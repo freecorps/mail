@@ -25,11 +25,21 @@ const DANGEROUS_BLOCKS =
   /<(script|style\s+[^>]*type\s*=\s*["']?text\/javascript|iframe|frame|frameset|object|embed|applet|noscript|template|svg|math)\b[\s\S]*?<\/\1\s*>/gi;
 const DANGEROUS_TAGS =
   /<\/?(script|iframe|frame|frameset|object|embed|applet|base|form|input|button|textarea|select|option|link|meta|portal|svg|math)\b[^>]*>/gi;
-const EVENT_ATTR = /\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
-const JS_URL_ATTR =
-  /\s+(href|src|action|formaction|xlink:href|background|poster|srcset)\s*=\s*("\s*(?:javascript|vbscript|data:text\/html)[^"]*"|'\s*(?:javascript|vbscript|data:text\/html)[^']*'|(?:javascript|vbscript):[^\s>]*)/gi;
+// Attributes are matched after any separator the HTML parser accepts (whitespace, `/`, or a closing quote:
+// `<a title="x"onclick=…>` is two attributes). Over-matching inside a quoted value only drops harmless text.
+const EVENT_ATTR = /(?:\s+|(?<=["'/]))on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
+const URL_ATTR =
+  /(?:\s+|(?<=["'/]))(href|xlink:href|action|formaction|cite|longdesc|ping|src|lowsrc|dynsrc|background|poster|srcset)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi;
 const COMMENTS = /<!--[\s\S]*?-->/g;
 const CSS_EXPRESSION = /expression\s*\(|behavior\s*:|-moz-binding/gi;
+
+/** Removes a matched attribute, keeping a separator when the next attribute was glued to it (`on…="x"title=…`). */
+// A String#replace callback: (match, ...groups, offset, whole string).
+function dropAttr(...a: unknown[]): string {
+  const m = a[0] as string;
+  const next = (a.at(-1) as string)[(a.at(-2) as number) + m.length];
+  return next === undefined || /[\s>/]/.test(next) ? "" : " ";
+}
 
 /** Removes scripts, handlers, script URLs, frames and other active content from an HTML fragment. */
 export function sanitizeEmailHtml(html: string): string {
@@ -40,12 +50,64 @@ export function sanitizeEmailHtml(html: string): string {
     s = s
       .replace(DANGEROUS_BLOCKS, "")
       .replace(DANGEROUS_TAGS, "")
-      .replace(EVENT_ATTR, "")
-      .replace(JS_URL_ATTR, "")
+      .replace(EVENT_ATTR, dropAttr)
+      .replace(URL_ATTR, (m: string, name: string, raw: string, offset: number, all: string) =>
+        urlAttrAllowed(name, unquote(raw)) ? m : dropAttr(m, offset, all),
+      )
       .replace(CSS_EXPRESSION, "blocked(");
     if (s === before) break;
   }
   return s;
+}
+
+const NAMED_ENTITIES: Record<string, string> = { colon: ":", tab: "\t", newline: "\n", sol: "/", lpar: "(", rpar: ")", amp: "&" };
+
+/** An attribute value as the browser sees it: entities decoded (`jav&#x61;script&colon;`), quotes removed. */
+function unquote(raw: string): string {
+  const v = /^["']/.test(raw) ? raw.slice(1, -1) : raw;
+  return v.replace(/&(?:#x([0-9a-f]+)|#(\d+)|([a-z]+));?/gi, (m, hex?: string, dec?: string, name?: string) => {
+    if (hex || dec) {
+      const code = hex ? parseInt(hex, 16) : Number(dec);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
+    }
+    return NAMED_ENTITIES[name!.toLowerCase()] ?? m;
+  });
+}
+
+const LINK_SCHEMES = new Set(["http", "https", "mailto", "tel"]);
+const RESOURCE_SCHEMES = new Set(["http", "https", "cid"]);
+const DATA_IMAGE = /^data:image\/(?:png|gif|jpe?g|webp|avif|bmp);/i;
+
+/**
+ * The URL's scheme the way a browser parses it (it ignores leading/trailing C0 controls and spaces, and tabs or
+ * newlines anywhere), or "" for a relative URL / #anchor.
+ */
+function schemeOf(url: string): { scheme: string; url: string } {
+  // eslint-disable-next-line no-control-regex
+  const u = url.replace(/^[\u0000- ]+|[\u0000- ]+$/g, "").replace(/[\t\n\r]/g, "");
+  const m = /^([a-z][a-z0-9+.-]*):/i.exec(u);
+  return { scheme: m ? m[1]!.toLowerCase() : "", url: u };
+}
+
+/**
+ * Allowlist for URLs in mail: links (`href`) may be http(s), mailto, tel, an #anchor or relative; resources (`src`,
+ * `background`, `poster`, `srcset`) may be http(s), cid: (resolved later) or a raster data:image. Everything else —
+ * javascript:, vbscript:, data: documents, blob:, filesystem:, file:, unknown schemes — is dropped. Links open via
+ * `allow-popups-to-escape-sandbox`, so this is what keeps a click from running anything outside the sandbox.
+ */
+export function urlAttrAllowed(attr: string, value: string): boolean {
+  const name = attr.toLowerCase();
+  if (name === "ping") return false; // click tracking beacons
+  if (name === "srcset") return value.split(",").every((c) => resourceAllowed(c.trim().split(/\s+/)[0] ?? ""));
+  if (name === "src" || name === "lowsrc" || name === "dynsrc" || name === "background" || name === "poster") return resourceAllowed(value);
+  const { scheme } = schemeOf(value);
+  return scheme === "" || LINK_SCHEMES.has(scheme);
+}
+
+function resourceAllowed(value: string): boolean {
+  const { scheme, url } = schemeOf(value);
+  if (scheme === "data") return DATA_IMAGE.test(url);
+  return scheme === "" || RESOURCE_SCHEMES.has(scheme);
 }
 
 const REMOTE_IMG = /<img\b[^>]*\bsrc\s*=\s*["']?\s*(?:https?:)?\/\//i;
@@ -62,11 +124,20 @@ const originOf = (u: string): string | null => {
   return m ? m[1]! : null;
 };
 
+/** decodeURIComponent that never throws (untrusted mail can carry `cid:foo%zz`). */
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
 /** `cid:` references → the resolved attachment URLs (unknown ones become empty, never fetched). */
 export function resolveCid(html: string, cid: Record<string, string>): string {
   return html.replace(
     /(["'(\s=])cid:([^"')\s>]+)/gi,
-    (_m, pre: string, id: string) => `${pre}${cid[decodeURIComponent(id)] ?? cid[id] ?? "about:blank"}`,
+    (_m, pre: string, id: string) => `${pre}${cid[safeDecode(id)] ?? cid[id] ?? "about:blank"}`,
   );
 }
 
@@ -97,11 +168,16 @@ export function contentSecurityPolicy(o: EmailDocumentOptions): string {
 
 const escapeAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
-/** Every link opens in a new tab, without opener or referrer (the sandbox forbids navigating the frame anyway). */
+/**
+ * Every link opens in a new tab, without opener or referrer (the sandbox forbids navigating the frame anyway); an
+ * in-message #anchor stays in the frame. Runs after the sanitizer, so the href is already allowlisted.
+ */
 export function externalLinks(html: string): string {
-  return html.replace(/<a\b([^>]*)>/gi, (_m, attrs: string) => {
-    const clean = attrs.replace(/\s+(target|rel)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-    return `<a${clean} target="_blank" rel="noopener noreferrer nofollow">`;
+  return html.replace(/<(a|area)\b([^>]*)>/gi, (_m, tag: string, attrs: string) => {
+    const clean = attrs.replace(/(?:\s+|(?<=["'/]))(target|rel)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, dropAttr);
+    const href = /(?<=[\s"'/])href\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i.exec(clean);
+    if (href && schemeOf(unquote(href[1]!)).url.startsWith("#")) return `<${tag}${clean}>`;
+    return `<${tag}${clean} target="_blank" rel="noopener noreferrer nofollow">`;
   });
 }
 

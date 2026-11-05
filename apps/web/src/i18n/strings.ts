@@ -101,6 +101,7 @@ const ptBR = {
   "compose.send": "Enviar",
   "compose.sent": "Mensagem enviada",
   "compose.invalidTo": "Informe pelo menos um destinatário válido.",
+  "compose.empty": "Escreva a mensagem antes de enviar.",
   "compose.invalidList": "Endereços inválidos: {list}",
 
   "account.menu": "Conta e preferências",
@@ -233,6 +234,7 @@ const en: Record<StringKey, string> = {
   "compose.send": "Send",
   "compose.sent": "Message sent",
   "compose.invalidTo": "Enter at least one valid recipient.",
+  "compose.empty": "Write a message before sending.",
   "compose.invalidList": "Invalid addresses: {list}",
 
   "account.menu": "Account and preferences",

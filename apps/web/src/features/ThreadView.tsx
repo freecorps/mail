@@ -30,13 +30,16 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
   const members = useMembers(vm.thread?.mailbox ?? null);
   const scroller = useRef<HTMLOListElement>(null);
   const count = vm.items.length;
-  // Open on the newest message and follow new ones (a reply, a note, a customer's answer) while the reader is at the
-  // bottom; HTML messages grow after their frame loads, so sizes are observed too.
+  // Open on the newest message (the view is keyed by thread, so `stick` starts true per thread) and follow new ones
+  // only while the reader is at the bottom — someone reading history is not yanked down by a customer's answer. The
+  // reader's own reply/note (pending) always scrolls into view. HTML messages grow after their frame loads, so sizes
+  // are observed too.
   const stick = useRef(true);
+  const ownNew = vm.items.at(-1)?.pending === true;
   useEffect(() => {
     const el = scroller.current;
     if (!el || !count) return;
-    stick.current = true;
+    if (ownNew) stick.current = true;
     const toBottom = () => {
       if (stick.current) el.scrollTop = el.scrollHeight;
     };
@@ -44,7 +47,7 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
     const ro = new ResizeObserver(toBottom);
     for (const li of el.children) ro.observe(li);
     return () => ro.disconnect();
-  }, [count]);
+  }, [count, ownNew]);
 
   if (vm.status === "error" || (vm.status === "ready" && !vm.thread)) {
     return (

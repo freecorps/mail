@@ -1,6 +1,6 @@
 // New conversation from a mailbox. Optimistic: the dialog closes at once and the thread shows at the top of the list
 // ("waiting"); on failure the dialog comes back with the draft.
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useMutation } from "@freecorps/ember-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n/context";
 import { api, type Mailbox } from "@/lib/api";
-import { checkCompose } from "@/model/compose";
+import { checkCompose, composeErrorField } from "@/model/compose";
 
 const EMPTY = { to: "", cc: "", subject: "", text: "" };
 
@@ -26,12 +26,24 @@ export function ComposeDialog(p: {
   const [draft, setDraft] = useState(EMPTY);
   const [from, setFrom] = useState<string | null>(null);
   const [showCc, setShowCc] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // `field` is the input the error is about (gets aria-invalid); server failures belong to no field.
+  const [error, setErrorState] = useState<{ message: string; field: "to" | "text" | null } | null>(null);
+  const setError = (message: string | null, field: "to" | "text" | null = null) => setErrorState(message ? { message, field } : null);
+  // One send per draft: the dialog closes optimistically, but a second Enter/click can land before it unmounts.
+  const sending = useRef(false);
+  const [busy, setBusy] = useState(false);
   const ids = { from: useId(), to: useId(), cc: useId(), subject: useId(), text: useId(), error: useId() };
   const mailbox = from ?? p.defaultMailbox ?? p.mailboxes[0]?.name ?? "";
+  // The From choice is per message: closing the dialog forgets it, so the next one starts from the current mailbox.
+  const [wasOpen, setWasOpen] = useState(p.open);
+  if (p.open !== wasOpen) {
+    setWasOpen(p.open);
+    if (!p.open) setFrom(null);
+  }
   const set = (k: keyof typeof EMPTY) => (e: { target: { value: string } }) => setDraft((d) => ({ ...d, [k]: e.target.value }));
 
   function submit() {
+    if (sending.current) return;
     const c = checkCompose({ mailbox, ...draft });
     if (!c.ok) {
       setError(
@@ -39,10 +51,13 @@ export function ComposeDialog(p: {
           ? t("compose.invalidList", { list: c.invalid.join(", ") })
           : c.error === "invalidTo"
             ? t("compose.invalidTo")
-            : t("compose.body"),
+            : t("compose.empty"),
+        composeErrorField(c.error),
       );
       return;
     }
+    sending.current = true;
+    setBusy(true);
     setError(null);
     const saved = draft;
     setDraft(EMPTY);
@@ -51,8 +66,13 @@ export function ComposeDialog(p: {
       .then((r) => toast.success(t("compose.sent"), { action: { label: "#" + r.number, onClick: () => p.onSent(r.threadId) } }))
       .catch((e: unknown) => {
         setDraft(saved);
+        setFrom(c.args.mailbox);
         setError(e instanceof Error ? e.message : String(e));
         p.onOpenChange(true);
+      })
+      .finally(() => {
+        sending.current = false;
+        setBusy(false);
       });
   }
 
@@ -101,8 +121,7 @@ export function ComposeDialog(p: {
                 placeholder={t("compose.toHint")}
                 autoComplete="off"
                 required
-
-                aria-invalid={!!error}
+                aria-invalid={error?.field === "to" || undefined}
               />
               {!showCc && (
                 <Button type="button" variant="ghost" size="sm" className="h-9 text-muted-foreground" onClick={() => setShowCc(true)}>
@@ -131,11 +150,12 @@ export function ComposeDialog(p: {
               placeholder={t("compose.body")}
               className="min-h-48 resize-y"
               required
+              aria-invalid={error?.field === "text" || undefined}
             />
           </div>
           {error && (
             <p id={ids.error} role="alert" className="text-sm text-destructive">
-              {error}
+              {error.message}
             </p>
           )}
           <DialogFooter className="items-center sm:justify-between">
@@ -144,7 +164,9 @@ export function ComposeDialog(p: {
               <Button type="button" variant="ghost" onClick={() => p.onOpenChange(false)}>
                 {t("common.cancel")}
               </Button>
-              <Button type="submit">{t("compose.send")}</Button>
+              <Button type="submit" disabled={busy}>
+                {t("compose.send")}
+              </Button>
             </div>
           </DialogFooter>
         </form>

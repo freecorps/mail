@@ -84,7 +84,7 @@ export function SignIn() {
                 name="password"
                 type="password"
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
-                minLength={8}
+                minLength={mode === "signup" ? 8 : undefined}
                 required
               />
             </div>

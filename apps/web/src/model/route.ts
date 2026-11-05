@@ -1,7 +1,7 @@
 // The inbox location lives in the URL (`?m=support&f=open&t=<threadId>&q=…`), so reloads, back/forward and shared
 // links land on the same view. Pure parse/format (tested) and a tiny history hook.
-import { useCallback, useSyncExternalStore } from "react";
-import { THREAD_FILTERS, type ThreadFilter } from "./threads";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { THREAD_FILTERS, useDebounced, type ThreadFilter } from "./threads";
 
 export interface Route {
   mailbox: string | null;
@@ -55,4 +55,21 @@ export function useRoute() {
     for (const l of listeners) l();
   }, []);
   return { route, navigate };
+}
+
+/**
+ * The search box and `?q=`: typing writes the URL (debounced, trimmed, replacing the entry); a `?q=` that changes from
+ * outside (back/forward, a pasted link) is copied back into the box. Our own writes always equal the last debounced
+ * value, so they never clobber what is still being typed. The list reads `route.query`, the URL being the truth.
+ */
+export function useSearchBox(urlQuery: string, navigate: (patch: Partial<Route>) => void, ms = 250) {
+  const [query, setQuery] = useState(urlQuery);
+  const debounced = useDebounced(query, ms);
+  useEffect(() => navigate({ query: debounced.trim() }), [debounced, navigate]);
+  const [seen, setSeen] = useState(urlQuery);
+  if (urlQuery !== seen) {
+    setSeen(urlQuery);
+    if (urlQuery !== debounced.trim()) setQuery(urlQuery);
+  }
+  return [query, setQuery] as const;
 }

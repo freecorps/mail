@@ -31,3 +31,8 @@ export function checkCompose(i: ComposeInput): ComposeCheck {
     },
   };
 }
+
+/** The field a validation error belongs to (it gets `aria-invalid`); server failures belong to none. */
+export function composeErrorField(error: "invalidTo" | "invalidList" | "empty"): "to" | "text" {
+  return error === "empty" ? "text" : "to";
+}

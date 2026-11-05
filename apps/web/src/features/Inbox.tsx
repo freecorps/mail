@@ -15,8 +15,8 @@ import {
 import { useI18n } from "@/i18n/context";
 import { api, type Me } from "@/lib/api";
 import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
-import { useRoute } from "@/model/route";
-import { useDebounced, useMailboxes, useThreadList } from "@/model/threads";
+import { useRoute, useSearchBox } from "@/model/route";
+import { useMailboxes, useThreadList } from "@/model/threads";
 import { ComposeDialog } from "./ComposeDialog";
 import type { ComposerHandle } from "./Composer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
@@ -31,11 +31,9 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const mailbox = route.mailbox ?? boxes.mailboxes[0]?.name ?? me.mailboxes[0] ?? null;
   const current = boxes.mailboxes.find((b) => b.name === mailbox) ?? null;
 
-  const [query, setQuery] = useState(route.query);
-  const debounced = useDebounced(query, 250);
-  useEffect(() => navigate({ query: debounced.trim() }), [debounced, navigate]);
+  const [query, setQuery] = useSearchBox(route.query, navigate);
 
-  const list = useThreadList({ mailbox: mailbox ?? "", filter: route.filter, query: debounced });
+  const list = useThreadList({ mailbox: mailbox ?? "", filter: route.filter, query: route.query });
   const rows = mailbox ? list.rows : [];
   const [cursor, setCursor] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -128,11 +126,14 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, open, setStatus, markUnread, t]);
 
+  // Mobile only: on md+ the sidebar lists the mailboxes, so the title is plain text (nothing dead in the tab order).
+  const title = current?.displayName ?? mailbox ?? t("mailboxes.title");
   const picker = (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1 text-base font-semibold tracking-tight md:pointer-events-none">
-        {current?.displayName ?? mailbox ?? t("mailboxes.title")}
-        <ChevronDown className="size-4 text-muted-foreground md:hidden" aria-hidden="true" />
+      <h1 className="hidden truncate text-base font-semibold tracking-tight md:block">{title}</h1>
+      <DropdownMenuTrigger className="flex items-center gap-1 text-base font-semibold tracking-tight md:hidden">
+        {title}
+        <ChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="md:hidden">
         <DropdownMenuRadioGroup value={mailbox ?? ""} onValueChange={(v) => navigate({ mailbox: v, thread: null })}>

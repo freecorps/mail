@@ -12,12 +12,14 @@ import {
   externalLinks,
   hasRemoteImages,
   linkifyText,
+  resolveCid,
   sanitizeEmailHtml,
+  urlAttrAllowed,
 } from "@/lib/emailHtml";
 import { formatWhen, parseRecipients } from "@/lib/format";
 import { inboxOptimisticUpdates, isOptimisticId } from "@/lib/optimistic";
 import { resolveTheme } from "@/lib/prefs";
-import { checkCompose } from "@/model/compose";
+import { checkCompose, composeErrorField } from "@/model/compose";
 import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
 import { formatRoute, parseRoute } from "@/model/route";
 import { searchRows, threadRow } from "@/model/threads";
@@ -47,6 +49,75 @@ describe("email HTML", () => {
     );
     expect(s).not.toMatch(/script|onclick|javascript:|iframe|<form|<input/i);
     expect(s).toContain("<p>Oi</p>");
+  });
+
+  it("allowlists URL schemes: hostile links and resources are dropped", () => {
+    const hostile = [
+      `<a href="javascript:alert(1)">x</a>`,
+      `<a href="JaVaScRiPt:alert(1)">x</a>`,
+      `<a href=" \tjava&#x09;script:alert(1)">x</a>`,
+      `<a href="jav&#x61;script&colon;alert(1)">x</a>`,
+      `<a href="&#106;&#97;&#118;&#97;&#115;&#99;&#114;&#105;&#112;&#116;&#58;alert(1)">x</a>`,
+      `<a href="&#0000106avascript:alert(1)">x</a>`,
+      `<a href='vbscript:msgbox(1)'>x</a>`,
+      `<a href=data:text/html,<script>alert(1)</script>>x</a>`,
+      `<a href="data:text/javascript,alert(1)">x</a>`,
+      `<a href="data:application/xhtml+xml;base64,PHg+">x</a>`,
+      `<a href="data:image/svg+xml,<svg onload=alert(1)>">x</a>`,
+      `<a href="blob:https://mail.test/1f0e">x</a>`,
+      `<a href="filesystem:https://mail.test/temporary/x">x</a>`,
+      `<a href="file:///etc/passwd">x</a>`,
+      `<a title="t"href="javascript:alert(1)">x</a>`,
+      `<a/href="javascript:alert(1)">x</a>`,
+      `<area href="javascript:alert(1)">`,
+      `<a href="https://ok.test" ping="https://track.test/p">x</a>`,
+      `<img src="javascript:alert(1)">`,
+      `<img src="data:text/html,<script>alert(1)</script>">`,
+      `<img src="data:image/svg+xml,<svg/onload=alert(1)>">`,
+      `<img srcset="https://ok.test/a.png 1x, javascript:alert(1) 2x">`,
+      `<video poster="blob:https://x/1"></video>`,
+      `<table background="vbscript:x">`,
+      `<blockquote cite="javascript:alert(1)">q</blockquote>`,
+    ];
+    for (const h of hostile) {
+      const out = buildEmailDocument(h);
+      expect(out.slice(out.indexOf("<body>")), h).not.toMatch(
+        /javascript|vbscript|data:(?!image\/(png|gif))|blob:|filesystem:|file:|ping=|&#/i,
+      );
+    }
+    // Handlers glued to a closing quote or a slash are attributes too.
+    expect(sanitizeEmailHtml(`<p title="x"onclick="alert(1)">a</p><img/onerror=alert(1) src=x>`)).toBe(`<p title="x">a</p><img/ src=x>`);
+    expect(sanitizeEmailHtml(`<p onclick="x"title="y">a</p>`)).toBe(`<p title="y">a</p>`);
+  });
+
+  it("keeps safe links and resources", () => {
+    const ok = [
+      `<a href="https://acme.test/x?a=1&amp;b=2">x</a>`,
+      `<a href="http://acme.test">x</a>`,
+      `<a href="mailto:ana@acme.test?subject=Oi">x</a>`,
+      `<a href="tel:+5511999999999">x</a>`,
+      `<a href="#section-2">x</a>`,
+      `<a href="/help">x</a>`,
+      `<a href="//acme.test/x">x</a>`,
+      `<img src="cid:logo@x">`,
+      `<img src="https://acme.test/a.png">`,
+      `<img src="data:image/png;base64,iVBORw0KGgo=">`,
+      `<img srcset="https://acme.test/a.png 1x, https://acme.test/b.png 2x">`,
+    ];
+    for (const h of ok) expect(sanitizeEmailHtml(h), h).toBe(h);
+    expect(urlAttrAllowed("href", "cid:x")).toBe(false);
+    expect(urlAttrAllowed("src", "cid:x")).toBe(true);
+    // In-message anchors stay in the frame; everything else opens a new tab.
+    expect(externalLinks(`<a href="#s2">x</a>`)).toBe(`<a href="#s2">x</a>`);
+    expect(externalLinks(`<a href="mailto:a@b.test">x</a>`)).toContain(`target="_blank"`);
+  });
+
+  it("never throws on malformed cid: references", () => {
+    const cid = { "a%b": "https://mail.test/a", "logo@x": "https://mail.test/l" };
+    expect(resolveCid(`<img src="cid:a%b"><img src="cid:%E0%A4%A"><img src="cid:logo%40x">`, cid)).toBe(
+      `<img src="https://mail.test/a"><img src="about:blank"><img src="https://mail.test/l">`,
+    );
+    expect(() => buildEmailDocument(`<img src="cid:foo%bar">`, { cid })).not.toThrow();
   });
 
   it("blocks remote images until allowed; inline cid images come from their signed URL origin", () => {
@@ -139,6 +210,9 @@ describe("compose", () => {
     expect(checkCompose(base)).toEqual({ ok: false, error: "invalidTo", invalid: [] });
     expect(checkCompose({ ...base, to: "x" })).toEqual({ ok: false, error: "invalidList", invalid: ["x"] });
     expect(checkCompose({ ...base, to: "a@b.test", text: " " })).toMatchObject({ ok: false, error: "empty" });
+    expect(composeErrorField("empty")).toBe("text");
+    expect(composeErrorField("invalidTo")).toBe("to");
+    expect(composeErrorField("invalidList")).toBe("to");
     expect(checkCompose({ ...base, to: "Ana <a@b.test>", cc: "c@d.test" })).toEqual({
       ok: true,
       args: { mailbox: "support", to: ["Ana <a@b.test>"], cc: ["c@d.test"], subject: "Oi", text: "Olá" },
