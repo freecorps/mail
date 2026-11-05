@@ -1,27 +1,34 @@
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useLayoutEffect, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+// New conversation (modal): a native form (SwiftUI Form / Material 3) with native text fields and a native picker for
+// the From mailbox; Cancel / Send are native header items.
+import { FieldGroup, Host, Picker, TextInput, Text } from "@expo/ui";
 import { useMutation, useQuery } from "@freecorps/ember-react-native";
+import { router, Stack, useLocalSearchParams } from "expo-router";
+import { useState } from "react";
 import { api } from "../api";
-import { Segmented, Separator, TextButton } from "../components/ui";
+import { Icons, useMaterialSource } from "../components/icons";
 import { useI18n } from "../i18n";
 import { parseRecipients } from "../lib/format";
-import type { RootStack } from "../navigation";
 import { usePalette } from "../theme";
 
-export function ComposeScreen({ navigation, route }: NativeStackScreenProps<RootStack, "Compose">) {
+export function ComposeScreen() {
+  const params = useLocalSearchParams<{ mailbox?: string; to?: string }>();
   const p = usePalette();
   const { t } = useI18n();
   const mailboxes = useQuery(api.inbox.mailboxes, {}) ?? [];
   const compose = useMutation(api.inbox.compose);
-  const [mailbox, setMailbox] = useState<string | null>(route.params?.mailbox ?? null);
-  const [to, setTo] = useState(route.params?.to ?? "");
+  const [mailbox, setMailbox] = useState<string | null>(params.mailbox ?? null);
+  const [to, setTo] = useState(params.to ?? "");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const from = mailbox ?? mailboxes[0]?.name ?? null;
   const ready = !!from && !!to.trim() && !!body.trim();
+  // Android header items must be icons (text-only toolbar buttons are not rendered there); iOS keeps the text buttons.
+  const android = process.env.EXPO_OS === "android";
+  const cancelIcon = useMaterialSource(android ? Icons.close : null, 24, p.tint);
+  const sendIcon = useMaterialSource(android ? Icons.sendMail : null, 24, p.tint);
+  const headerReady = !android || (!!cancelIcon && !!sendIcon);
 
   const send = () => {
     const rt = parseRecipients(to);
@@ -32,69 +39,62 @@ export function ComposeScreen({ navigation, route }: NativeStackScreenProps<Root
     }
     // Optimistic + queued offline: the new conversation shows in the mailbox right away.
     void compose({ mailbox: from!, to: rt.valid, ...(rc.valid.length ? { cc: rc.valid } : {}), subject: subject.trim(), text: body.trim() }).catch(() => {});
-    navigation.goBack();
+    router.back();
   };
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      title: t("compose.title"),
-      headerLeft: () => <TextButton label={t("common.cancel")} onPress={() => navigation.goBack()} />,
-      headerRight: () => <TextButton label={t("compose.send")} onPress={send} disabled={!ready} bold />,
-    });
-  });
-
-  const field = (label: string, value: string, set: (v: string) => void, extra: Partial<React.ComponentProps<typeof TextInput>> = {}) => (
+  return (
     <>
-      <View style={styles.field}>
-        <Text style={[styles.label, { color: p.secondary }]}>{label}</Text>
-        <TextInput value={value} onChangeText={set} style={[styles.input, { color: p.text }]} accessibilityLabel={label} placeholderTextColor={p.tertiary} {...extra} />
-      </View>
-      <Separator inset={16} />
+      <Stack.Screen options={{ title: t("compose.title") }} />
+      {headerReady ? (
+        <>
+          <Stack.Toolbar placement="left">
+            <Stack.Toolbar.Button {...(cancelIcon ? { icon: cancelIcon } : {})} accessibilityLabel={t("common.cancel")} onPress={() => router.back()}>
+              {t("common.cancel")}
+            </Stack.Toolbar.Button>
+          </Stack.Toolbar>
+          <Stack.Toolbar placement="right">
+            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={t("compose.send")} variant="done" disabled={!ready} onPress={send}>
+              {t("compose.send")}
+            </Stack.Toolbar.Button>
+          </Stack.Toolbar>
+        </>
+      ) : null}
+      <Host style={{ flex: 1 }} seedColor={p.tint}>
+        <FieldGroup>
+          <FieldGroup.Section>
+            {mailboxes.length > 1 ? (
+              <Picker<string> selectedValue={from ?? ""} onValueChange={setMailbox}>
+                {mailboxes.map((b) => (
+                  <Picker.Item key={b.name} label={`${t("compose.from")}: ${b.address}`} value={b.name} />
+                ))}
+              </Picker>
+            ) : mailboxes.length === 1 ? (
+              <Text textStyle={{ color: p.secondary }}>{`${t("compose.from")}: ${mailboxes[0]!.address}`}</Text>
+            ) : null}
+            <TextInput
+              placeholder={t("compose.to")}
+              accessibilityLabel={t("compose.to")}
+              defaultValue={params.to ?? ""}
+              onChangeText={setTo}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              autoComplete="email"
+              autoFocus={!params.to}
+            />
+            <TextInput placeholder={t("compose.cc")} accessibilityLabel={t("compose.cc")} onChangeText={setCc} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" />
+            <TextInput placeholder={t("compose.subject")} accessibilityLabel={t("compose.subject")} onChangeText={setSubject} />
+          </FieldGroup.Section>
+          {error ? (
+            <FieldGroup.Section>
+              <Text textStyle={{ color: p.danger }}>{error}</Text>
+            </FieldGroup.Section>
+          ) : null}
+          <FieldGroup.Section>
+            <TextInput placeholder={t("compose.body")} accessibilityLabel={t("compose.body")} onChangeText={setBody} multiline numberOfLines={10} />
+          </FieldGroup.Section>
+        </FieldGroup>
+      </Host>
     </>
   );
-
-  return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: p.card }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView keyboardShouldPersistTaps="handled">
-        {mailboxes.length > 1 && (
-          <>
-            <View style={[styles.field, { paddingRight: 0 }]}>
-              <Text style={[styles.label, { color: p.secondary }]}>{t("compose.from")}</Text>
-              <View style={{ flex: 1 }}>
-                <Segmented value={from ?? ""} onChange={setMailbox} options={mailboxes.map((b) => ({ value: b.name, label: b.address }))} />
-              </View>
-            </View>
-            <Separator inset={16} />
-          </>
-        )}
-        {mailboxes.length === 1 && field(t("compose.from"), mailboxes[0]!.address, () => {}, { editable: false })}
-        {field(t("compose.to"), to, setTo, { autoCapitalize: "none", autoCorrect: false, keyboardType: "email-address", autoFocus: !to, textContentType: "emailAddress" })}
-        {field(t("compose.cc"), cc, setCc, { autoCapitalize: "none", autoCorrect: false, keyboardType: "email-address" })}
-        {field(t("compose.subject"), subject, setSubject)}
-        {error && (
-          <Text style={[styles.error, { color: p.danger }]} accessibilityRole="alert">
-            {error}
-          </Text>
-        )}
-        <TextInput
-          value={body}
-          onChangeText={setBody}
-          multiline
-          placeholder={t("compose.body")}
-          placeholderTextColor={p.tertiary}
-          accessibilityLabel={t("compose.body")}
-          style={[styles.body, { color: p.text }]}
-          textAlignVertical="top"
-        />
-      </ScrollView>
-    </KeyboardAvoidingView>
-  );
 }
-
-const styles = StyleSheet.create({
-  field: { flexDirection: "row", alignItems: "center", paddingLeft: 16, paddingRight: 16, minHeight: 48, gap: 8 },
-  label: { fontSize: 16, width: 70 },
-  input: { flex: 1, fontSize: 16, paddingVertical: 12 },
-  body: { fontSize: 16, lineHeight: 22, padding: 16, minHeight: 260 },
-  error: { paddingHorizontal: 16, paddingTop: 10 },
-});

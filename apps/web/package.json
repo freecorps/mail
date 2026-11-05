@@ -20,6 +20,7 @@
     "@fontsource-variable/geist-mono": "^5.2.7",
     "@freecorps/ember-client": "workspace:*",
     "@freecorps/ember-react": "workspace:*",
+    "@freecorps/mail-email-html": "workspace:*",
     "better-auth": "~1.7.17",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

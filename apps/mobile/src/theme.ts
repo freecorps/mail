@@ -1,5 +1,4 @@
 // Colors close to iOS system colors (light and dark), with an ember accent. Android uses the same palette.
-import { DarkTheme, DefaultTheme, type Theme } from "@react-navigation/native";
 import { useColorScheme } from "react-native";
 
 export interface Palette {
@@ -67,9 +66,4 @@ const dark: Palette = {
 
 export function usePalette(): Palette {
   return useColorScheme() === "dark" ? dark : light;
-}
-
-export function navigationTheme(p: Palette): Theme {
-  const base = p.dark ? DarkTheme : DefaultTheme;
-  return { ...base, colors: { ...base.colors, primary: p.tint, background: p.grouped, card: p.dark ? p.card : p.background, text: p.text, border: p.separator, notification: p.tint } };
 }

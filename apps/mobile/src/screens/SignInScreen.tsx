@@ -1,12 +1,16 @@
+// Sign-in / sign-up: a native form with native text fields (SwiftUI TextField/SecureField, Compose text fields) and
+// native buttons.
+import { Button, FieldGroup, Host, Text, TextInput, type TextInputRef } from "@expo/ui";
 import { useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import type { UseEmberAuthTokenResult } from "@freecorps/ember-react-native";
-import { Icon, PrimaryButton, TextButton } from "../components/ui";
+import { ActivityIndicator, Platform, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EMBER_URL } from "../config";
 import { useI18n } from "../i18n";
+import { useSession } from "../session";
 import { usePalette } from "../theme";
 
-export function SignInScreen({ auth }: { auth: UseEmberAuthTokenResult }) {
+export function SignInScreen() {
+  const { auth } = useSession();
   const p = usePalette();
   const { t } = useI18n();
   const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
@@ -15,9 +19,13 @@ export function SignInScreen({ auth }: { auth: UseEmberAuthTokenResult }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const passwordRef = useRef<TextInputRef>(null);
+  // No header on this screen: SwiftUI's Form keeps clear of the status bar by itself, the Compose list does not.
+  const insets = useSafeAreaInsets();
+  const canSubmit = !!email && !!password && !busy;
 
   const submit = async () => {
+    if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
@@ -30,65 +38,56 @@ export function SignInScreen({ auth }: { auth: UseEmberAuthTokenResult }) {
     }
   };
 
-  const input = [styles.input, { backgroundColor: p.card, color: p.text, borderColor: p.separator }];
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: p.grouped }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <View style={[styles.logo, { backgroundColor: p.tint }]}>
-          <Icon name="mail-unread" size={34} color={p.onTint} />
+    <View style={{ flex: 1, backgroundColor: p.grouped, ...(Platform.OS === "android" ? { paddingTop: insets.top, paddingBottom: insets.bottom } : null) }}>
+      <Host style={{ flex: 1 }} seedColor={p.tint}>
+        <FieldGroup>
+          <FieldGroup.Section>
+            <FieldGroup.SectionHeader>
+              <Text textStyle={{ fontSize: 30, fontWeight: "700", color: p.text, textAlign: "center" }}>{t("app.name")}</Text>
+            </FieldGroup.SectionHeader>
+            {mode === "signUp" ? <TextInput placeholder={t("signin.name")} accessibilityLabel={t("signin.name")} onChangeText={setName} autoComplete="name" /> : null}
+            <TextInput
+              placeholder={t("signin.email")}
+              accessibilityLabel={t("signin.email")}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              keyboardType="email-address"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              testID="signin-email"
+            />
+            <TextInput
+              ref={passwordRef}
+              placeholder={t("signin.password")}
+              accessibilityLabel={t("signin.password")}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoComplete={mode === "signIn" ? "current-password" : "new-password"}
+              returnKeyType="go"
+              onSubmitEditing={() => void submit()}
+              testID="signin-password"
+            />
+            <FieldGroup.SectionFooter>
+              <Text textStyle={{ color: error ? p.danger : p.secondary }}>{error ?? t("signin.subtitle")}</Text>
+            </FieldGroup.SectionFooter>
+          </FieldGroup.Section>
+          <FieldGroup.Section>
+            <Button variant="filled" onPress={() => void submit()} disabled={!canSubmit} testID="signin-submit" label={mode === "signIn" ? t("signin.submit") : t("signin.signup")} />
+            <Button variant="text" onPress={() => setMode(mode === "signIn" ? "signUp" : "signIn")} label={mode === "signIn" ? t("signin.toSignup") : t("signin.toSignin")} />
+            <FieldGroup.SectionFooter>
+              <Text textStyle={{ color: p.tertiary, fontSize: 12 }}>{t("signin.server", { url: EMBER_URL.replace(/^https?:\/\//, "") })}</Text>
+            </FieldGroup.SectionFooter>
+          </FieldGroup.Section>
+        </FieldGroup>
+      </Host>
+      {busy ? (
+        <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
+          <ActivityIndicator accessibilityLabel={t("common.loading")} />
         </View>
-        <Text style={[styles.title, { color: p.text }]} accessibilityRole="header">
-          {t("app.name")}
-        </Text>
-        <Text style={[styles.subtitle, { color: p.secondary }]}>{t("signin.subtitle")}</Text>
-        {mode === "signUp" && <TextInput style={input} placeholder={t("signin.name")} placeholderTextColor={p.tertiary} value={name} onChangeText={setName} accessibilityLabel={t("signin.name")} textContentType="name" />}
-        <TextInput
-          style={input}
-          placeholder={t("signin.email")}
-          placeholderTextColor={p.tertiary}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoComplete="email"
-          keyboardType="email-address"
-          textContentType="username"
-          returnKeyType="next"
-          onSubmitEditing={() => passwordRef.current?.focus()}
-          value={email}
-          onChangeText={setEmail}
-          accessibilityLabel={t("signin.email")}
-        />
-        <TextInput
-          ref={passwordRef}
-          style={input}
-          placeholder={t("signin.password")}
-          placeholderTextColor={p.tertiary}
-          secureTextEntry
-          textContentType={mode === "signIn" ? "password" : "newPassword"}
-          returnKeyType="go"
-          onSubmitEditing={() => email && password && void submit()}
-          value={password}
-          onChangeText={setPassword}
-          accessibilityLabel={t("signin.password")}
-        />
-        {error && (
-          <Text style={[styles.error, { color: p.danger }]} accessibilityLiveRegion="assertive" accessibilityRole="alert">
-            {error}
-          </Text>
-        )}
-        <PrimaryButton label={mode === "signIn" ? t("signin.submit") : t("signin.signup")} onPress={submit} disabled={!email || !password} busy={busy} />
-        <TextButton label={mode === "signIn" ? t("signin.toSignup") : t("signin.toSignin")} onPress={() => setMode(mode === "signIn" ? "signUp" : "signIn")} style={{ alignSelf: "center" }} />
-        <Text style={[styles.server, { color: p.tertiary }]}>{t("signin.server", { url: EMBER_URL.replace(/^https?:\/\//, "") })}</Text>
-      </ScrollView>
-    </KeyboardAvoidingView>
+      ) : null}
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  container: { flexGrow: 1, justifyContent: "center", padding: 24, gap: 12, maxWidth: 480, width: "100%", alignSelf: "center" },
-  logo: { width: 64, height: 64, borderRadius: 16, alignItems: "center", justifyContent: "center", alignSelf: "center", marginBottom: 4 },
-  title: { fontSize: 30, fontWeight: "700", textAlign: "center" },
-  subtitle: { fontSize: 16, textAlign: "center", marginBottom: 16 },
-  input: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, paddingHorizontal: 14, height: 50, fontSize: 17 },
-  error: { fontSize: 15 },
-  server: { fontSize: 12, textAlign: "center", marginTop: 8 },
-});

@@ -1,5 +1,6 @@
 // UI strings. Portuguese (pt-BR) is the default; English is the alternative. Keys are shared, so a missing
-// translation is a type error. `{name}` placeholders are filled by `translate`.
+// translation is a type error. `{name}` placeholders are filled by `translate`; `{count}` strings may add a singular
+// form under `<key>.one`.
 
 const ptBR = {
   "app.name": "Ember Mail",
@@ -32,7 +33,9 @@ const ptBR = {
   "mailboxes.title": "Caixas",
   "mailboxes.empty": "Nenhuma caixa disponível",
   "mailboxes.unread": "{count} não lidas",
+  "mailboxes.unread.one": "{count} não lida",
   "mailboxes.threads": "{count} conversas",
+  "mailboxes.threads.one": "{count} conversa",
   "mailboxes.a11y": "{name}, {unread} não lidas",
 
   "threads.search": "Buscar mensagens",
@@ -47,6 +50,7 @@ const ptBR = {
   "threads.a11y": "{from}, {subject}, {when}{unread}",
   "threads.a11yUnread": ", não lida",
   "threads.compose": "Nova mensagem",
+  "threads.filterLabel": "Filtrar conversas",
 
   "status.open": "Aberta",
   "status.waiting": "Aguardando",
@@ -75,6 +79,7 @@ const ptBR = {
   "thread.addNote": "Salvar nota",
   "thread.replyMode": "Resposta",
   "thread.noteMode": "Nota",
+  "thread.modeLabel": "Tipo de mensagem",
   "thread.notFound": "Conversa não encontrada",
   "thread.spamNoReply": "Não é possível responder a spam.",
 
@@ -103,12 +108,14 @@ const ptBR = {
   "settings.sync": "Sincronização",
   "settings.online": "Conectado",
   "settings.pending": "{count} ações na fila",
+  "settings.pending.one": "{count} ação na fila",
   "settings.signOut": "Sair",
   "settings.signOutConfirm": "As mensagens guardadas neste aparelho serão apagadas.",
   "settings.server": "Servidor",
 
   "banner.offline": "Offline — mostrando o que está no aparelho",
   "banner.pending": "{count} ações aguardando conexão",
+  "banner.pending.one": "{count} ação aguardando conexão",
 
   "when.yesterday": "Ontem",
 };
@@ -147,7 +154,9 @@ const en: Record<StringKey, string> = {
   "mailboxes.title": "Mailboxes",
   "mailboxes.empty": "No mailboxes available",
   "mailboxes.unread": "{count} unread",
+  "mailboxes.unread.one": "{count} unread",
   "mailboxes.threads": "{count} conversations",
+  "mailboxes.threads.one": "{count} conversation",
   "mailboxes.a11y": "{name}, {unread} unread",
 
   "threads.search": "Search messages",
@@ -162,6 +171,7 @@ const en: Record<StringKey, string> = {
   "threads.a11y": "{from}, {subject}, {when}{unread}",
   "threads.a11yUnread": ", unread",
   "threads.compose": "New message",
+  "threads.filterLabel": "Filter conversations",
 
   "status.open": "Open",
   "status.waiting": "Waiting",
@@ -190,6 +200,7 @@ const en: Record<StringKey, string> = {
   "thread.addNote": "Save note",
   "thread.replyMode": "Reply",
   "thread.noteMode": "Note",
+  "thread.modeLabel": "Message type",
   "thread.notFound": "Conversation not found",
   "thread.spamNoReply": "You cannot reply to spam.",
 
@@ -218,12 +229,14 @@ const en: Record<StringKey, string> = {
   "settings.sync": "Sync",
   "settings.online": "Connected",
   "settings.pending": "{count} actions queued",
+  "settings.pending.one": "{count} action queued",
   "settings.signOut": "Sign out",
   "settings.signOutConfirm": "Mail stored on this device will be deleted.",
   "settings.server": "Server",
 
   "banner.offline": "Offline — showing what is on this device",
   "banner.pending": "{count} actions waiting for a connection",
+  "banner.pending.one": "{count} action waiting for a connection",
 
   "when.yesterday": "Yesterday",
 };
@@ -232,8 +245,10 @@ const TABLES: Record<Locale, Record<StringKey, string>> = { "pt-BR": ptBR, en };
 
 export type Vars = Record<string, string | number>;
 
+/** `{count}` strings may have a singular form under `<key>.one`, used when count is 1. */
 export function translate(locale: Locale, key: StringKey, vars?: Vars): string {
-  const s = TABLES[locale][key] ?? ptBR[key] ?? key;
+  const one = vars?.count === 1 ? (`${key}.one` as StringKey) : null;
+  const s = (one && (TABLES[locale][one] ?? ptBR[one])) || (TABLES[locale][key] ?? ptBR[key] ?? key);
   return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
 }
 

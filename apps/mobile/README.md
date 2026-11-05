@@ -18,6 +18,13 @@ The UI is in Portuguese (pt-BR) by default, with English as the alternative, and
 | Read / unread, archive, assign | `inbox:markRead` (automatic when a thread is opened), `inbox:markUnread`, `inbox:setStatus` (archive = `closed`), `inbox:assign` (to members who can see the mailbox). All are optimistic. |
 | Push | `inbox:registerDevice` after sign-in, then `support:onInbound` pushes each new inbound message to the mailbox's members. A tap opens the thread (`embermail://thread/<id>`), including from a cold start. |
 
+## Native UI
+
+Routes live in `src/app` (expo-router): native tabs (Inbox, Settings), a native stack per tab with large titles and
+the header search bar, compose as a modal and assign as a form sheet. Controls are native: `@expo/ui` (SwiftUI on
+iOS, Jetpack Compose on Android) for forms, lists, text fields, pickers, segmented controls and buttons; SF Symbols /
+Material Symbols through `expo-symbols`; the system context menu on thread rows. See `AGENTS.md` for the mapping.
+
 ## Offline
 
 `src/offline/replica.ts`. The server's `inbox:*` queries call the email component, and component calls cannot run
@@ -42,6 +49,12 @@ cd apps/mobile && EMBER_URL=http://127.0.0.1:8787 bunx expo start
 
 The app runs in Expo Go, because every native module it uses ships with Expo Go. Push needs a development
 build on a device.
+
+- Use `127.0.0.1`, not `localhost`: `ember dev` pins Better Auth's base URL to `http://127.0.0.1:<port>`, and sign-in
+  from any other origin fails with "Invalid origin".
+- Android emulator: `adb reverse tcp:8787 tcp:8787` and `adb reverse tcp:8081 tcp:8081`, then the same URL works.
+- A development build reads the URL baked in at build time (`EMBER_URL` when you run `expo run:*` / Gradle /
+  `xcodebuild`) when the dev client opens the bundle without Metro's manifest. Build with the port you will use.
 
 ## Push: the transport seam
 

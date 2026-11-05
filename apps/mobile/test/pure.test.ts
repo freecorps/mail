@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import type { Mailbox, Page, Thread, ThreadDetail } from "../src/api";
 import { pickLocale, translate } from "../src/i18n/strings";
-import { buildEmailDocument, contentSecurityPolicy, hasRemoteImages, isExternalLink, isInitialLoad, resolveCid, sanitizeEmailHtml } from "../src/lib/emailHtml";
+import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
+import { buildEmailDocument, contentSecurityPolicy, hasRemoteImages, HEIGHT_PROBE, isExternalLink, isInitialLoad, resolveCid, sanitizeEmailHtml } from "../src/lib/emailHtml";
 import { fileSize, formatWhen, initials, parseRecipients } from "../src/lib/format";
 import { inboxOptimisticUpdates, isOptimisticId } from "../src/offline/optimistic";
 import { pushTransport, registrationArgs, targetOf } from "../src/push/transport";
@@ -19,6 +20,20 @@ describe("email HTML", () => {
     expect(clean).not.toMatch(/<script|onclick|onerror|onload|javascript:|<iframe|<form|<input|<meta|<base|<svg/i);
     expect(clean).toContain("<p>Hi</p>");
     expect(clean).toContain("<img src=x>");
+  });
+
+  it(`allowlists URL schemes in the WebView document: ${HOSTILE_SAMPLES.length} hostile samples, safe ones kept`, () => {
+    for (const h of HOSTILE_SAMPLES) expect(bodyOf(buildEmailDocument(h)), h).not.toMatch(HOSTILE_LEFTOVER);
+    for (const h of SAFE_SAMPLES) expect(sanitizeEmailHtml(h), h).toBe(h);
+    // Glued attributes and entity-encoded schemes (the old blocklist let these through).
+    expect(sanitizeEmailHtml(`<p title="x"onclick="alert(1)">a</p>`)).toBe(`<p title="x">a</p>`);
+    expect(sanitizeEmailHtml(`<a href="jav&#x61;script&colon;alert(1)">x</a>`)).toBe(`<a>x</a>`);
+  });
+
+  it("never throws on malformed cid: references", () => {
+    const cid = { "logo@x": "https://mail.test/l" };
+    expect(() => buildEmailDocument(`<img src="cid:foo%bar"><img src="cid:%E0%A4%A">`, { cid })).not.toThrow();
+    expect(resolveCid(`<img src="cid:%E0%A4%A"><img src="cid:logo%40x">`, cid)).toBe(`<img src="about:blank"><img src="https://mail.test/l">`);
   });
 
   it("detects remote images (img, CSS url(), background=) and leaves data: images alone", () => {
@@ -48,6 +63,11 @@ describe("email HTML", () => {
     expect(doc).not.toContain("x()");
   });
 
+  it("the injected probe parses and fits wide mail to the width before reporting its height", () => {
+    expect(() => new Function(HEIGHT_PROBE)).not.toThrow();
+    expect(HEIGHT_PROBE).toContain("zoom");
+  });
+
   it("only the initial document loads in the WebView; taps on http(s)/mailto/tel go to the OS", () => {
     expect(isInitialLoad("about:blank")).toBe(true);
     expect(isInitialLoad("https://evil.test")).toBe(false);
@@ -55,6 +75,9 @@ describe("email HTML", () => {
     expect(isExternalLink("mailto:a@b.test")).toBe(true);
     expect(isExternalLink("javascript:alert(1)")).toBe(false);
     expect(isExternalLink("file:///etc/passwd")).toBe(false);
+    expect(isExternalLink(" JavaScript:alert(1)")).toBe(false);
+    expect(isExternalLink("intent://x#Intent;scheme=http;end")).toBe(false);
+    expect(isExternalLink("TEL:+5511999999999")).toBe(true);
   });
 });
 
@@ -79,6 +102,10 @@ describe("format and i18n", () => {
     expect(pickLocale(["fr-FR", "en-US"])).toBe("en");
     expect(pickLocale(["pt-PT"])).toBe("pt-BR");
     expect(translate("pt-BR", "mailboxes.unread", { count: 3 })).toBe("3 não lidas");
+    expect(translate("pt-BR", "mailboxes.threads", { count: 1 })).toBe("1 conversa");
+    expect(translate("en", "mailboxes.threads", { count: 1 })).toBe("1 conversation");
+    expect(translate("en", "mailboxes.threads", { count: 0 })).toBe("0 conversations");
+    expect(translate("pt-BR", "banner.pending", { count: 1 })).toBe("1 ação aguardando conexão");
     expect(translate("en", "threads.emptySearch", { query: "x" })).toBe("Nothing found for “x”");
   });
 });

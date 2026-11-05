@@ -9,7 +9,7 @@
       "distribution": "internal",
       "ios": { "simulator": true },
       "env": {
-        "EMBER_URL": "http://localhost:8787"
+        "EMBER_URL": "http://127.0.0.1:8787"
       }
     },
     "preview": {
