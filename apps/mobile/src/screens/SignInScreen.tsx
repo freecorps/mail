@@ -2,7 +2,8 @@
 // native buttons.
 import { Button, FieldGroup, Host, Text, TextInput, type TextInputRef } from "@expo/ui";
 import { useRef, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EMBER_URL } from "../config";
 import { useI18n } from "../i18n";
 import { useSession } from "../session";
@@ -19,6 +20,8 @@ export function SignInScreen() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const passwordRef = useRef<TextInputRef>(null);
+  // No header on this screen: SwiftUI's Form keeps clear of the status bar by itself, the Compose list does not.
+  const insets = useSafeAreaInsets();
   const canSubmit = !!email && !!password && !busy;
 
   const submit = async () => {
@@ -36,7 +39,7 @@ export function SignInScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: p.grouped }}>
+    <View style={{ flex: 1, backgroundColor: p.grouped, ...(Platform.OS === "android" ? { paddingTop: insets.top, paddingBottom: insets.bottom } : null) }}>
       <Host style={{ flex: 1 }} seedColor={p.tint}>
         <FieldGroup>
           <FieldGroup.Section>
