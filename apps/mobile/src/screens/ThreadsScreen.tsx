@@ -62,11 +62,13 @@ export function ThreadsScreen() {
     <>
       <Stack.Screen options={{ title: title ?? mailbox }} />
       <Stack.SearchBar placeholder={t("threads.search")} hideWhenScrolling={false} autoCapitalize="none" onChangeText={(e) => setQuery(e.nativeEvent.text)} onCancelButtonPress={() => setQuery("")} />
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button icon={composeIcon} accessibilityLabel={t("threads.compose")} onPress={() => router.push({ pathname: "/compose", params: { mailbox } })}>
-          {t("threads.compose")}
-        </Stack.Toolbar.Button>
-      </Stack.Toolbar>
+      {composeIcon ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button icon={composeIcon} accessibilityLabel={t("threads.compose")} onPress={() => router.push({ pathname: "/compose", params: { mailbox } })}>
+            {t("threads.compose")}
+          </Stack.Toolbar.Button>
+        </Stack.Toolbar>
+      ) : null}
       <FlatList
         style={{ backgroundColor: p.background }}
         contentInsetAdjustmentBehavior="automatic"

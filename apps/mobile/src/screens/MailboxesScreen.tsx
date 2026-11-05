@@ -17,13 +17,14 @@ export function MailboxesScreen() {
   const c = useConnectionState();
   const composeIcon = useToolbarIcon(Icons.compose, p.tint);
 
-  const toolbar = (
+  // Android: the header item needs a Material Symbol image, which loads asynchronously; mount it once it has.
+  const toolbar = composeIcon ? (
     <Stack.Toolbar placement="right">
       <Stack.Toolbar.Button icon={composeIcon} accessibilityLabel={t("threads.compose")} onPress={() => router.push("/compose")}>
         {t("threads.compose")}
       </Stack.Toolbar.Button>
     </Stack.Toolbar>
-  );
+  ) : null;
 
   let body;
   if (vm.status === "loading") body = <Loading />;

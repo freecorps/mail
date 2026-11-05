@@ -33,7 +33,8 @@ export function ThreadScreen() {
   const chrome = (
     <>
       <Stack.Screen options={{ title: thread?.number ? t("thread.title", { number: thread.number }) : "" }} />
-      {thread ? (
+      {/* Android: header items need a Material Symbol image, which loads asynchronously; mount them once it has. */}
+      {thread && readIcon && assignIcon && archiveIcon ? (
         <Stack.Toolbar placement="right">
           <Stack.Toolbar.Button icon={readIcon} accessibilityLabel={unread ? t("thread.markRead") : t("thread.markUnread")} onPress={vm.toggleRead}>
             {unread ? t("thread.markRead") : t("thread.markUnread")}

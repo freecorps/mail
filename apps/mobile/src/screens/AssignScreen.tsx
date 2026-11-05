@@ -27,11 +27,14 @@ export function AssignScreen() {
   return (
     <>
       <Stack.Screen options={{ title: t("assign.title") }} />
-      <Stack.Toolbar placement="right">
-        <Stack.Toolbar.Button variant="done" onPress={() => router.back()}>
-          {t("common.done")}
-        </Stack.Toolbar.Button>
-      </Stack.Toolbar>
+      {/* iOS only: the Android sheet has no header (it closes on a row tap, a swipe or Back). */}
+      {process.env.EXPO_OS === "ios" ? (
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button variant="done" onPress={() => router.back()}>
+            {t("common.done")}
+          </Stack.Toolbar.Button>
+        </Stack.Toolbar>
+      ) : null}
       {status === "loading" && online ? (
         <Loading />
       ) : (

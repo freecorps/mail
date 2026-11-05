@@ -49,6 +49,8 @@ export const Icons = {
   file: icon("doc", "description"),
   download: icon("arrow.down.circle", "download"),
   send: icon("arrow.up.circle.fill", "arrow_upward"),
+  close: icon("xmark", "close"),
+  sendMail: icon("paperplane", "send"),
   note: icon("note.text", "sticky_note_2"),
   check: icon("checkmark", "check"),
   mail: icon("envelope.fill", "mail"),
