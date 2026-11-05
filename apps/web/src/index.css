@@ -1,0 +1,158 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * One system: warm stone neutrals, one accent (ember orange, used for unread, focus and the primary action),
+ * status tints, a 4px spacing grid, radius scale from --radius. Light and dark share the same roles.
+ */
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.985 0.002 75);
+  --foreground: oklch(0.2 0.01 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.01 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.01 60);
+  --primary: oklch(0.56 0.17 42);
+  --primary-foreground: oklch(0.99 0.005 75);
+  --secondary: oklch(0.955 0.004 75);
+  --secondary-foreground: oklch(0.25 0.01 60);
+  --muted: oklch(0.955 0.004 75);
+  --muted-foreground: oklch(0.5 0.012 60);
+  --accent: oklch(0.945 0.008 70);
+  --accent-foreground: oklch(0.22 0.01 60);
+  --destructive: oklch(0.56 0.2 27);
+  --border: oklch(0.91 0.005 70);
+  --input: oklch(0.89 0.006 70);
+  --ring: oklch(0.6 0.16 42);
+  --sidebar: oklch(0.965 0.004 75);
+  --sidebar-foreground: oklch(0.3 0.01 60);
+  --selected: oklch(0.93 0.025 55);
+  --note: oklch(0.97 0.04 90);
+  --note-border: oklch(0.88 0.07 90);
+  --note-foreground: oklch(0.38 0.06 75);
+  --status-open: oklch(0.55 0.13 150);
+  --status-waiting: oklch(0.62 0.13 75);
+  --status-closed: oklch(0.55 0.01 60);
+  --status-spam: oklch(0.56 0.2 27);
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+.dark {
+  --background: oklch(0.17 0.006 60);
+  --foreground: oklch(0.94 0.006 75);
+  --card: oklch(0.205 0.007 60);
+  --card-foreground: oklch(0.94 0.006 75);
+  --popover: oklch(0.225 0.007 60);
+  --popover-foreground: oklch(0.94 0.006 75);
+  --primary: oklch(0.7 0.16 48);
+  --primary-foreground: oklch(0.18 0.02 50);
+  --secondary: oklch(0.25 0.008 60);
+  --secondary-foreground: oklch(0.92 0.006 75);
+  --muted: oklch(0.245 0.007 60);
+  --muted-foreground: oklch(0.68 0.01 70);
+  --accent: oklch(0.27 0.01 60);
+  --accent-foreground: oklch(0.94 0.006 75);
+  --destructive: oklch(0.66 0.19 25);
+  --border: oklch(0.29 0.008 60);
+  --input: oklch(0.32 0.008 60);
+  --ring: oklch(0.7 0.15 48);
+  --sidebar: oklch(0.15 0.006 60);
+  --sidebar-foreground: oklch(0.85 0.008 75);
+  --selected: oklch(0.28 0.03 50);
+  --note: oklch(0.26 0.04 85);
+  --note-border: oklch(0.4 0.07 85);
+  --note-foreground: oklch(0.88 0.06 90);
+  --status-open: oklch(0.72 0.13 150);
+  --status-waiting: oklch(0.78 0.13 80);
+  --status-closed: oklch(0.65 0.01 70);
+  --status-spam: oklch(0.68 0.18 25);
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-selected: var(--selected);
+  --color-note: var(--note);
+  --color-note-border: var(--note-border);
+  --color-note-foreground: var(--note-foreground);
+  --color-status-open: var(--status-open);
+  --color-status-waiting: var(--status-waiting);
+  --color-status-closed: var(--status-closed);
+  --color-status-spam: var(--status-spam);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "cv11";
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 25%, transparent);
+  }
+}
+
+/* Pressable things answer the pointer (scale on press); keyboard actions are never animated. */
+@layer components {
+  .pressable {
+    transition:
+      transform 140ms var(--ease-out),
+      background-color 140ms ease,
+      color 140ms ease;
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
