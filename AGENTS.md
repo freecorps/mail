@@ -11,6 +11,7 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) | builds/tests; not shipped |
 | `apps/web` | Web inbox: Vite+ (`vp`), React, shadcn/ui, Better Auth client, `@freecorps/ember-react`. Same-origin proxy (dev: Vite; prod: `worker/index.ts` on Workers static assets). See `apps/web/README.md` | builds/tests; not deployed |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client, Resend-style `{ data, error }` | private, unpublished |
+| `packages/email-html` | `@freecorps/mail-email-html`: safe rendering of inbound HTML mail (sanitizer with a URL allowlist, CSP, `cid:`), shared by the web iframe and the mobile WebView; hostile samples in `test/samples.ts` | private, source-only |
 | `ember/` | git submodule of freecorps/ember, pinned (see "Ember dependency") | |
 | `.agents/skills`, `.claude/skills` | installed agent skills (see below) | |
 

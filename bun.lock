@@ -40,6 +40,7 @@
         "@freecorps/ember-offline": "workspace:*",
         "@freecorps/ember-react-native": "workspace:*",
         "@freecorps/ember-server": "workspace:*",
+        "@freecorps/mail-email-html": "workspace:*",
         "@react-native-async-storage/async-storage": "2.2.0",
         "@react-native-community/netinfo": "12.0.1",
         "expo": "~58.0.23",
@@ -81,6 +82,7 @@
         "@fontsource-variable/geist-mono": "^5.2.7",
         "@freecorps/ember-client": "workspace:*",
         "@freecorps/ember-react": "workspace:*",
+        "@freecorps/mail-email-html": "workspace:*",
         "better-auth": "~1.7.17",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -376,6 +378,10 @@
         "@freecorps/ember-server": "workspace:*",
         "@freecorps/ember-values": "workspace:*",
       },
+    },
+    "packages/email-html": {
+      "name": "@freecorps/mail-email-html",
+      "version": "0.0.0",
     },
     "packages/sdk": {
       "name": "@freecorps/mail-sdk",
@@ -750,6 +756,8 @@
     "@freecorps/ember-workflows": ["@freecorps/ember-workflows@workspace:ember/packages/workflows"],
 
     "@freecorps/mail-api": ["@freecorps/mail-api@workspace:apps/api"],
+
+    "@freecorps/mail-email-html": ["@freecorps/mail-email-html@workspace:packages/email-html"],
 
     "@freecorps/mail-mobile": ["@freecorps/mail-mobile@workspace:apps/mobile"],
 
