@@ -45,8 +45,7 @@ export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; 
         cacheEnabled={false}
         thirdPartyCookiesEnabled={false}
         sharedCookiesEnabled={false}
-        // An array: Android passes this prop to native as is, and a bare string aborts the debug build (RNCWebViewProps).
-        dataDetectorTypes={["none"]}
+        dataDetectorTypes={NO_DATA_DETECTORS}
         mixedContentMode="never"
         geolocationEnabled={false}
         scrollEnabled={false}
@@ -58,6 +57,10 @@ export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; 
     </View>
   );
 }
+
+// An array (Android passes the prop to native as is; a bare string aborts the debug build in RNCWebViewProps), and a
+// constant (iOS warns when the prop's identity changes after the first render).
+const NO_DATA_DETECTORS: ["none"] = ["none"];
 
 const styles = StyleSheet.create({
   box: { overflow: "hidden", borderRadius: 10, backgroundColor: "#FFFFFF" },
