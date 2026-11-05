@@ -9,6 +9,6 @@ jobs:
           submodules: true # ember/ (until Ember 0.2.0 is on npm)
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
-        with: { node-version: 24 }
+        with: { node-version: 24 } # also the runtime of Vite+ (vp) in apps/web
       - run: bun install
-      - run: bun run check
+      - run: bun run check # typecheck, vp check (web), tests (api, sdk, mobile, web), web build

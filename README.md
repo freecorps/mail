@@ -19,7 +19,7 @@ elas.
 |---|---|
 | `apps/api` | O serviço (app Ember → Worker `ember-mail-<env>`) |
 | `apps/mobile` | App Expo da inbox (iOS primeiro, Android pronto) |
-| `apps/web` | Inbox web, **planejada** (Vite+, React, shadcn/ui, Better Auth, cliente React do Ember) |
+| `apps/web` | Inbox web (Vite+, React, shadcn/ui, Better Auth, cliente React do Ember); deploy em Workers static assets, ver [`apps/web/README.md`](apps/web/README.md) |
 | `packages/sdk` | `@freecorps/mail-sdk`: cliente HTTP tipado (ainda não publicado) |
 | `ember/` | Ember como submódulo git, até o Ember 0.2.0 sair no npm |
 | `docs/operations.md` | Operação da produção da FreeCorps e lista exata para apagar tudo |
@@ -29,7 +29,7 @@ elas.
 ```sh
 git clone --recurse-submodules https://github.com/freecorps/mail && cd mail
 bun install
-bun run check          # typecheck + testes (API no workerd, SDK, app móvel)
+bun run check          # typecheck + lint/format (web) + testes (API no workerd, SDK, app móvel, web) + build web
 ```
 
 Desenvolvimento local:
@@ -37,6 +37,7 @@ Desenvolvimento local:
 ```sh
 cd apps/api && EMBER_ADMIN_TOKEN=dev-admin bunx ember dev   # API em http://127.0.0.1:8787, envio simulado
 cd apps/mobile && bun run seed:dev && EMBER_URL=http://127.0.0.1:8787 bunx expo start
+cd apps/web && bun run dev   # inbox web em http://localhost:5180 (proxy para a API; Vite+ precisa de Node)
 ```
 
 ## Deploy na sua conta
@@ -104,7 +105,7 @@ them.
 |---|---|
 | `apps/api` | The service (Ember app → Worker `ember-mail-<env>`) |
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) |
-| `apps/web` | Web inbox, **planned** (Vite+, React, shadcn/ui, Better Auth, Ember React client) |
+| `apps/web` | Web inbox (Vite+, React, shadcn/ui, Better Auth, Ember React client); deploys to Workers static assets, see [`apps/web/README.md`](apps/web/README.md) |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client (not published yet) |
 | `ember/` | Ember as a git submodule, until Ember 0.2.0 is on npm |
 | `docs/operations.md` | Operating FreeCorps' production, with the exact teardown list (pt-BR) |
@@ -114,7 +115,7 @@ them.
 ```sh
 git clone --recurse-submodules https://github.com/freecorps/mail && cd mail
 bun install
-bun run check          # typecheck + tests (API on workerd, SDK, mobile app)
+bun run check          # typecheck + lint/format (web) + tests (API on workerd, SDK, mobile app, web) + web build
 ```
 
 Local development:
@@ -122,6 +123,7 @@ Local development:
 ```sh
 cd apps/api && EMBER_ADMIN_TOKEN=dev-admin bunx ember dev   # API at http://127.0.0.1:8787, simulated sending
 cd apps/mobile && bun run seed:dev && EMBER_URL=http://127.0.0.1:8787 bunx expo start
+cd apps/web && bun run dev   # web inbox at http://localhost:5180 (proxies to the API; Vite+ needs Node)
 ```
 
 ### Deploying to your account

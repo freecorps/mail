@@ -10,9 +10,11 @@
     "ember/apps/dashboard"
   ],
   "scripts": {
-    "typecheck": "tsc -b packages/sdk/tsconfig.json && bun run --filter '@freecorps/mail-api' typecheck && bun run --filter '@freecorps/mail-mobile' typecheck",
+    "typecheck": "tsc -b packages/sdk/tsconfig.json && bun run --filter '@freecorps/mail-api' typecheck && bun run --filter '@freecorps/mail-mobile' typecheck && bun run --filter '@freecorps/mail-web' typecheck",
     "test": "bun run --filter '@freecorps/mail-*' test",
-    "check": "bun run typecheck && bun run test"
+    "check": "bun run typecheck && bun run lint && bun run test && bun run build:web",
+    "lint": "bun run --filter '@freecorps/mail-web' check",
+    "build:web": "bun run --filter '@freecorps/mail-web' build"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

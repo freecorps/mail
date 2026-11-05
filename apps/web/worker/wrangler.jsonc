@@ -1,0 +1,20 @@
+// The web inbox on Cloudflare Workers (static assets + the same-origin proxy in index.ts). Not deployed by CI:
+// see apps/web/README.md "Deploy". Fill MAIL_API_URL (and the service binding) for your account first.
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "ember-mail-web",
+  "main": "index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "../dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/ws"],
+  },
+  "vars": {
+    "MAIL_API_URL": "https://mail.example.com",
+  },
+  // Preferred: call the mail service Worker directly (uncomment with your environment's Worker name).
+  // "services": [{ "binding": "API", "service": "ember-mail-prod" }],
+  "observability": { "enabled": true },
+}

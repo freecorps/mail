@@ -9,7 +9,7 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 |---|---|---|
 | `apps/api` | The service: an Ember app (Worker `ember-mail-<env>`). HTTP API (`ember/http.ts`), domains (`ember/domains.ts`, via `@freecorps/ember-email/cloudflare`), inbox functions for clients (`ember/inbox.ts`), Better Auth (`ember/auth.config.ts`), push on inbound (`ember/support.ts`). Ops scripts in `scripts/` | in production |
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) | builds/tests; not shipped |
-| `apps/web` | Web inbox | **planned** (path reserved; not created yet) |
+| `apps/web` | Web inbox: Vite+ (`vp`), React, shadcn/ui, Better Auth client, `@freecorps/ember-react`. Same-origin proxy (dev: Vite; prod: `worker/index.ts` on Workers static assets). See `apps/web/README.md` | builds/tests; not deployed |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client, Resend-style `{ data, error }` | private, unpublished |
 | `ember/` | git submodule of freecorps/ember, pinned (see "Ember dependency") | |
 | `.agents/skills`, `.claude/skills` | installed agent skills (see below) | |
@@ -26,8 +26,14 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
   - Don't draw a widget in JS when a native one exists: segmented controls, pickers, buttons, toggles, lists/forms,
     context menus, search bars, sheets, SF Symbols.
   - The current app still has JS-drawn pieces to migrate; see "Mobile: native migration" below.
-- **Web inbox (to build) = Vite+ (`vp` CLI, https://viteplus.dev) + React + shadcn/ui + Better Auth client + Ember
-  React client** (`@freecorps/ember-react`, the same inbox functions as mobile). It will live in `apps/web`.
+- **Web inbox = Vite+ (`vp` CLI, https://viteplus.dev) + React + shadcn/ui + Better Auth client + Ember React
+  client** (`@freecorps/ember-react`, the same inbox functions as mobile), in `apps/web`.
+  - `vp` runs on Node (engines `^22.18 || ^24.11 || >=26`); Bun installs and runs scripts. Use `vp check`
+    (Oxfmt + type-aware Oxlint) and `vp test`; imports for tests come from `vite-plus/test`.
+  - shadcn components live in `src/components/ui` (add more with `bunx shadcn@latest add <name> -y`, then move them
+    from `apps/web/@/components/ui` if the CLI misplaces them and fix `cn` imports to `@/lib/utils`).
+  - The app must stay same-origin with the API (session cookie, `/ws`): never point it at the API cross-origin.
+  - Email HTML: only through `EmailFrame` (sandbox without `allow-scripts` + CSP + sanitizer in `src/lib/emailHtml.ts`).
 - **Toolchain:** Bun (workspaces, scripts), TypeScript strict, Vitest. Ember sources resolve through the export
   condition `@freecorps/ember-source` (`bun --conditions=@freecorps/ember-source ...` for scripts).
 
