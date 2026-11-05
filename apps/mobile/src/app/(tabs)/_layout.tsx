@@ -1,5 +1,5 @@
 // Native tabs (UITabBarController / Material 3 navigation bar): Inbox and Settings, each with its own native stack.
-import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { NativeTabs } from "expo-router/native-tabs";
 import { useEffect } from "react";
 import { Icons } from "../../components/icons";
 import { useI18n } from "../../i18n";

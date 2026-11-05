@@ -2,7 +2,7 @@ import { Stack } from "expo-router";
 import { useI18n } from "../../../i18n";
 import { usePalette } from "../../../theme";
 
-export const unstable_settings = { initialRouteName: "index" };
+export const unstable_settings = { anchor: "index" };
 
 export default function InboxStack() {
   const p = usePalette();
