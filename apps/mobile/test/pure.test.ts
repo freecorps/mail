@@ -4,7 +4,7 @@ import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import type { Mailbox, Page, Thread, ThreadDetail } from "../src/api";
 import { pickLocale, translate } from "../src/i18n/strings";
 import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
-import { buildEmailDocument, contentSecurityPolicy, hasRemoteImages, isExternalLink, isInitialLoad, resolveCid, sanitizeEmailHtml } from "../src/lib/emailHtml";
+import { buildEmailDocument, contentSecurityPolicy, hasRemoteImages, HEIGHT_PROBE, isExternalLink, isInitialLoad, resolveCid, sanitizeEmailHtml } from "../src/lib/emailHtml";
 import { fileSize, formatWhen, initials, parseRecipients } from "../src/lib/format";
 import { inboxOptimisticUpdates, isOptimisticId } from "../src/offline/optimistic";
 import { pushTransport, registrationArgs, targetOf } from "../src/push/transport";
@@ -63,6 +63,11 @@ describe("email HTML", () => {
     expect(doc).not.toContain("x()");
   });
 
+  it("the injected probe parses and fits wide mail to the width before reporting its height", () => {
+    expect(() => new Function(HEIGHT_PROBE)).not.toThrow();
+    expect(HEIGHT_PROBE).toContain("zoom");
+  });
+
   it("only the initial document loads in the WebView; taps on http(s)/mailto/tel go to the OS", () => {
     expect(isInitialLoad("about:blank")).toBe(true);
     expect(isInitialLoad("https://evil.test")).toBe(false);
@@ -97,6 +102,10 @@ describe("format and i18n", () => {
     expect(pickLocale(["fr-FR", "en-US"])).toBe("en");
     expect(pickLocale(["pt-PT"])).toBe("pt-BR");
     expect(translate("pt-BR", "mailboxes.unread", { count: 3 })).toBe("3 não lidas");
+    expect(translate("pt-BR", "mailboxes.threads", { count: 1 })).toBe("1 conversa");
+    expect(translate("en", "mailboxes.threads", { count: 1 })).toBe("1 conversation");
+    expect(translate("en", "mailboxes.threads", { count: 0 })).toBe("0 conversations");
+    expect(translate("pt-BR", "banner.pending", { count: 1 })).toBe("1 ação aguardando conexão");
     expect(translate("en", "threads.emptySearch", { query: "x" })).toBe("Nothing found for “x”");
   });
 });
