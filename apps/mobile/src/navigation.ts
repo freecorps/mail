@@ -1,36 +1,17 @@
-// Screens, deep links and the navigation ref (notification taps navigate from outside React).
-import { createNavigationContainerRef, type LinkingOptions } from "@react-navigation/native";
-import * as Linking from "expo-linking";
-import { SCHEME } from "./config";
+// Navigation from outside React (notification taps). Routes and deep links are file-based (src/app, expo-router):
+// `embermail://thread/<id>`, `embermail://mailbox/<name>`, `embermail://compose`, `embermail://settings`.
+import { router } from "expo-router";
 
-export type RootStack = {
-  Mailboxes: undefined;
-  Threads: { mailbox: string; title?: string };
-  Thread: { threadId: string; mailbox?: string };
-  Compose: { mailbox?: string; to?: string } | undefined;
-  Assign: { threadId: string; mailbox: string; current?: string | null };
-  Settings: undefined;
-};
+let inboxMounted = false;
 
-export const navigationRef = createNavigationContainerRef<RootStack>();
+/** The tabs mount only for members; until then a notification tap waits (see push/usePush.ts). */
+export function setInboxMounted(mounted: boolean) {
+  inboxMounted = mounted;
+}
 
-/** `embermail://thread/<id>`, `embermail://mailbox/<name>`, `embermail://compose`. */
-export const linking: LinkingOptions<RootStack> = {
-  prefixes: [Linking.createURL("/"), `${SCHEME}://`],
-  config: {
-    screens: {
-      Mailboxes: "",
-      Threads: "mailbox/:mailbox",
-      Thread: "thread/:threadId",
-      Compose: "compose",
-      Settings: "settings",
-    },
-  },
-};
-
-/** Opens a thread on top of the current stack (from a notification), once navigation is ready. */
+/** Opens a thread on top of the Inbox stack, once the inbox is mounted. */
 export function openThread(threadId: string, mailbox?: string): boolean {
-  if (!navigationRef.isReady()) return false;
-  navigationRef.navigate("Thread", { threadId, ...(mailbox ? { mailbox } : {}) });
+  if (!inboxMounted) return false;
+  router.push({ pathname: "/thread/[threadId]", params: { threadId, ...(mailbox ? { mailbox } : {}) } });
   return true;
 }

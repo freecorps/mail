@@ -18,6 +18,13 @@ The UI is in Portuguese (pt-BR) by default, with English as the alternative, and
 | Read / unread, archive, assign | `inbox:markRead` (automatic when a thread is opened), `inbox:markUnread`, `inbox:setStatus` (archive = `closed`), `inbox:assign` (to members who can see the mailbox). All are optimistic. |
 | Push | `inbox:registerDevice` after sign-in, then `support:onInbound` pushes each new inbound message to the mailbox's members. A tap opens the thread (`embermail://thread/<id>`), including from a cold start. |
 
+## Native UI
+
+Routes live in `src/app` (expo-router): native tabs (Inbox, Settings), a native stack per tab with large titles and
+the header search bar, compose as a modal and assign as a form sheet. Controls are native: `@expo/ui` (SwiftUI on
+iOS, Jetpack Compose on Android) for forms, lists, text fields, pickers, segmented controls and buttons; SF Symbols /
+Material Symbols through `expo-symbols`; the system context menu on thread rows. See `AGENTS.md` for the mapping.
+
 ## Offline
 
 `src/offline/replica.ts`. The server's `inbox:*` queries call the email component, and component calls cannot run

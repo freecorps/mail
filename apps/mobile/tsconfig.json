@@ -9,6 +9,6 @@
     "customConditions": ["@freecorps/ember-source"],
     "types": ["node"]
   },
-  "include": ["index.ts", "app.config.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "scripts/**/*.ts"],
+  "include": ["app.config.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "scripts/**/*.ts"],
   "exclude": ["node_modules"]
 }

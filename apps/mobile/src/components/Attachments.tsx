@@ -8,15 +8,15 @@ import type { Attachment } from "../api";
 import { useI18n } from "../i18n";
 import { fileSize } from "../lib/format";
 import { usePalette } from "../theme";
-import { Icon, type IconName } from "./ui";
+import { Icons, Symbol, type IconSpec } from "./icons";
 
-function iconFor(type: string): IconName {
-  if (type.startsWith("image/")) return "image-outline";
-  if (type === "application/pdf") return "document-text-outline";
-  if (type.includes("zip") || type.includes("compressed")) return "archive-outline";
-  if (type.startsWith("audio/")) return "musical-notes-outline";
-  if (type.startsWith("video/")) return "videocam-outline";
-  return "document-outline";
+function iconFor(type: string): IconSpec {
+  if (type.startsWith("image/")) return Icons.image;
+  if (type === "application/pdf") return Icons.pdf;
+  if (type.includes("zip") || type.includes("compressed")) return Icons.zip;
+  if (type.startsWith("audio/")) return Icons.audio;
+  if (type.startsWith("video/")) return Icons.video;
+  return Icons.file;
 }
 
 async function openAttachment(url: string, a: Attachment) {
@@ -58,16 +58,17 @@ export function AttachmentList({ attachments, urls }: { attachments: Attachment[
             accessibilityRole="button"
             accessibilityLabel={`${a.filename}${meta ? `, ${meta}` : ""}`}
             accessibilityState={{ disabled: !url, busy: busy === a.file }}
+            android_ripple={{ color: p.separator }}
             style={({ pressed }) => [styles.item, { backgroundColor: p.chip, opacity: url ? (pressed ? 0.6 : 1) : 0.55 }]}
           >
-            {busy === a.file ? <ActivityIndicator /> : <Icon name={failed === a.file ? "alert-circle-outline" : iconFor(a.contentType)} size={20} />}
+            {busy === a.file ? <ActivityIndicator /> : <Symbol icon={failed === a.file ? Icons.error : iconFor(a.contentType)} size={20} />}
             <View style={{ flex: 1 }}>
               <Text style={{ color: p.text, fontSize: 14, fontWeight: "500" }} numberOfLines={1}>
                 {a.filename}
               </Text>
               {meta ? <Text style={{ color: p.secondary, fontSize: 12 }}>{meta}</Text> : null}
             </View>
-            {url ? <Icon name="download-outline" size={18} color={p.secondary} /> : null}
+            {url ? <Symbol icon={Icons.download} size={18} color={p.secondary} /> : null}
           </Pressable>
         );
       })}
@@ -77,5 +78,5 @@ export function AttachmentList({ attachments, urls }: { attachments: Attachment[
 
 const styles = StyleSheet.create({
   list: { gap: 6, marginTop: 10 },
-  item: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 10, paddingHorizontal: 12, minHeight: 48, paddingVertical: 6 },
+  item: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 10, borderCurve: "continuous", paddingHorizontal: 12, minHeight: 48, paddingVertical: 6 },
 });

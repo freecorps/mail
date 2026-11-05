@@ -32,9 +32,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       NSAppTransportSecurity: { NSAllowsLocalNetworking: true },
     },
   },
-  android: { package: ANDROID_PACKAGE },
+  android: { package: ANDROID_PACKAGE, softwareKeyboardLayoutMode: "resize" },
   locales: { pt: { CFBundleDisplayName: "Ember Mail" }, en: { CFBundleDisplayName: "Ember Mail" } },
   plugins: [
+    "expo-router",
     "expo-secure-store",
     ["expo-notifications", { defaultChannel: "mail" }],
     ["expo-sqlite", { enableFTS: true }],

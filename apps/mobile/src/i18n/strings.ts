@@ -47,6 +47,7 @@ const ptBR = {
   "threads.a11y": "{from}, {subject}, {when}{unread}",
   "threads.a11yUnread": ", não lida",
   "threads.compose": "Nova mensagem",
+  "threads.filterLabel": "Filtrar conversas",
 
   "status.open": "Aberta",
   "status.waiting": "Aguardando",
@@ -75,6 +76,7 @@ const ptBR = {
   "thread.addNote": "Salvar nota",
   "thread.replyMode": "Resposta",
   "thread.noteMode": "Nota",
+  "thread.modeLabel": "Tipo de mensagem",
   "thread.notFound": "Conversa não encontrada",
   "thread.spamNoReply": "Não é possível responder a spam.",
 
@@ -162,6 +164,7 @@ const en: Record<StringKey, string> = {
   "threads.a11y": "{from}, {subject}, {when}{unread}",
   "threads.a11yUnread": ", unread",
   "threads.compose": "New message",
+  "threads.filterLabel": "Filter conversations",
 
   "status.open": "Open",
   "status.waiting": "Waiting",
@@ -190,6 +193,7 @@ const en: Record<StringKey, string> = {
   "thread.addNote": "Save note",
   "thread.replyMode": "Reply",
   "thread.noteMode": "Note",
+  "thread.modeLabel": "Message type",
   "thread.notFound": "Conversation not found",
   "thread.spamNoReply": "You cannot reply to spam.",
 

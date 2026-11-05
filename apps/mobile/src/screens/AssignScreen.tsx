@@ -1,62 +1,62 @@
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useLayoutEffect } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+// Assign (form sheet): team members as a native list with a checkmark on the current assignee.
+import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
 import { useConnectionState, useMutation } from "@freecorps/ember-react-native";
+import { router, Stack, useLocalSearchParams } from "expo-router";
 import { api } from "../api";
-import { Avatar, Icon, Loading, Separator, TextButton } from "../components/ui";
+import { Icons } from "../components/icons";
+import { Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useMembers } from "../model/thread";
-import type { RootStack } from "../navigation";
 import { usePalette } from "../theme";
 
-export function AssignScreen({ navigation, route }: NativeStackScreenProps<RootStack, "Assign">) {
-  const { threadId, mailbox, current } = route.params;
+export function AssignScreen() {
+  const params = useLocalSearchParams<{ threadId: string; mailbox: string; current?: string }>();
+  const current = params.current || null;
   const p = usePalette();
   const { t } = useI18n();
-  const { members, status } = useMembers(mailbox);
+  const { members, status } = useMembers(params.mailbox);
   const { online } = useConnectionState();
   const assign = useMutation(api.inbox.assign);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: t("assign.title"), headerRight: () => <TextButton label={t("common.done")} onPress={() => navigation.goBack()} bold /> });
-  }, [navigation, t]);
-
   const pick = (userId: string | null) => {
-    void assign({ threadId, userId }).catch(() => {});
-    navigation.goBack();
+    void assign({ threadId: params.threadId, userId }).catch(() => {});
+    router.back();
   };
 
-  if (status === "loading" && online) return <Loading />;
   const rows = [{ userId: null as string | null, name: t("assign.nobody") }, ...members];
   return (
-    <FlatList
-      style={{ backgroundColor: p.grouped }}
-      data={rows}
-      keyExtractor={(m) => m.userId ?? "-"}
-      ItemSeparatorComponent={() => <Separator inset={60} />}
-      ListFooterComponent={!members.length && !online ? <Text style={[styles.note, { color: p.secondary }]}>{t("assign.offline")}</Text> : undefined}
-      renderItem={({ item }) => {
-        const selected = (current ?? null) === item.userId;
-        return (
-          <Pressable
-            onPress={() => pick(item.userId)}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            accessibilityLabel={item.name}
-            style={({ pressed }) => [styles.row, { backgroundColor: pressed ? p.chip : p.card }]}
-          >
-            {item.userId ? <Avatar name={item.name} size={32} /> : <View style={styles.none}><Icon name="person-remove-outline" size={20} color={p.secondary} /></View>}
-            <Text style={{ flex: 1, color: p.text, fontSize: 17 }}>{item.name}</Text>
-            {selected ? <Icon name="checkmark" size={20} /> : null}
-          </Pressable>
-        );
-      }}
-    />
+    <>
+      <Stack.Screen options={{ title: t("assign.title") }} />
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button variant="done" onPress={() => router.back()}>
+          {t("common.done")}
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
+      {status === "loading" && online ? (
+        <Loading />
+      ) : (
+        <Host style={{ flex: 1 }} seedColor={p.tint}>
+          <FieldGroup>
+            <FieldGroup.Section>
+              {rows.map((m) => (
+                <ListItem
+                  key={m.userId ?? "-"}
+                  onPress={() => pick(m.userId)}
+                  leading={<NativeIcon icon={m.userId ? Icons.person : Icons.unassign} color={m.userId ? p.tint : p.secondary} />}
+                  trailing={current === m.userId ? <NativeIcon icon={Icons.check} color={p.tint} /> : undefined}
+                >
+                  <Text>{m.name}</Text>
+                </ListItem>
+              ))}
+              {!members.length && !online ? (
+                <FieldGroup.SectionFooter>
+                  <Text textStyle={{ color: p.secondary }}>{t("assign.offline")}</Text>
+                </FieldGroup.SectionFooter>
+              ) : null}
+            </FieldGroup.Section>
+          </FieldGroup>
+        </Host>
+      )}
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  row: { flexDirection: "row", alignItems: "center", gap: 14, paddingHorizontal: 16, minHeight: 52 },
-  none: { width: 32, alignItems: "center" },
-  note: { padding: 16, textAlign: "center" },
-});
