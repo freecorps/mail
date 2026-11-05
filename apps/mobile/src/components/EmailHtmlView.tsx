@@ -45,7 +45,8 @@ export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; 
         cacheEnabled={false}
         thirdPartyCookiesEnabled={false}
         sharedCookiesEnabled={false}
-        dataDetectorTypes="none"
+        // An array: Android passes this prop to native as is, and a bare string aborts the debug build (RNCWebViewProps).
+        dataDetectorTypes={["none"]}
         mixedContentMode="never"
         geolocationEnabled={false}
         scrollEnabled={false}
