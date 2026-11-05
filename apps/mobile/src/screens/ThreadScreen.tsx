@@ -2,8 +2,8 @@
 // composer with a native segmented control (reply / internal note) and a native text field.
 import { Host, TextInput, type TextInputRef } from "@expo/ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { memo, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Keyboard, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AttachmentList } from "../components/Attachments";
 import { EmailHtmlView } from "../components/EmailHtmlView";
@@ -88,7 +88,7 @@ export function ThreadScreen() {
   );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: p.grouped }} behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={process.env.EXPO_OS === "ios" ? 100 : 0}>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: p.grouped }} behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>
       {chrome}
       <FlatList
         data={vm.items}
@@ -149,6 +149,17 @@ function Composer({ onReply, onNote }: { onReply(text: string): Promise<unknown>
   const input = useRef<TextInputRef>(null);
   const [mode, setMode] = useState<"reply" | "note">("reply");
   const [text, setText] = useState("");
+  // The home-indicator inset only matters while the bar sits at the bottom; above the keyboard it is empty space.
+  const [keyboard, setKeyboard] = useState(false);
+  useEffect(() => {
+    const ios = process.env.EXPO_OS === "ios";
+    const show = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboard(true));
+    const hide = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboard(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const placeholder = mode === "reply" ? t("thread.replyPlaceholder") : t("thread.notePlaceholder");
   const send = () => {
     const body = text.trim();
@@ -159,7 +170,7 @@ function Composer({ onReply, onNote }: { onReply(text: string): Promise<unknown>
     setText("");
   };
   return (
-    <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: Math.max(insets.bottom, 8) }]}>
+    <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 8) }]}>
       <Segmented<"reply" | "note">
         label={t("thread.modeLabel")}
         value={mode}
