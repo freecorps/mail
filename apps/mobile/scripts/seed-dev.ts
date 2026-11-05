@@ -41,8 +41,26 @@ async function member(): Promise<string> {
 
 const boundary = "ember-seed-boundary";
 const b64 = (s: string | Uint8Array) => Buffer.from(s).toString("base64").replace(/.{76}/g, "$&\r\n");
-/** A tiny valid PDF. */
-const PDF = `%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj 4 0 obj<</Length 55>>stream\nBT /F1 18 Tf 24 72 Td (Fatura 2026-03: R$ 1.234,56) Tj ET\nendstream endobj 5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n`;
+/** A tiny valid PDF, with the xref table and offsets that iOS PDFKit (Quick Look) requires; Android's renderer is lenient. */
+const PDF = (() => {
+  const text = "BT /F1 18 Tf 24 72 Td (Fatura 2026-03: R$ 1.234,56) Tj ET";
+  const objects = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 144]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>",
+    `<</Length ${text.length}>>\nstream\n${text}\nendstream`,
+    "<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>",
+  ];
+  let out = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((o, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xref = out.length;
+  out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((n) => `${String(n).padStart(10, "0")} 00000 n \n`).join("")}`;
+  return `${out}trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF\n`;
+})();
 
 function mime(o: { from: string; to: string; subject: string; text: string; html?: string; id: string; date: Date; pdf?: string }) {
   const head = [
