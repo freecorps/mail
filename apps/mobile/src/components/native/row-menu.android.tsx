@@ -12,7 +12,8 @@ export function RowMenu({ children, actions, href, disabled }: RowMenuProps) {
   const [open, setOpen] = useState(false);
   const row = isValidElement(children)
     ? cloneElement(children as ReactElement<Pressy>, {
-        onPress: () => router.push(href as never),
+        // A disabled row (an optimistic thread not yet on the server) neither opens nor shows the menu.
+        onPress: disabled ? undefined : () => router.push(href as never),
         onLongPress: disabled || !actions.length ? undefined : () => setOpen(true),
       })
     : children;
