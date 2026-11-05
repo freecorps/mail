@@ -2,8 +2,8 @@
 // (the CLI's token lookup: CLOUDFLARE_API_TOKEN or wrangler's OAuth), in memory only, and records the result in the
 // mail service through `POST /domains/import`. Use it when the Worker has no CLOUDFLARE_API_TOKEN secret.
 //
-//   EMBER_ADMIN_TOKEN=... bun --conditions=@freecorps/ember-source scripts/domains.ts add mail.example.com --url https://mail.example.com [--enable-routing]
-//   EMBER_ADMIN_TOKEN=... bun --conditions=@freecorps/ember-source scripts/domains.ts remove mail.example.com --url https://mail.example.com
+//   EMBER_ADMIN_TOKEN=... bun scripts/domains.ts add mail.example.com --url https://mail.example.com [--enable-routing]
+//   EMBER_ADMIN_TOKEN=... bun scripts/domains.ts remove mail.example.com --url https://mail.example.com
 //
 // `remove` deletes what onboarding created in Cloudflare, then the service's record (`POST /domains/:id/forget`),
 // so the domain stops being accepted as a From domain. If a Cloudflare deletion fails, the record (and the ids it

@@ -5,8 +5,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: true # ember/ (until Ember 0.2.0 is on npm)
       - uses: oven-sh/setup-bun@v2
       - uses: actions/setup-node@v4
         with: { node-version: 24 } # also the runtime of Vite+ (vp) in apps/web

@@ -21,13 +21,12 @@ elas.
 | `apps/mobile` | App Expo da inbox (iOS primeiro, Android pronto) |
 | `apps/web` | Inbox web (Vite+, React, shadcn/ui, Better Auth, cliente React do Ember); deploy em Workers static assets, ver [`apps/web/README.md`](apps/web/README.md) |
 | `packages/sdk` | `@freecorps/mail-sdk`: cliente HTTP tipado (ainda não publicado) |
-| `ember/` | Ember como submódulo git, até o Ember 0.2.0 sair no npm |
 | `docs/operations.md` | Operação da produção da FreeCorps e lista exata para apagar tudo |
 
 ## Começar
 
 ```sh
-git clone --recurse-submodules https://github.com/freecorps/mail && cd mail
+git clone https://github.com/freecorps/mail && cd mail
 bun install
 bun run check          # typecheck + lint/format (web) + testes (API no workerd, SDK, app móvel, web) + build web
 ```
@@ -107,13 +106,12 @@ them.
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) |
 | `apps/web` | Web inbox (Vite+, React, shadcn/ui, Better Auth, Ember React client); deploys to Workers static assets, see [`apps/web/README.md`](apps/web/README.md) |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client (not published yet) |
-| `ember/` | Ember as a git submodule, until Ember 0.2.0 is on npm |
 | `docs/operations.md` | Operating FreeCorps' production, with the exact teardown list (pt-BR) |
 
 ### Getting started
 
 ```sh
-git clone --recurse-submodules https://github.com/freecorps/mail && cd mail
+git clone https://github.com/freecorps/mail && cd mail
 bun install
 bun run check          # typecheck + lint/format (web) + tests (API on workerd, SDK, mobile app, web) + web build
 ```

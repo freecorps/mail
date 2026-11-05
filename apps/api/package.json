@@ -10,22 +10,22 @@
     "test": "tsc -p tsconfig.json --noEmit && vitest run",
     "dev": "ember dev",
     "deploy": "ember deploy --wait",
-    "ops": "bun --conditions=@freecorps/ember-source scripts/prod.ts",
-    "domains": "bun --conditions=@freecorps/ember-source scripts/domains.ts"
+    "ops": "bun scripts/prod.ts",
+    "domains": "bun scripts/domains.ts"
   },
   "dependencies": {
-    "@freecorps/ember-auth": "workspace:*",
-    "@freecorps/ember-email": "workspace:*",
-    "@freecorps/ember-push": "workspace:*",
-    "@freecorps/ember-rate-limit": "workspace:*",
-    "@freecorps/ember-runtime": "workspace:*",
-    "@freecorps/ember-server": "workspace:*",
-    "@freecorps/ember-values": "workspace:*"
+    "@freecorps/ember-auth": "^0.2.0",
+    "@freecorps/ember-email": "^0.2.0",
+    "@freecorps/ember-push": "^0.2.0",
+    "@freecorps/ember-rate-limit": "^0.2.0",
+    "@freecorps/ember-runtime": "^0.2.0",
+    "@freecorps/ember-server": "^0.2.0",
+    "@freecorps/ember-values": "^0.2.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.5.1",
     "@cloudflare/workers-types": "^5.20261104.1",
-    "@freecorps/ember-cli": "workspace:*",
+    "@freecorps/ember-cli": "^0.2.0",
     "wrangler": "^4.157.0",
     "@freecorps/mail-sdk": "workspace:*"
   }

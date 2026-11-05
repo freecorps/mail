@@ -5,9 +5,7 @@
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "ember/packages/*",
-    "ember/apps/dashboard"
+    "packages/*"
   ],
   "scripts": {
     "typecheck": "tsc -b packages/sdk/tsconfig.json packages/email-html/tsconfig.json && bun run --filter '@freecorps/mail-api' typecheck && bun run --filter '@freecorps/mail-mobile' typecheck && bun run --filter '@freecorps/mail-web' typecheck",
