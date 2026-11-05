@@ -37,9 +37,19 @@ a{color:#0a66d8}
 </style></head><body>${body}</body></html>`;
 }
 
-/** Native user script: reports the content height (and again after images load) to size the WebView. */
+/**
+ * Native user script: fits the message to the width, then reports the content height (and again after images load)
+ * to size the WebView. The WebView doesn't scroll, so a fixed-width newsletter (`<table width="600">`, which CSS
+ * `max-width` cannot shrink: the cell around it grows with it) is zoomed out to the viewport instead of being cut.
+ */
 export const HEIGHT_PROBE = `(function(){
-  function post(){ try { window.ReactNativeWebView.postMessage(String(Math.ceil(document.documentElement.scrollHeight))); } catch (e) {} }
+  function fit(){
+    var b = document.body, d = document.documentElement; if (!b) return;
+    b.style.zoom = '';
+    var vw = d.clientWidth, w = d.scrollWidth;
+    if (vw > 0 && w > vw + 1) b.style.zoom = String(Math.max(0.3, vw / w));
+  }
+  function post(){ try { fit(); window.ReactNativeWebView.postMessage(String(Math.ceil(document.documentElement.scrollHeight))); } catch (e) {} }
   post();
   window.addEventListener('load', post);
   Array.prototype.forEach.call(document.images, function(i){ i.addEventListener('load', post); i.addEventListener('error', post); });
