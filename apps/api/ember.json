@@ -1,0 +1,12 @@
+{
+  "project": "mail",
+  "compatibilityDate": "2026-10-01",
+  "resources": {
+    "files": true
+  },
+  "environments": {
+    "prod": {},
+    "dev": {}
+  },
+  "fingerprint": "a5f38481-bc75-46da-9e08-67b0c6548ef6"
+}

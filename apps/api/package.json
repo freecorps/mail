@@ -1,0 +1,32 @@
+{
+  "name": "@freecorps/mail-api",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "The mail service: Resend-style HTTP API, multi-domain onboarding, templates, inbox for support@/privacy@ with push, on Ember (Cloudflare).",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json --noEmit && vitest run",
+    "dev": "ember dev",
+    "deploy": "ember deploy --wait",
+    "ops": "bun --conditions=@freecorps/ember-source scripts/prod.ts",
+    "domains": "bun --conditions=@freecorps/ember-source scripts/domains.ts"
+  },
+  "dependencies": {
+    "@freecorps/ember-auth": "workspace:*",
+    "@freecorps/ember-email": "workspace:*",
+    "@freecorps/ember-push": "workspace:*",
+    "@freecorps/ember-rate-limit": "workspace:*",
+    "@freecorps/ember-runtime": "workspace:*",
+    "@freecorps/ember-server": "workspace:*",
+    "@freecorps/ember-values": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.5.1",
+    "@cloudflare/workers-types": "^5.20261104.1",
+    "@freecorps/ember-cli": "workspace:*",
+    "wrangler": "^4.157.0",
+    "@freecorps/mail-sdk": "workspace:*"
+  }
+}

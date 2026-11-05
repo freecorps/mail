@@ -1,0 +1,81 @@
+# Ember Mail (mobile)
+
+An Expo app (SDK 58, iOS first, Android ready) for the self-hosted mail service in [`apps/api`](../api).
+Team members use it to read and answer `support@`/`privacy@` mail and to get a push for each new message.
+The UI is in Portuguese (pt-BR) by default, with English as the alternative, and follows dark mode.
+
+## Features
+
+| | How |
+|---|---|
+| Sign-in | Better Auth of the mail service (`apps/api/ember/auth.config.ts`). The session lives in SecureStore and short JWTs go to Ember (`createEmberAuthClient`). A signed-in user without mailboxes sees their user id to hand to an admin (`POST /inbox/members`). |
+| Mailboxes | `inbox:mailboxes`: the member's mailboxes, with unread and thread counts from the email component's aggregate. |
+| Threads | `inbox:threads`, with filters (all / open / waiting / archived) and pages that grow as you scroll. |
+| Search | `inbox:search`. It runs on the server when online and on the device (expo-sqlite FTS5, accents folded) when offline. |
+| Thread view | Text messages render natively. HTML mail renders in a locked-down WebView: CSP with no scripts, frames, forms or network, plus a sanitizer, and links open outside the app. Remote images are blocked until you tap **Carregar imagens**. Inline `cid:` images come from the attachments. |
+| Reply, note, compose | `inbox:reply` / `inbox:note` / `inbox:compose`. These are optimistic and queued in SQLite while offline; the queue survives restarts and is sent once when you are back online. |
+| Attachments | `inbox:attachments` returns signed `files` URLs. A tap downloads the file to the cache and opens Quick Look (iOS) or a viewer (Android), with the share sheet as a fallback. |
+| Read / unread, archive, assign | `inbox:markRead` (automatic when a thread is opened), `inbox:markUnread`, `inbox:setStatus` (archive = `closed`), `inbox:assign` (to members who can see the mailbox). All are optimistic. |
+| Push | `inbox:registerDevice` after sign-in, then `support:onInbound` pushes each new inbound message to the mailbox's members. A tap opens the thread (`embermail://thread/<id>`), including from a cold start. |
+
+## Offline
+
+`src/offline/replica.ts`. The server's `inbox:*` queries call the email component, and component calls cannot run
+on a replica. So the app registers local twins under the same names that read the replicated component tables
+(`email$threads`, `email$messages`). The local schema is the component's own schema, installed as `email` with
+`composeApp` (`@freecorps/ember-email/schema` has no runtime code).
+`inbox:recent` (the latest 50 threads per mailbox with their messages) stays subscribed, so recent mail is on the
+device and searchable. Sign-out wipes the replica.
+
+## Run it locally
+
+```sh
+# terminal 1: the mail service on Miniflare (Better Auth, local R2, the email() handler)
+cd apps/api && EMBER_ADMIN_TOKEN=dev-admin bunx ember dev
+
+# terminal 2: mailboxes, a member (bia@acme.test / ember-mail-dev-123), and inbound mail through the local email trigger
+cd apps/mobile && bun run seed:dev
+
+# terminal 3: Metro; open in Expo Go (iOS Simulator: press i) or a development build
+cd apps/mobile && EMBER_URL=http://127.0.0.1:8787 bunx expo start
+```
+
+The app runs in Expo Go, because every native module it uses ships with Expo Go. Push needs a development
+build on a device.
+
+## Push: the transport seam
+
+`src/push/transport.ts` is the only place that knows how a device is reached.
+
+- `expo` (now): an Expo push token, sent through `@freecorps/ember-push` (Expo Push Service).
+- `direct` (after `feat/push-direct` merges): the native APNs/FCM token, its APNs environment and the device's
+  public key. The server seals the payload (HPKE) and the iOS Notification Service Extension or Android task opens
+  it. Turn it on with `EMBER_PUSH_DIRECT=1`.
+
+What to change when `feat/push-direct` lands:
+
+1. `src/push/transport.ts` → `directPushTransport.register()`: `ensurePushKey()` and
+   `registerForPush({ kind: "device", publicKey, androidChannels })`. On Android, also call `registerEmberPushTask()`,
+   as the comment there describes. Add `@freecorps/ember-expo-push` to `package.json`.
+2. `apps/api/ember/inbox.ts` → `registerDevice`: accept `environment` and `publicKey` and pass them to
+   `push.register` (`registrationArgs(..., { direct: true })` already sends them).
+3. `apps/api/ember/support.ts` → `onInbound`: send through the direct path (`sendToDevices` / the push component's
+   direct send) so native devices get sealed payloads. Expo tokens keep working.
+4. `app.config.ts` already adds the `@freecorps/ember-expo-push` plugin and `extra.pushTransport: "direct"` when
+   `EMBER_PUSH_DIRECT=1`.
+
+## Builds (EAS)
+
+`eas.json` has three profiles: `development` (dev client, simulator), `preview` (internal distribution) and
+`production` (auto-increment, TestFlight via `eas submit`).
+The bundle ids are placeholders: set `EMBER_MAIL_IOS_BUNDLE_ID` and `EMBER_MAIL_ANDROID_PACKAGE`, run `eas init`
+for `EAS_PROJECT_ID`, then `ASC_APP_ID=… APPLE_TEAM_ID=… bun run eas:submit-ids` before
+`eas build -p ios --profile production --auto-submit`. The App Store Connect API key comes from `ASC_API_KEY_*` in
+CI. No credentials are in the repository.
+
+## Tests
+
+`bun run test` runs view models and pure helpers in happy-dom with `@testing-library/react`, against the real mail
+service on the server engine (node:sqlite). `test/offline.test.tsx` covers the offline scenario: cold start from
+expo-sqlite, local list, thread and FTS5 search, a reply queued offline that survives a restart, and convergence
+once back online. `bun run typecheck` checks the app, the screens and the tests.

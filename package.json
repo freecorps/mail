@@ -1,0 +1,26 @@
+{
+  "name": "freecorps-mail",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "ember/packages/*",
+    "ember/apps/dashboard"
+  ],
+  "scripts": {
+    "typecheck": "tsc -b packages/sdk/tsconfig.json && bun run --filter '@freecorps/mail-api' typecheck && bun run --filter '@freecorps/mail-mobile' typecheck",
+    "test": "bun run --filter '@freecorps/mail-*' test",
+    "check": "bun run typecheck && bun run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12",
+    "@types/node": "^24.0.0",
+    "esbuild": "0.28.2"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,202 @@
+// The inbox for the dashboard and the mobile client (apps/mobile): reactive queries over the email component's
+// mailboxes, threads and search, for signed-in members only (identity from the app's auth provider: Ember auth
+// via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see all. Push devices register here.
+import { anyComponents as components, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
+import { PushNotifications } from "@freecorps/ember-push";
+
+const push = new PushNotifications(components.push);
+const email = components.email.lib;
+
+type Ctx = { auth: { getUserIdentity(): { subject: string; name?: string; email?: string } | null }; db: any; runQuery: any; storage?: any };
+type Member = { userId: string; mailboxes: string[]; admin?: boolean; name?: string };
+
+const displayName = (m: Member) => m.name ?? m.userId;
+
+function member(ctx: Ctx) {
+  const who = ctx.auth.getUserIdentity();
+  if (!who) throw new Error("unauthenticated");
+  const m = ctx.db.query("members").withIndex("by_user", (q: any) => q.eq("userId", who.subject)).first();
+  if (!m) throw new Error("not a member of any mailbox");
+  return m as Member;
+}
+
+function memberMailboxes(ctx: Ctx, m: Member): string[] {
+  const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name);
+  return m.admin ? all : all.filter((n) => m.mailboxes.includes(n));
+}
+
+function allowed(ctx: Ctx, mailbox: string) {
+  const m = member(ctx);
+  if (!m.admin && !m.mailboxes.includes(mailbox)) throw new Error(`no access to mailbox ${mailbox}`);
+  return m;
+}
+
+function threadOf(ctx: Ctx, threadId: string) {
+  const t = ctx.runQuery(email.thread, { threadId });
+  if (!t) throw new Error("thread not found");
+  const m = allowed(ctx, t.thread.mailbox);
+  return { t, m };
+}
+
+/** Mailboxes this member can see, with unread counts (aggregate). */
+export const mailboxes = query({
+  args: {},
+  handler: (ctx) => {
+    const m = member(ctx);
+    const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string; address: string; displayName?: string }>).filter((b) => m.admin || m.mailboxes.includes(b.name));
+    const unread = ctx.runQuery(email.unread, { mailboxes: all.map((b) => b.name) }) as Record<string, { unread: number; threads: number }>;
+    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, ...unread[b.name]! }));
+  },
+});
+
+export const threads = query({
+  args: { mailbox: v.string(), status: v.optional(v.string()), paginationOpts: v.optional(v.object({ numItems: v.number(), cursor: v.union(v.string(), v.null()) })) },
+  handler: (ctx, a) => {
+    allowed(ctx, a.mailbox);
+    return ctx.runQuery(email.threads, a);
+  },
+});
+
+export const thread = query({ args: { threadId: v.string() }, handler: (ctx, a) => threadOf(ctx, a.threadId).t });
+
+export const search = query({
+  args: { query: v.string(), mailbox: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    if (a.mailbox) allowed(ctx, a.mailbox);
+    const rows = ctx.runQuery(email.search, { query: a.query, ...(a.mailbox ? { mailbox: a.mailbox } : {}), limit: 50 }) as Array<{ mailbox: string }>;
+    return rows.filter((r) => m.admin || m.mailboxes.includes(r.mailbox));
+  },
+});
+
+export const reply = mutation({
+  args: { threadId: v.string(), text: v.string() },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.reply, { threadId: a.threadId, text: a.text, author: displayName(m) });
+  },
+});
+
+export const note = mutation({
+  args: { threadId: v.string(), text: v.string() },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.note, { threadId: a.threadId, text: a.text, author: displayName(m) });
+  },
+});
+
+export const markRead = mutation({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.markRead, a);
+  },
+});
+
+export const setStatus = mutation({
+  args: { threadId: v.string(), status: v.union(v.literal("open"), v.literal("waiting"), v.literal("closed"), v.literal("spam")) },
+  handler: (ctx, a) => {
+    threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.setStatus, a);
+  },
+});
+
+export const markUnread = mutation({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.markUnread, a);
+  },
+});
+
+/** Assigns a thread to a member who can see its mailbox (`userId: null` clears it). */
+export const assign = mutation({
+  args: { threadId: v.string(), userId: v.union(v.string(), v.null()) },
+  handler: (ctx, a) => {
+    const { t } = threadOf(ctx, a.threadId);
+    if (a.userId === null) return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: null });
+    const target = ctx.db.query("members").withIndex("by_user", (q) => q.eq("userId", a.userId!)).first() as Member | null;
+    if (!target || (!target.admin && !target.mailboxes.includes(t.thread.mailbox))) throw new Error(`${a.userId} cannot see mailbox ${t.thread.mailbox}`);
+    return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: target.userId, assigneeName: displayName(target) });
+  },
+});
+
+/** A new conversation from a mailbox (answers join it through the thread token). */
+export const compose = mutation({
+  args: { mailbox: v.string(), to: v.array(v.string()), cc: v.optional(v.array(v.string())), subject: v.string(), text: v.string() },
+  handler: (ctx, a) => {
+    const m = allowed(ctx, a.mailbox);
+    return ctx.runMutation(email.compose, { ...a, author: displayName(m) });
+  },
+});
+
+/** Who the signed-in user is for the inbox: null when signed out or not a member (the app shows "ask an admin"). */
+export const me = query({
+  args: {},
+  handler: (ctx) => {
+    const who = ctx.auth.getUserIdentity();
+    if (!who) return null;
+    const m = ctx.db.query("members").withIndex("by_user", (q) => q.eq("userId", who.subject)).first() as Member | null;
+    if (!m) return { userId: who.subject, member: false as const, name: null, admin: false, mailboxes: [] as string[] };
+    return { userId: m.userId, member: true as const, name: m.name ?? null, admin: !!m.admin, mailboxes: memberMailboxes(ctx, m) };
+  },
+});
+
+/** Members who can see a mailbox (assignment picker). */
+export const members = query({
+  args: { mailbox: v.string() },
+  handler: (ctx, a) => {
+    allowed(ctx, a.mailbox);
+    return (ctx.db.query("members").collect() as Member[])
+      .filter((m) => m.admin || m.mailboxes.includes(a.mailbox))
+      .map((m) => ({ userId: m.userId, name: displayName(m) }));
+  },
+});
+
+/**
+ * Download URLs of a thread's attachments, by file id (signed, stable within a 5-minute window). Separate from
+ * `thread` so that query keeps returning complete documents (offline replicas store them as they are).
+ */
+export const attachments = query({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    const { t } = threadOf(ctx, a.threadId);
+    const out: Record<string, string | null> = {};
+    for (const msg of t.messages as Array<{ attachments: Array<{ file: string; filename: string }> }>) {
+      for (const f of msg.attachments) out[f.file] = ctx.storage.getUrl(f.file, { download: f.filename });
+    }
+    return out;
+  },
+});
+
+/**
+ * The member's latest threads with all their messages (complete documents). The mobile app keeps this subscribed
+ * (`sync`), so its offline replica — and its local FTS5 search — covers recent mail of every mailbox it can see.
+ */
+export const recent = query({
+  args: { threads: v.optional(v.number()) },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    return ctx.runQuery(email.recent, { mailboxes: memberMailboxes(ctx, m), threads: a.threads ?? 50 });
+  },
+});
+
+/**
+ * The mobile app registers its push token after sign-in. `provider` is "expo" (Expo push token, the current
+ * transport) or a direct provider ("apns" / "fcm") once direct push is enabled; the push component keeps it per device.
+ */
+export const registerDevice = mutation({
+  args: { token: v.string(), provider: v.optional(v.string()), platform: v.optional(v.string()), deviceName: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    return push.register(ctx, {
+      userId: m.userId,
+      token: a.token,
+      ...(a.provider ? { provider: a.provider } : {}),
+      ...(a.platform ? { platform: a.platform } : {}),
+      ...(a.deviceName ? { deviceName: a.deviceName } : {}),
+    });
+  },
+});
+
+export const unregisterDevice = mutation({ args: { token: v.string() }, handler: (ctx, a) => (member(ctx), push.unregister(ctx, a.token)) });
