@@ -109,6 +109,9 @@ const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: Threa
   const { t } = useI18n();
   const label = t("threads.a11y", { from: row.title, subject: row.subject, when, unread: row.unread ? t("threads.a11yUnread") : "" });
   const href = `/thread/${encodeURIComponent(row.threadId)}?mailbox=${encodeURIComponent(row.mailbox)}`;
+  // A flat style object, not a ({ pressed }) => style function: on iOS the row is a `Link asChild`, whose Slot drops a
+  // function style (the row lost flexDirection/padding) and rejects arrays. The pressed highlight comes from state.
+  const [pressed, setPressed] = useState(false);
   return (
     <RowMenu href={href} title={row.subject} actions={actions} disabled={row.pending}>
       <Pressable
@@ -119,7 +122,9 @@ const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: Threa
         accessibilityActions={actions.map((a) => ({ name: a.label, label: a.label }))}
         onAccessibilityAction={(e) => actions.find((a) => a.label === e.nativeEvent.actionName)?.onPress()}
         android_ripple={{ color: p.chip }}
-        style={({ pressed }) => [styles.row, { backgroundColor: pressed && process.env.EXPO_OS === "ios" ? p.chip : p.background }]}
+        onPressIn={() => setPressed(true)}
+        onPressOut={() => setPressed(false)}
+        style={StyleSheet.flatten([styles.row, { backgroundColor: pressed && process.env.EXPO_OS === "ios" ? p.chip : p.background }])}
       >
         <View style={styles.lead}>
           <UnreadDot visible={row.unread} />
