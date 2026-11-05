@@ -7,7 +7,6 @@ import { defineConfig, lazyPlugins } from "vite-plus";
 // The mail service (apps/api) the dev server proxies to: `ember dev` prints its URL. Same-origin in the browser,
 // so Better Auth's session cookie and the Ember WebSocket need no CORS (production does the same in worker/).
 const API = (process.env.MAIL_API_URL ?? "http://127.0.0.1:8787").replace(/\/+$/, "");
-const SOURCE = "@freecorps/ember-source";
 
 // Better Auth rejects state-changing calls whose Origin is not its own: the proxy is that origin's front door.
 const proxyTo = (ws = false) => ({
@@ -22,8 +21,6 @@ const proxyTo = (ws = false) => ({
 export default defineConfig({
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
-    // @freecorps/ember-* are workspace packages: use their TypeScript sources (no build step).
-    conditions: [SOURCE, "module", "browser", "development|production"],
     dedupe: ["react", "react-dom"],
   },
   server: {

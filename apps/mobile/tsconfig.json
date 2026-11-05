@@ -6,7 +6,6 @@
     "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "noUncheckedIndexedAccess": true,
-    "customConditions": ["@freecorps/ember-source"],
     "types": ["node"]
   },
   "include": ["app.config.ts", "src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "scripts/**/*.ts"],

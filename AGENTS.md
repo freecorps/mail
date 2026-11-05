@@ -12,7 +12,6 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 | `apps/web` | Web inbox: Vite+ (`vp`), React, shadcn/ui, Better Auth client, `@freecorps/ember-react`. Same-origin proxy (dev: Vite; prod: `worker/index.ts` on Workers static assets). See `apps/web/README.md` | builds/tests; not deployed |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client, Resend-style `{ data, error }` | private, unpublished |
 | `packages/email-html` | `@freecorps/mail-email-html`: safe rendering of inbound HTML mail (sanitizer with a URL allowlist, CSP, `cid:`), shared by the web iframe and the mobile WebView; hostile samples in `test/samples.ts` | private, source-only |
-| `ember/` | git submodule of freecorps/ember, pinned (see "Ember dependency") | |
 | `.agents/skills`, `.claude/skills` | installed agent skills (see below) | |
 
 ## Stack decisions
@@ -35,8 +34,9 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
     from `apps/web/@/components/ui` if the CLI misplaces them and fix `cn` imports to `@/lib/utils`).
   - The app must stay same-origin with the API (session cookie, `/ws`): never point it at the API cross-origin.
   - Email HTML: only through `EmailFrame` (sandbox without `allow-scripts` + CSP + sanitizer in `src/lib/emailHtml.ts`).
-- **Toolchain:** Bun (workspaces, scripts), TypeScript strict, Vitest. Ember sources resolve through the export
-  condition `@freecorps/ember-source` (`bun --conditions=@freecorps/ember-source ...` for scripts).
+- **Toolchain:** Bun (workspaces, scripts), TypeScript strict, Vitest. `@freecorps/mail-sdk` maps its TS sources
+  through the export condition `@freecorps/ember-source` (set in `tsconfig.base.json` and the api's vitest config),
+  so the api tests use it without a build.
 
 ## Skills to use
 
@@ -52,15 +52,10 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 
 ## Ember dependency
 
-- `ember/` is a submodule, and the root workspace includes `ember/packages/*`, so `@freecorps/ember-*` resolve to
-  that checkout (`workspace:*`).
-- **TODO:** when Ember 0.2.0 is on npm (it adds `@freecorps/ember-email/cloudflare`, `/schema` and the inbox
-  additions), do the following:
-  1. Replace `workspace:*` with `^0.2.0` for every `@freecorps/ember-*`.
-  2. Drop `ember/` from the workspaces.
-  3. Remove the submodule.
-  4. Drop `ember/packages` from `workspaceDirs` in `apps/mobile/metro.config.js`.
-- To move the pin: `git -C ember fetch && git -C ember checkout <sha> && git add ember`.
+- `@freecorps/ember-*` come from npm (`^0.2.0`, dist via `exports`), declared in each app that uses them.
+- The Ember CLI is `@freecorps/ember-cli` (bin `ember`, devDependency of `apps/api`): `bun run dev` / `bun run deploy`
+  there call it.
+- Changes to Ember go to the Ember repo first (freecorps/ember), then a release, then a bump here.
 
 ## Rules
 

@@ -1,13 +1,7 @@
-// Tests resolve the @freecorps/ember-* workspace packages to their TypeScript sources through the
-// "@freecorps/ember-source" export condition (see each package.json "exports"), so no build is needed to test.
-// The workerd configs only add the condition: @cloudflare/vitest-plugin appends its own (workerd, worker, ...).
+// @freecorps/ember-* come from npm (their "exports" point to dist/). Only this repo's own @freecorps/mail-sdk keeps a
+// source export condition, so the api tests (which import it) run without building it first.
+// The workerd config only adds the condition: @cloudflare/vitest-plugin appends its own (workerd, worker, ...).
 export const SOURCE_CONDITION = "@freecorps/ember-source";
-
-/** Vite resolve options for Node / happy-dom test environments. */
-export const sourceResolve = {
-  resolve: { conditions: [SOURCE_CONDITION, "module", "browser", "development|production"] },
-  ssr: { resolve: { conditions: [SOURCE_CONDITION, "module", "node", "development|production"] } },
-};
 
 /** For configs using @cloudflare/vitest-plugin. */
 export const workerdSourceResolve = {

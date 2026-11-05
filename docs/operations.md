@@ -27,7 +27,7 @@ Medido em 2026-11-05, com envios entre `support@` e `privacy@`:
 
 ## Pré-requisitos
 
-- Bun ≥ 1.4, `git submodule update --init` (Ember em `ember/`), `bun install`.
+- Bun ≥ 1.4, `bun install` (o Ember vem do npm, `@freecorps/ember-*`).
 - Login da Cloudflare: `npx wrangler login` (OAuth) ou `CLOUDFLARE_API_TOKEN` no ambiente. Os scripts buscam o token
   como a CLI do Ember faz e o mantêm só em memória. Nada é enviado ao Worker.
 - macOS com o item do Keychain acima, para operações que usam o token admin.
