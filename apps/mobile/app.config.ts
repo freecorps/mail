@@ -8,7 +8,9 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
  * - EMBER_PUSH_DIRECT=1: direct APNs/FCM with end-to-end encrypted payloads — only after feat/push-direct merges
  *   (adds the @freecorps/ember-expo-push config plugin; see src/push/transport.ts).
  */
-const EMBER_URL = process.env.EMBER_URL ?? "http://localhost:8787";
+// 127.0.0.1, not localhost: `ember dev` pins Better Auth's base URL (EMBER_AUTH_URL) to http://127.0.0.1:<port>, and
+// Better Auth rejects sign-in from any other Origin ("Invalid origin"). On an Android emulator, `adb reverse` the port.
+const EMBER_URL = process.env.EMBER_URL ?? "http://127.0.0.1:8787";
 const BUNDLE_ID = process.env.EMBER_MAIL_IOS_BUNDLE_ID ?? "com.example.embermail";
 const ANDROID_PACKAGE = process.env.EMBER_MAIL_ANDROID_PACKAGE ?? "com.example.embermail";
 const PUSH_DIRECT = process.env.EMBER_PUSH_DIRECT === "1";

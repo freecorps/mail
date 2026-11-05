@@ -50,6 +50,12 @@ cd apps/mobile && EMBER_URL=http://127.0.0.1:8787 bunx expo start
 The app runs in Expo Go, because every native module it uses ships with Expo Go. Push needs a development
 build on a device.
 
+- Use `127.0.0.1`, not `localhost`: `ember dev` pins Better Auth's base URL to `http://127.0.0.1:<port>`, and sign-in
+  from any other origin fails with "Invalid origin".
+- Android emulator: `adb reverse tcp:8787 tcp:8787` and `adb reverse tcp:8081 tcp:8081`, then the same URL works.
+- A development build reads the URL baked in at build time (`EMBER_URL` when you run `expo run:*` / Gradle /
+  `xcodebuild`) when the dev client opens the bundle without Metro's manifest. Build with the port you will use.
+
 ## Push: the transport seam
 
 `src/push/transport.ts` is the only place that knows how a device is reached.
