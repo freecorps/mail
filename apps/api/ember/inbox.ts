@@ -94,7 +94,7 @@ export const generateUploadUrl = mutation({
   args: { contentType: v.optional(v.string()), size: v.number(), sha256: v.optional(v.string()), multipart: v.optional(v.boolean()) },
   handler: (ctx, a) => {
     const m = member(ctx);
-    if (!Number.isSafeInteger(a.size) || a.size < 0) throw new Error("size must be a non-negative integer");
+    if (!Number.isSafeInteger(a.size) || a.size <= 0) throw new Error("size must be a positive integer (an empty file is not an attachment)");
     if (a.size > MAX_UPLOAD) throw new Error(`file too large: at most ${mib(MAX_UPLOAD)}`);
     const ticket = ctx.storage.generateUploadUrl(a);
     ctx.db.insert("uploads", { file: ticket.storageId, userId: m.userId, at: ctx.now });
