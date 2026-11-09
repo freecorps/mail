@@ -1,0 +1,76 @@
+// Files attached to a draft while they upload: name, size and progress; tap a row to remove it. The thread's reply
+// bar shows them as a strip of rows above the input (RN views); the compose form lists them in its native form.
+import { Button, FieldGroup, ListItem, Text as UIText } from "@expo/ui";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { useI18n } from "../i18n";
+import { fileSize } from "../lib/format";
+import type { Upload } from "../lib/uploads";
+import { usePalette } from "../theme";
+import { Icons, Symbol } from "./icons";
+import { NativeIcon } from "./ui";
+
+function useStatus() {
+  const { t, locale } = useI18n();
+  return (u: Upload) =>
+    u.status === "uploading"
+      ? `${fileSize(u.size, locale)} · ${t("attach.uploading", { percent: u.size ? Math.min(99, Math.floor((u.loaded / u.size) * 100)) : 0 })}`
+      : u.status === "failed"
+        ? t("attach.failed", { error: u.error ?? "" })
+        : `${fileSize(u.size, locale)} · ${t("attach.ready")}`;
+}
+
+/** Rows above the reply input. */
+export function UploadStrip({ items, onRemove }: { items: Upload[]; onRemove(id: string): void }) {
+  const p = usePalette();
+  const { t } = useI18n();
+  const status = useStatus();
+  if (!items.length) return null;
+  return (
+    <View style={styles.strip}>
+      {items.map((u) => (
+        <Pressable key={u.id} onPress={() => onRemove(u.id)} accessibilityRole="button" accessibilityLabel={t("attach.remove", { name: u.name })} style={[styles.row, { backgroundColor: p.grouped, borderColor: p.separator }]}>
+          <Symbol icon={u.status === "failed" ? Icons.error : Icons.attach} size={16} color={u.status === "failed" ? p.danger : p.secondary} />
+          <View style={{ flex: 1 }}>
+            <Text numberOfLines={1} style={{ color: p.text, fontSize: 14 }}>
+              {u.name}
+            </Text>
+            <Text numberOfLines={1} style={{ color: u.status === "failed" ? p.danger : p.secondary, fontSize: 12 }}>
+              {status(u)}
+            </Text>
+          </View>
+          <Symbol icon={Icons.close} size={14} color={p.secondary} />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/** A section of the compose form: the add button, one row per file (tap Remove to drop it). */
+export function UploadSection({ items, onAdd, onRemove }: { items: Upload[]; onAdd(): void; onRemove(id: string): void }) {
+  const p = usePalette();
+  const { t } = useI18n();
+  const status = useStatus();
+  return (
+    <FieldGroup.Section title={t("attach.title")}>
+      {items.map((u) => (
+        <ListItem key={u.id} leading={<NativeIcon icon={u.status === "failed" ? Icons.error : Icons.attach} color={u.status === "failed" ? p.danger : p.tint} />} supportingText={status(u)}>
+          <UIText>{u.name}</UIText>
+        </ListItem>
+      ))}
+      {items.map((u) => (
+        <Button key={`rm-${u.id}`} variant="text" onPress={() => onRemove(u.id)}>
+          {t("attach.remove", { name: u.name })}
+        </Button>
+      ))}
+      <Button variant="text" onPress={onAdd}>
+        {t("attach.add")}
+      </Button>
+      {items.length ? <UIText textStyle={{ color: p.secondary, fontSize: 13 }}>{t("attach.limitNote")}</UIText> : null}
+    </FieldGroup.Section>
+  );
+}
+
+const styles = StyleSheet.create({
+  strip: { gap: 6, paddingHorizontal: 12, paddingTop: 8 },
+  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth },
+});

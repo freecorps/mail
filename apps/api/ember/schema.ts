@@ -19,6 +19,12 @@ export default defineSchema({
       .index("by_hash", ["hash"])
       .index("by_project", ["project"]),
 
+    /**
+     * Attachment uploads, by who asked for the ticket: a member may attach only files they uploaded, never another
+     * mailbox's (an inbound attachment's file id must not become an outbound attachment or a public link).
+     */
+    uploads: defineTable({ file: v.string(), userId: v.string(), at: v.number() }).index("by_file", ["file"]),
+
     /** Domains onboarded for sending and/or receiving. */
     domains: defineTable({
       name: v.string(),

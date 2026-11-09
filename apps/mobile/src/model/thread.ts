@@ -2,6 +2,7 @@
 // offline; see offline/optimistic.ts).
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useConnectionState, useMutation, useQuerySnapshot } from "@freecorps/ember-react-native";
+import type { AttachmentArg } from "../lib/uploads";
 import { api, type Message, type Thread } from "../api";
 import { isOptimisticId } from "../offline/optimistic";
 import type { LoadStatus, Source } from "./threads";
@@ -62,7 +63,10 @@ export function useThread(threadId: string) {
   }, [thread, threadId, setStatus]);
   const assign = useCallback((userId: string | null) => swallow(assignTo({ threadId, userId })), [threadId, assignTo]);
   /** Resolves when the server confirmed (the optimistic message shows right away, also offline). */
-  const reply = useCallback((text: string) => replyM({ threadId, text: text.trim() }), [threadId, replyM]);
+  const reply = useCallback(
+    (text: string, attachments?: AttachmentArg[]) => replyM({ threadId, text: text.trim(), ...(attachments?.length ? { attachments } : {}) }),
+    [threadId, replyM],
+  );
   const note = useCallback((text: string) => noteM({ threadId, text: text.trim() }), [threadId, noteM]);
 
   return {
