@@ -36,7 +36,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: true,
     infoPlist: {
-      // Only HTTPS/TLS: skips the export-compliance question in App Store Connect.
+      // Standard encryption only: HTTPS/TLS, and on iOS Apple's CryptoKit (HPKE, in the Notification Service Extension)
+      // to open sealed pushes. Same declaration as Freecorps' Brigade app, which does the same; it skips the
+      // export-compliance question in App Store Connect. Revisit if the app adds its own cryptography on iOS.
       ITSAppUsesNonExemptEncryption: false,
       CFBundleAllowMixedLocalizations: true,
       // `ember dev` on the Mac (http://localhost) from the Simulator / a device on the LAN during development.
