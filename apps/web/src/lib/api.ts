@@ -135,9 +135,11 @@ export const api = {
       { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string },
       { threadId: string; emailId: string; messageId: string; status: string; number: number }
     >("inbox:compose"),
-    registerDevice: q<"mutation", { token: string; provider?: string; platform?: string; deviceName?: string }, string>(
-      "inbox:registerDevice",
-    ),
+    registerDevice: q<
+      "mutation",
+      { token: string; provider?: string; platform?: string; deviceName?: string; environment?: string; publicKey?: string },
+      string
+    >("inbox:registerDevice"),
     unregisterDevice: q<"mutation", { token: string }, boolean>("inbox:unregisterDevice"),
   },
 };

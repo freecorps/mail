@@ -112,10 +112,9 @@ describe("format and i18n", () => {
 });
 
 describe("push seam", () => {
-  it("picks the transport from config; the direct one is a placeholder until feat/push-direct", async () => {
+  it("picks the transport from config", async () => {
     expect(pushTransport(undefined).name).toBe("expo");
     expect(pushTransport("direct").name).toBe("direct");
-    expect(await pushTransport("direct").register()).toMatchObject({ status: "unsupported" });
   });
   it("registration args drop direct-only fields unless the server takes them", () => {
     const r = { status: "granted" as const, token: "t", provider: "apns" as const, platform: "ios", environment: "development", publicKey: "pk" };
