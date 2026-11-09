@@ -27,10 +27,6 @@ permissions:
   contents: read
   actions: read
 
-concurrency:
-  group: mobile
-  cancel-in-progress: false
-
 env:
   EAS_CLI: eas-cli@27.1.0
 
@@ -86,6 +82,12 @@ jobs:
     if: needs.changes.outputs.mobile == 'true'
     runs-on: macos-26
     timeout-minutes: 90
+    # One ship at a time, on this job only: a run left with `mobile=false` (an older commit's late CI) never queues
+    # here, so it cannot take the one pending slot from the tip's ship. Only tips reach this job, so the pending one
+    # a newer tip replaces is always older.
+    concurrency:
+      group: mobile-ship
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: apps/mobile
