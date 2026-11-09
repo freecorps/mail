@@ -232,6 +232,13 @@ describe("mail app", () => {
     expect(recent.threads.map((x: any) => x.number)).toEqual([2, 1]);
     expect(recent.messages.every((m: any) => typeof m._id === "string" && typeof m._creationTime === "number" && m.mailbox === "support")).toBe(true);
     expect((await call("mutation", "inbox:registerDevice", { token: "apns-device-token", provider: "apns", platform: "ios" }, "user:agent-1")).ok).toBe(true);
+    // The direct transport also reports the token's APNs environment and the device key the server seals to.
+    const pair = (await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"])) as CryptoKeyPair;
+    const raw = new Uint8Array((await crypto.subtle.exportKey("raw", pair.publicKey)) as ArrayBuffer);
+    const publicKey = btoa(String.fromCharCode(...raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const direct = { token: "apns-direct-token", provider: "apns", platform: "ios", environment: "production", publicKey };
+    const reg = await call("mutation", "inbox:registerDevice", direct, "user:agent-1");
+    expect(reg.error ?? null).toBeNull();
   });
 
   it("operator script: remove deletes the Cloudflare side, then the service's record (From no longer accepted)", async () => {

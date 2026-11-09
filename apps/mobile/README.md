@@ -60,31 +60,26 @@ build on a device.
 
 `src/push/transport.ts` is the only place that knows how a device is reached.
 
-- `expo` (now): an Expo push token, sent through `@freecorps/ember-push` (Expo Push Service).
-- `direct` (after `feat/push-direct` merges): the native APNs/FCM token, its APNs environment and the device's
-  public key. The server seals the payload (HPKE) and the iOS Notification Service Extension or Android task opens
-  it. Turn it on with `EMBER_PUSH_DIRECT=1`.
+- `direct` (default): the native APNs/FCM token, its APNs environment and the device's public key
+  (`@freecorps/ember-expo-push`). The server seals every notification to that key (`encryption: "required"` in
+  `apps/api/ember/ember.config.ts`): Apple and Google see only "Novo email". The iOS Notification Service Extension
+  (added by the config plugin) or the Android task (`index.ts`) opens it on the phone. Sign-out deletes the key.
+- `expo`: an Expo push token through Expo Push, no encryption (and under `required`, only the fallback text). Build
+  with `EMBER_PUSH_DIRECT=0` to use it.
 
-What to change when `feat/push-direct` lands:
-
-1. `src/push/transport.ts` → `directPushTransport.register()`: `ensurePushKey()` and
-   `registerForPush({ kind: "device", publicKey, androidChannels })`. On Android, also call `registerEmberPushTask()`,
-   as the comment there describes. Add `@freecorps/ember-expo-push` to `package.json`.
-2. `apps/api/ember/inbox.ts` → `registerDevice`: accept `environment` and `publicKey` and pass them to
-   `push.register` (`registrationArgs(..., { direct: true })` already sends them).
-3. `apps/api/ember/support.ts` → `onInbound`: send through the direct path (`sendToDevices` / the push component's
-   direct send) so native devices get sealed payloads. Expo tokens keep working.
-4. `app.config.ts` already adds the `@freecorps/ember-expo-push` plugin and `extra.pushTransport: "direct"` when
-   `EMBER_PUSH_DIRECT=1`.
+The server needs `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `FCM_SERVICE_ACCOUNT` (secrets) and `APNS_TOPIC` (the bundle
+id, a plain var), set with `ember env` (`packages/push` README in Ember). Android direct push also needs the Firebase
+app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outside the repo, or an EAS file variable).
 
 ## Builds (EAS)
 
 `eas.json` has three profiles: `development` (dev client, simulator), `preview` (internal distribution) and
-`production` (auto-increment, TestFlight via `eas submit`).
-The bundle ids are placeholders: set `EMBER_MAIL_IOS_BUNDLE_ID` and `EMBER_MAIL_ANDROID_PACKAGE`, run `eas init`
-for `EAS_PROJECT_ID`, then `ASC_APP_ID=… APPLE_TEAM_ID=… bun run eas:submit-ids` before
-`eas build -p ios --profile production --auto-submit`. The App Store Connect API key comes from `ASC_API_KEY_*` in
-CI. No credentials are in the repository.
+`production` (auto-increment, TestFlight via `eas submit`). The ids default to Freecorps' build (`app.freecorps.mail`,
+EAS project `@freecorps/ember-mail`); another account sets `EMBER_MAIL_IOS_BUNDLE_ID`, `EMBER_MAIL_ANDROID_PACKAGE` and
+`EAS_PROJECT_ID`. `preview` and `production` read `EMBER_URL` (and `GOOGLE_SERVICES_JSON`) from the EAS environment of
+the same name, so the service's URL stays out of the repository. Before `eas build -p ios --profile production
+--auto-submit`, run `ASC_APP_ID=… APPLE_TEAM_ID=… bun run eas:submit-ids`; the App Store Connect API key comes from
+`ASC_API_KEY_*`. No credentials are in the repository.
 
 ## Tests
 

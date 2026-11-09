@@ -31,6 +31,10 @@ export const onInbound = internalMutation({
       body: `${e.subject}\n${e.snippet}`.slice(0, 180),
       data: { threadId: e.threadId, mailbox: e.mailbox },
       sound: "default",
+      // Android: the app's "mail" channel; one notification per thread, replaced by its next message. The tag is in
+      // clear at Google, so it is the thread's opaque id, never the subject.
+      channelId: "mail",
+      collapseId: e.threadId,
     });
     return users.length;
   },

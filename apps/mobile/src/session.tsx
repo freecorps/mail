@@ -52,6 +52,7 @@ function Member({ auth, lang, children }: { auth: UseEmberAuthTokenResult; lang:
 
   const signOut = useCallback(async () => {
     if (push.token) await unregister({ token: push.token }).catch(() => {});
+    await transport.forget();
     await clearReplica();
     await auth.signOut().catch(() => {});
   }, [push.token, unregister, auth]);

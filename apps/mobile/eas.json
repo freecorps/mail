@@ -7,7 +7,9 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true },
+      "ios": {
+        "simulator": true
+      },
       "env": {
         "EMBER_URL": "http://127.0.0.1:8787"
       }
@@ -15,23 +17,17 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
-      "env": {
-        "EMBER_URL": "https://ember-mail-dev.YOUR-SUBDOMAIN.workers.dev"
-      }
+      "environment": "preview"
     },
     "production": {
       "autoIncrement": true,
       "channel": "production",
-      "env": {
-        "EMBER_URL": "https://mail.example.com"
-      }
+      "environment": "production"
     }
   },
   "submit": {
     "production": {
       "ios": {
-        "ascAppId": "0000000000",
-        "appleTeamId": "XXXXXXXXXX",
         "ascApiKeyPath": "$ASC_API_KEY_PATH",
         "ascApiKeyIssuerId": "$ASC_API_KEY_ISSUER_ID",
         "ascApiKeyId": "$ASC_API_KEY_ID"

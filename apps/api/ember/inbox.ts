@@ -182,11 +182,19 @@ export const recent = query({
 });
 
 /**
- * The mobile app registers its push token after sign-in. `provider` is "expo" (Expo push token, the current
- * transport) or a direct provider ("apns" / "fcm") once direct push is enabled; the push component keeps it per device.
+ * The mobile app registers its push token after sign-in. `provider` is "expo" (an Expo push token) or "apns" / "fcm"
+ * (the direct transport: the native token, its APNs environment and the device's public key, so the push component
+ * seals each notification to it).
  */
 export const registerDevice = mutation({
-  args: { token: v.string(), provider: v.optional(v.string()), platform: v.optional(v.string()), deviceName: v.optional(v.string()) },
+  args: {
+    token: v.string(),
+    provider: v.optional(v.string()),
+    platform: v.optional(v.string()),
+    deviceName: v.optional(v.string()),
+    environment: v.optional(v.string()),
+    publicKey: v.optional(v.string()),
+  },
   handler: (ctx, a) => {
     const m = member(ctx);
     return push.register(ctx, {
@@ -195,6 +203,8 @@ export const registerDevice = mutation({
       ...(a.provider ? { provider: a.provider } : {}),
       ...(a.platform ? { platform: a.platform } : {}),
       ...(a.deviceName ? { deviceName: a.deviceName } : {}),
+      ...(a.environment ? { environment: a.environment } : {}),
+      ...(a.publicKey ? { publicKey: a.publicKey } : {}),
     });
   },
 });
