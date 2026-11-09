@@ -62,12 +62,17 @@ export const expoPushTransport: PushTransport = {
 export const directPushTransport: PushTransport = {
   name: "direct",
   register: async () => {
-    const key = await ensurePushKey().catch((e: unknown) => (console.warn("[push] no device key", e), null));
-    const r = fromRegisterForPush(
-      await registerForPush({ kind: "device", ...(key ? { publicKey: key.publicKey } : {}), androidChannels: [MAIL_CHANNEL] }),
-    );
-    if (r.status === "granted" && r.platform === "android") await registerEmberPushTask().catch((e: unknown) => console.warn("[push] task", e));
-    return r;
+    try {
+      const key = await ensurePushKey().catch((e: unknown) => (console.warn("[push] no device key", e), null));
+      const r = fromRegisterForPush(
+        await registerForPush({ kind: "device", ...(key ? { publicKey: key.publicKey } : {}), androidChannels: [MAIL_CHANNEL] }),
+      );
+      if (r.status === "granted" && r.platform === "android") await registerEmberPushTask().catch((e: unknown) => console.warn("[push] task", e));
+      return r;
+    } catch (e) {
+      // No native token (no network for the APNs/FCM token, a build without push): not registered, never a crash.
+      return { status: "unsupported", reason: e instanceof Error ? e.message : String(e) };
+    }
   },
   forget: () => deletePushKeys().catch(() => {}),
 };

@@ -13,6 +13,10 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
  */
 // 127.0.0.1, not localhost: `ember dev` pins Better Auth's base URL (EMBER_AUTH_URL) to http://127.0.0.1:<port>, and
 // Better Auth rejects sign-in from any other Origin ("Invalid origin"). On an Android emulator, `adb reverse` the port.
+// An EAS build of a store profile must name its service: never ship a build that talks to 127.0.0.1.
+if (!process.env.EMBER_URL && process.env.EAS_BUILD_PROFILE && process.env.EAS_BUILD_PROFILE !== "development") {
+  throw new Error(`EMBER_URL is not set for the "${process.env.EAS_BUILD_PROFILE}" build (EAS environment variable)`);
+}
 const EMBER_URL = process.env.EMBER_URL ?? "http://127.0.0.1:8787";
 const BUNDLE_ID = process.env.EMBER_MAIL_IOS_BUNDLE_ID ?? "app.freecorps.mail";
 const ANDROID_PACKAGE = process.env.EMBER_MAIL_ANDROID_PACKAGE ?? "app.freecorps.mail";
