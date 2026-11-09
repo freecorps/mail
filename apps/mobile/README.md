@@ -83,6 +83,13 @@ with. Another account runs `ASC_APP_ID=… APPLE_TEAM_ID=… bun run eas:submit-
 bundle id needs the Apple account once (not only an API key) so EAS can create the App Group
 (`group.<bundle id>.ember`). No credentials are in the repository.
 
+Freecorps' builds run on GitHub Actions (`.github/workflows/mobile.yml`), not in EAS's queue: after CI passes on
+`main`, a change the app bundles goes out as an EAS Update when a build with the same native fingerprint was made
+before (the runtime version is the fingerprint, `fingerprint.config.cjs`; the app's version counts), and otherwise as
+a new build with `eas build --local` on the macOS runner, submitted to TestFlight. A build by hand works the same way
+on a Mac with Xcode: `eas build --local --platform ios --profile production --output app.ipa`, then
+`eas submit --platform ios --profile production --path app.ipa`.
+
 ## Tests
 
 `bun run test` runs view models and pure helpers in happy-dom with `@testing-library/react`, against the real mail

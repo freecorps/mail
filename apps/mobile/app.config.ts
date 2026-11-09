@@ -59,9 +59,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     // capability (EAS capability sync with an API key fails on it).
     ...(PUSH_DIRECT ? [["@freecorps/ember-expo-push", { timeSensitive: false }] as [string, unknown]] : []),
   ],
-  // OTA updates of the JS (EAS Update), per build channel; a native change needs a new build (runtime = app version).
+  // OTA updates of the JS (EAS Update), per build channel. The runtime is the native fingerprint
+  // (fingerprint.config.cjs), so an update only reaches builds with the same native code, and a native change (or a
+  // new version) is a new build (.github/workflows/mobile.yml decides which).
   updates: { url: `https://u.expo.dev/${EAS_PROJECT_ID}` },
-  runtimeVersion: { policy: "appVersion" },
+  runtimeVersion: { policy: "fingerprint" },
   extra: {
     emberUrl: EMBER_URL,
     pushTransport: PUSH_DIRECT ? "direct" : "expo",

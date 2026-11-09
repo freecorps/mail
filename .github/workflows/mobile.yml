@@ -1,0 +1,181 @@
+# Ships apps/mobile from main once CI passed, when something it bundles changed since the last successful run. The
+# native fingerprint (the runtime version, apps/mobile/app.config.ts) decides how:
+#
+# - a build with that fingerprint was made here before: the change is JavaScript only, so an EAS Update goes to the
+#   `production` channel, and installed builds pick it up on their next launches;
+# - none was: the native code (or the version) changed, so a new production build is made with `eas build --local`
+#   on this runner (no EAS build queue or credits; the repository is public, so the macOS runner is free). The .ipa is
+#   kept as a run artifact for 14 days, a small `mobile-build-ios-<fingerprint>` artifact (90 days) records that the
+#   fingerprint was built, and the .ipa goes to TestFlight with `eas submit`.
+#
+# The same as Brigade's .github/workflows/mobile.yml, iOS only until the app has its Firebase file for Android.
+#
+# Repository secrets: EXPO_TOKEN (an EAS robot token of the freecorps organisation), and ASC_API_KEY_P8 (the .p8 file's
+# contents), ASC_API_KEY_ID and ASC_API_ISSUER_ID (an App Store Connect API key, App Manager role). EMBER_URL comes
+# from the EAS `production` environment, as for cloud builds.
+name: Mobile
+run-name: Mobile ${{ github.event.workflow_run.head_sha || github.sha }}
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: mobile
+  cancel-in-progress: false
+
+env:
+  EAS_CLI: eas-cli@27.1.0
+
+jobs:
+  changes:
+    name: Changed
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mobile: ${{ steps.changes.outputs.mobile }}
+      sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      # What the app bundles: apps/mobile, the workspace packages and the lockfile. Compared with the commit of the
+      # last successful run; the first run, or a manual one, ships.
+      - id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          last=$(gh run list -R "$GITHUB_REPOSITORY" --workflow mobile.yml --branch main --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+          if [ "$MANUAL" = true ] || [ -z "$last" ] || ! git cat-file -e "$last^{commit}" 2>/dev/null; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$last" "$SHA" -- apps/mobile packages bun.lock package.json | grep -q .; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mobile=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing the app bundles changed since $last" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  ship:
+    name: iOS
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: macos-26
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.changes.outputs.sha }}
+      - name: Required settings
+        run: |
+          [ -n "$EXPO_TOKEN" ] || { echo "::error::The EXPO_TOKEN secret is not set"; exit 1; }
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - name: Fingerprint
+        id: fingerprint
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # --json still prints progress lines before the JSON on stdout: keep from the first `{`.
+          hash=$(bunx "$EAS_CLI" fingerprint:generate --platform ios --environment production --json --non-interactive \
+            | sed -n '/^{/,$p' | jq -r .hash)
+          [ -n "$hash" ] && [ "$hash" != null ] || { echo "::error::No fingerprint"; exit 1; }
+          marker="mobile-build-ios-$hash"
+          built=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker" --jq '[.artifacts[] | select(.expired | not)] | length')
+          {
+            echo "hash=$hash"
+            echo "marker=$marker"
+            echo "built=$([ "$built" -gt 0 ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+          echo "iOS fingerprint $hash: $([ "$built" -gt 0 ] && echo 'built before, publishing an update' || echo 'new, building')" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the update
+        if: steps.fingerprint.outputs.built == 'true'
+        env:
+          SHA: ${{ needs.changes.outputs.sha }}
+        run: |
+          message="$(git log -1 --format=%s "$SHA") (${SHA::12})"
+          bunx "$EAS_CLI" update --channel production --environment production --platform ios \
+            --message "$message" --non-interactive
+
+      - name: Select Xcode
+        if: steps.fingerprint.outputs.built != 'true'
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          # App Store Connect takes no beta Xcode builds.
+          xcode-version: latest-stable
+      # eas-cli starts its local build plugin with `npx`; installed outside the repository at eas-cli's own version
+      # and passed through EAS_LOCAL_BUILD_PLUGIN_PATH, as Brigade's workflow does.
+      - name: EAS local build plugin
+        if: steps.fingerprint.outputs.built != 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir -p eas-build-plugin && cd eas-build-plugin
+          echo '{ "private": true }' > package.json
+          bun add "eas-cli-local-build-plugin@${EAS_CLI#eas-cli@}"
+          echo "EAS_LOCAL_BUILD_PLUGIN_PATH=$PWD/node_modules/.bin/eas-cli-local-build-plugin" >> "$GITHUB_ENV"
+      - name: Build
+        if: steps.fingerprint.outputs.built != 'true'
+        run: bunx "$EAS_CLI" build --local --platform ios --profile production --non-interactive --output "$RUNNER_TEMP/mail-ios-production.ipa"
+      - name: Keep the build
+        if: steps.fingerprint.outputs.built != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mail-ios-production-${{ needs.changes.outputs.sha }}
+          path: ${{ runner.temp }}/mail-ios-production.ipa
+          retention-days: 14
+          if-no-files-found: error
+      # Only after the build succeeded: a failed one leaves the fingerprint unbuilt, so the next run tries again.
+      - name: Record the fingerprint as built
+        if: steps.fingerprint.outputs.built != 'true'
+        working-directory: ${{ runner.temp }}
+        env:
+          HASH: ${{ steps.fingerprint.outputs.hash }}
+          SHA: ${{ needs.changes.outputs.sha }}
+        run: printf '%s\n' "$HASH $SHA" > fingerprint.txt
+      - if: steps.fingerprint.outputs.built != 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.fingerprint.outputs.marker }}
+          path: ${{ runner.temp }}/fingerprint.txt
+          retention-days: 90
+      # Last, after the fingerprint is recorded: a failed submission fails the job, visibly, without making the next
+      # run build the same native code again; the kept .ipa can be submitted by hand (`eas submit --path`).
+      - name: Submit to TestFlight
+        if: steps.fingerprint.outputs.built != 'true'
+        env:
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_KEY_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          if [ -z "$ASC_API_KEY_P8" ] || [ -z "$ASC_API_KEY_ID" ] || [ -z "$ASC_API_KEY_ISSUER_ID" ]; then
+            echo "::notice::Not submitted to TestFlight: the ASC_API_KEY_P8, ASC_API_KEY_ID and ASC_API_ISSUER_ID secrets are not all set"
+            exit 0
+          fi
+          export ASC_API_KEY_PATH="$RUNNER_TEMP/asc-api-key.p8"
+          trap 'rm -f "$ASC_API_KEY_PATH"' EXIT
+          (umask 077 && printf '%s\n' "$ASC_API_KEY_P8" > "$ASC_API_KEY_PATH")
+          unset ASC_API_KEY_P8
+          bunx "$EAS_CLI" submit --platform ios --profile production --path "$RUNNER_TEMP/mail-ios-production.ipa" --non-interactive
+          echo "iOS build submitted to TestFlight" >> "$GITHUB_STEP_SUMMARY"
