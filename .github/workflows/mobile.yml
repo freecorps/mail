@@ -128,7 +128,7 @@ jobs:
         env:
           SHA: ${{ needs.changes.outputs.sha }}
         run: |
-          message="$(git log -1 --format=%s "$SHA") (${SHA::12})"
+          message="$(git log -1 --format=%s "$SHA") (${SHA:0:12})"
           bunx "$EAS_CLI" update --channel production --environment production --platform ios \
             --message "$message" --non-interactive
 
