@@ -5,7 +5,11 @@
     "files": true
   },
   "environments": {
-    "prod": {},
+    "prod": {
+      "vars": {
+        "APNS_TOPIC": "app.freecorps.mail"
+      }
+    },
     "dev": {}
   },
   "fingerprint": "a5f38481-bc75-46da-9e08-67b0c6548ef6"

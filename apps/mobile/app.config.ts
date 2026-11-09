@@ -22,6 +22,7 @@ const BUNDLE_ID = process.env.EMBER_MAIL_IOS_BUNDLE_ID ?? "app.freecorps.mail";
 const ANDROID_PACKAGE = process.env.EMBER_MAIL_ANDROID_PACKAGE ?? "app.freecorps.mail";
 const PUSH_DIRECT = process.env.EMBER_PUSH_DIRECT !== "0";
 const GOOGLE_SERVICES = process.env.GOOGLE_SERVICES_JSON;
+const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID ?? "1ee4e66d-41f1-4a8a-8195-673d8f9dd3e9";
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
@@ -54,11 +55,16 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ["expo-sqlite", { enableFTS: true }],
     "expo-localization",
     "expo-sharing",
-    ...(PUSH_DIRECT ? ["@freecorps/ember-expo-push"] : []),
+    // No Time Sensitive entitlement: mail is sent at normal urgency, and App Store Connect's API cannot enable that
+    // capability (EAS capability sync with an API key fails on it).
+    ...(PUSH_DIRECT ? [["@freecorps/ember-expo-push", { timeSensitive: false }] as [string, unknown]] : []),
   ],
+  // OTA updates of the JS (EAS Update), per build channel; a native change needs a new build (runtime = app version).
+  updates: { url: `https://u.expo.dev/${EAS_PROJECT_ID}` },
+  runtimeVersion: { policy: "appVersion" },
   extra: {
     emberUrl: EMBER_URL,
     pushTransport: PUSH_DIRECT ? "direct" : "expo",
-    eas: { projectId: process.env.EAS_PROJECT_ID ?? "1ee4e66d-41f1-4a8a-8195-673d8f9dd3e9" },
+    eas: { projectId: EAS_PROJECT_ID },
   },
 });

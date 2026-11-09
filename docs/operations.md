@@ -7,8 +7,9 @@ no repositório.
 
 | Recurso | Nome | Criado por |
 |---|---|---|
-| Worker | `ember-mail-prod` (projeto Ember `mail`, env `prod`; Durable Objects `Shard` e `System`; cron `* * * * *`) | `ember deploy` |
-| Segredos do Worker | `EMBER_ADMIN_TOKEN`, `EMBER_STORAGE_SECRET` | `ember deploy` |
+| Worker | `ember-mail-prod` (projeto Ember `mail`, env `prod`; Durable Objects `Shard`, `System` e `Auth`; cron `* * * * *`) | `ember deploy` |
+| Segredos do Worker | `EMBER_ADMIN_TOKEN`, `EMBER_STORAGE_SECRET`, `EMBER_AUTH_SECRET`, `EMBER_AUTH_JWKS` | `ember deploy` |
+| Segredos de push | `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID` (a chave de APNs da equipe FreeCorps, a mesma do relay do Brigade) e `FCM_SERVICE_ACCOUNT` (projeto Firebase `freecorps-brigade`); `APNS_TOPIC` = `app.freecorps.mail` é variável em `ember.json` | `ember env set … --env prod` (valores por stdin) |
 | R2 | bucket `ember-mail-prod` (`.eml` e anexos), com notificação de eventos → fila `ember-mail-prod-files` | `ember deploy` (`resources.files`) |
 | Queues | `ember-mail-prod-email-events` (eventos de entrega do Email Service → componente `email`), `ember-mail-prod-files` (eventos do R2) | `ember deploy` |
 | D1 | `ember-registry` (registro de projetos Ember da conta; o dono do nome `mail` é o `fingerprint` de `apps/api/ember.json`) | primeiro `ember deploy` da conta |
@@ -65,14 +66,14 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
 - Depois de publicar:
   1. Rode `bun run ops inventory depois` e `bun run ops diff antes depois`.
   2. Rode `bun run ops e2e`.
-- **O que o próximo deploy muda em produção:** o código deste repositório traz o que o deploy de 2026-11-05 ainda não
-  tinha.
-  - Better Auth (`ember/auth.config.ts`): Durable Object `Auth` novo, com segredos `EMBER_AUTH_SECRET` e
-    `EMBER_AUTH_JWKS` gerados no primeiro deploy.
-  - A API da inbox móvel: `inbox:me`, `members`, `markUnread`, `assign`, `compose`, `attachments`, `recent`.
-  - Push com provider.
-
-  É uma migração só de adição. Mesmo assim, faça com inventário antes e depois.
+- **Deploy de 2026-11-09** (Ember 0.5.1): Better Auth (Durable Object `Auth` novo, `EMBER_AUTH_SECRET` e
+  `EMBER_AUTH_JWKS` gerados nesse deploy), a API da inbox móvel e push direto criptografado (APNs/FCM,
+  `encryption: "required"`). Inventário antes e depois: só adição (o namespace `Auth`); `ops e2e` passou.
+  - Uma classe de Durable Object nova precisa do `ember-cli` com freecorps/ember#39: sem ele, a Cloudflare recusa
+    a versão (`100406`, binding para classe ainda não provisionada). Esse deploy usou um build local do CLI com essa
+    correção.
+  - O Ember 0.5 converte as tabelas do shard para o armazenamento compacto no primeiro boot. Depois disso não se volta
+    o Worker para um build com Ember < 0.5: corrija para frente, ou restaure o shard junto com o código.
 - Logs: `bunx ember logs --env prod` (em `apps/api`).
 
 ## Domínios
