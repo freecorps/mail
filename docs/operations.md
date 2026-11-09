@@ -75,6 +75,17 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
     do CLI com essa correção.
   - O Ember 0.5 converte as tabelas do shard para o armazenamento compacto no primeiro boot. Depois disso não se volta
     o Worker para um build com Ember < 0.5: corrija para frente, ou restaure o shard junto com o código.
+- **Deploy de 2026-11-09, recusado** (Ember 0.5.3, anexos da #8): o shard recusou a migração no boot
+  (`field attachments changes type`). O `attachmentV.link` novo é opcional e só amplia o tipo, mas o planejador do
+  Ember 0.5.3 tratava isso como troca de tipo. O shard rejeitou requisições por cerca de 2 minutos, até o redeploy do
+  commit anterior (72fd8de). Depois disso o `ops e2e` passou e os segredos do R2 continuaram no Worker. Correção no
+  Ember 0.5.4 (freecorps/ember#45): ampliar um campo (campo opcional novo, união maior) não exige migração de dados.
+  - Até o Ember fazer o preflight da migração contra o shard antes de trocar o tráfego, ensaie localmente um deploy
+    que muda o schema: rode `ember dev` no commit em produção, faça uma requisição ao shard `global:main` e ponha uma
+    linha em cada tabela do SQLite do shard (a recusa só acontece em tabela com dados). Depois copie o
+    `.ember/state` para o commit novo e repita a requisição: `MigrationRefused` é o que o deploy faria. Depois do
+    deploy, rode o `ops e2e` logo em seguida, com o commit anterior pronto para redeploy. O ensaio do Ember 0.5.4
+    recusou com o 0.5.3 e passou com o 0.5.4.
 - Logs: `bunx ember logs --env prod` (em `apps/api`).
 
 ## Domínios

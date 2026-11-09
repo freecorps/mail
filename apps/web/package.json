@@ -18,8 +18,8 @@
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
     "@fontsource-variable/geist-mono": "^5.2.7",
-    "@freecorps/ember-client": "^0.5.3",
-    "@freecorps/ember-react": "^0.5.3",
+    "@freecorps/ember-client": "^0.5.4",
+    "@freecorps/ember-react": "^0.5.4",
     "@freecorps/mail-email-html": "workspace:*",
     "better-auth": "~1.7.17",
     "class-variance-authority": "^0.7.1",
@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261104.1",
-    "@freecorps/ember-server": "^0.5.3",
+    "@freecorps/ember-server": "^0.5.4",
     "@tailwindcss/vite": "^4.1.16",
     "@testing-library/react": "^16.3.3",
     "@types/react": "19.3.0",
