@@ -77,9 +77,11 @@ app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outsi
 `production` (auto-increment, TestFlight via `eas submit`). The ids default to Freecorps' build (`app.freecorps.mail`,
 EAS project `@freecorps/ember-mail`); another account sets `EMBER_MAIL_IOS_BUNDLE_ID`, `EMBER_MAIL_ANDROID_PACKAGE` and
 `EAS_PROJECT_ID`. `preview` and `production` read `EMBER_URL` (and `GOOGLE_SERVICES_JSON`) from the EAS environment of
-the same name, so the service's URL stays out of the repository. Before `eas build -p ios --profile production
---auto-submit`, run `ASC_APP_ID=… APPLE_TEAM_ID=… bun run eas:submit-ids`; the App Store Connect API key comes from
-`ASC_API_KEY_*`. No credentials are in the repository.
+the same name, so the service's URL stays out of the repository. `submit.production.ios.ascAppId` is Freecorps' App
+Store Connect app (created by the first `eas submit`, 2026-11-09); EAS holds the App Store Connect API key it submits
+with. Another account runs `ASC_APP_ID=… APPLE_TEAM_ID=… bun run eas:submit-ids` first. The first iOS build of a new
+bundle id needs the Apple account once (not only an API key) so EAS can create the App Group
+(`group.<bundle id>.ember`). No credentials are in the repository.
 
 ## Tests
 

@@ -69,9 +69,9 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
 - **Deploy de 2026-11-09** (Ember 0.5.1): Better Auth (Durable Object `Auth` novo, `EMBER_AUTH_SECRET` e
   `EMBER_AUTH_JWKS` gerados nesse deploy), a API da inbox móvel e push direto criptografado (APNs/FCM,
   `encryption: "required"`). Inventário antes e depois: só adição (o namespace `Auth`); `ops e2e` passou.
-  - Uma classe de Durable Object nova precisa do `ember-cli` com freecorps/ember#39: sem ele, a Cloudflare recusa
-    a versão (`100406`, binding para classe ainda não provisionada). Esse deploy usou um build local do CLI com essa
-    correção.
+  - Uma classe de Durable Object nova precisa do `ember-cli` 0.5.2 ou mais novo (freecorps/ember#39): antes dele, a
+    Cloudflare recusa a versão (`100406`, binding para classe ainda não provisionada). Esse deploy usou um build local
+    do CLI com essa correção.
   - O Ember 0.5 converte as tabelas do shard para o armazenamento compacto no primeiro boot. Depois disso não se volta
     o Worker para um build com Ember < 0.5: corrija para frente, ou restaure o shard junto com o código.
 - Logs: `bunx ember logs --env prod` (em `apps/api`).

@@ -28,6 +28,7 @@
   "submit": {
     "production": {
       "ios": {
+        "ascAppId": "6832609034",
         "ascApiKeyPath": "$ASC_API_KEY_PATH",
         "ascApiKeyIssuerId": "$ASC_API_KEY_ISSUER_ID",
         "ascApiKeyId": "$ASC_API_KEY_ID"
