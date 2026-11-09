@@ -241,6 +241,50 @@ describe("mail app", () => {
     expect(reg.error ?? null).toBeNull();
   });
 
+  it("attachments: uploaded with a ticket, a small one attached, past the limit a 7-day link (the thread keeps both)", async () => {
+    // What the app's client does: ticket from inbox:generateUploadUrl, PUT the bytes, confirm.
+    const upload = async (bytes: Uint8Array, contentType: string) => {
+      const t = await call("mutation", "inbox:generateUploadUrl", { contentType, size: bytes.length }, "user:agent-1");
+      expect(t.error ?? null).toBeNull();
+      const ticket = t.value;
+      const put = await SELF.fetch(new URL(ticket.url, BASE).toString(), { method: "PUT", headers: ticket.headers ?? {}, body: bytes });
+      expect(put.status).toBeLessThan(300);
+      const ok = await SELF.fetch(`${BASE}/api/storage/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shard: ticket.shard, storageId: ticket.storageId, token: ticket.token }) });
+      expect(ok.status).toBe(200);
+      return ticket.storageId as string;
+    };
+    expect((await call("mutation", "inbox:generateUploadUrl", { size: 10 }, "user:stranger")).error.message).toMatch(/not a member/);
+    expect((await call("mutation", "inbox:generateUploadUrl", { size: 3 * 1024 ** 3 }, "user:agent-1")).error.message).toMatch(/too large/);
+
+    const small = await upload(new TextEncoder().encode("hello attachment"), "text/plain");
+    const big = await upload(new Uint8Array(10 * 1024 * 1024 + 1), "application/octet-stream");
+    const c = await call(
+      "mutation",
+      "inbox:compose",
+      { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Files", text: "See the files.", attachments: [{ file: big, filename: "big.bin", contentType: "application/octet-stream" }, { file: small, filename: "note.txt", contentType: "text/plain" }] },
+      "user:agent-1",
+    );
+    expect(c.error ?? null).toBeNull();
+    const t = (await call("query", "inbox:thread", { threadId: c.value.threadId }, "user:agent-1")).value;
+    const msg = t.messages[0];
+    expect(msg.attachments).toEqual([
+      { filename: "big.bin", contentType: "application/octet-stream", file: big, size: 10 * 1024 * 1024 + 1, link: true },
+      { filename: "note.txt", contentType: "text/plain", file: small, size: 16 },
+    ]);
+    expect(msg.text).toMatch(/^See the files\.\n\n—\nArquivos para baixar \(links válidos até \d{4}-\d{2}-\d{2}\):\nbig\.bin \(10\.0 MB\): \S+/);
+    // The link downloads the file.
+    const url = /big\.bin \(10\.0 MB\): (\S+)/.exec(msg.text)![1]!;
+    const dl = await SELF.fetch(new URL(url, BASE).toString());
+    expect(dl.status).toBe(200);
+    expect((await dl.arrayBuffer()).byteLength).toBe(10 * 1024 * 1024 + 1);
+    // The email goes out with the small file only.
+    const sent = await until(() => call("query", "testing:email", { id: c.value.emailId }), (x) => x.value?.status === "sent");
+    expect(sent.value).toMatchObject({ status: "sent", attachments: [{ filename: "note.txt", file: small }] });
+    // A file still uploading is refused.
+    const pending = (await call("mutation", "inbox:generateUploadUrl", { contentType: "text/plain", size: 4 }, "user:agent-1")).value;
+    expect((await call("mutation", "inbox:reply", { threadId: c.value.threadId, text: "x", attachments: [{ file: pending.storageId, filename: "p.txt", contentType: "text/plain" }] }, "user:agent-1")).error.message).toMatch(/still uploading/);
+  });
+
   it("operator script: remove deletes the Cloudflare side, then the service's record (From no longer accepted)", async () => {
     const imported = await SELF.fetch(`${BASE}/domains/import`, {
       method: "POST",

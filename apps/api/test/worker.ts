@@ -1,6 +1,6 @@
 // Test-only Worker: the mail app on workerd (Miniflare): send_email is simulated, the events queue and R2 are local.
 import { createEmberWorker } from "@freecorps/ember-runtime";
-import { mutationGeneric, v } from "@freecorps/ember-server";
+import { anyComponents, mutationGeneric, queryGeneric, v } from "@freecorps/ember-server";
 import { app, functions, http, schema } from "../src/app.ts";
 
 export { Shard, System } from "@freecorps/ember-runtime";
@@ -16,6 +16,8 @@ export default createEmberWorker({
         handler: (ctx: any, { name }: { name: string }) =>
           ctx.runMutation("domains:save", { name, status: "verified", sending: true, receiving: true, records: [], ruleIds: [], notes: [] }),
       }),
+      // Test-only: an email row of the component (status, attachments), whatever project sent it.
+      email: queryGeneric({ args: { id: v.string() }, handler: (ctx: any, { id }: { id: string }) => ctx.runQuery(anyComponents.email.lib.get, { id }) }),
       member: mutationGeneric({
         args: { userId: v.string() },
         handler: (ctx: any, { userId }: { userId: string }) => ctx.db.query("members").withIndex("by_user", (q: any) => q.eq("userId", userId)).first(),

@@ -6,8 +6,10 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { api } from "../api";
 import { Icons, useMaterialSource } from "../components/icons";
+import { UploadSection } from "../components/Uploads";
 import { useI18n } from "../i18n";
 import { parseRecipients } from "../lib/format";
+import { useUploadOne, useUploads } from "../lib/uploads";
 import { usePalette } from "../theme";
 
 export function ComposeScreen() {
@@ -22,8 +24,10 @@ export function ComposeScreen() {
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const uploads = useUploads(useUploadOne());
   const from = mailbox ?? mailboxes[0]?.name ?? null;
-  const ready = !!from && !!to.trim() && !!body.trim();
+  // Sending waits for every attachment (a failed one must be removed first).
+  const ready = !!from && !!to.trim() && !!body.trim() && !uploads.busy && !uploads.failed;
   // Android header items must be icons (text-only toolbar buttons are not rendered there); iOS keeps the text buttons.
   const android = process.env.EXPO_OS === "android";
   const cancelIcon = useMaterialSource(android ? Icons.close : null, 24, p.tint);
@@ -38,7 +42,8 @@ export function ComposeScreen() {
       return;
     }
     // Optimistic + queued offline: the new conversation shows in the mailbox right away.
-    void compose({ mailbox: from!, to: rt.valid, ...(rc.valid.length ? { cc: rc.valid } : {}), subject: subject.trim(), text: body.trim() }).catch(() => {});
+    const attachments = uploads.attachments;
+    void compose({ mailbox: from!, to: rt.valid, ...(rc.valid.length ? { cc: rc.valid } : {}), subject: subject.trim(), text: body.trim(), ...(attachments.length ? { attachments } : {}) }).catch(() => {});
     router.back();
   };
 
@@ -93,6 +98,7 @@ export function ComposeScreen() {
           <FieldGroup.Section>
             <TextInput placeholder={t("compose.body")} accessibilityLabel={t("compose.body")} onChangeText={setBody} multiline numberOfLines={10} />
           </FieldGroup.Section>
+          <UploadSection items={uploads.items} onAdd={() => void uploads.add().catch(() => {})} onRemove={uploads.remove} />
         </FieldGroup>
       </Host>
     </>

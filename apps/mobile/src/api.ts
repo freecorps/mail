@@ -1,6 +1,7 @@
 // Typed references to the mail service's inbox API (apps/api/ember/inbox.ts). Hand-written so the app type-checks
 // without running codegen against apps/api; the shapes are the email component's documents (packages/email).
 import { makeFunctionReference } from "@freecorps/ember-react-native";
+import type { AttachmentArg } from "./lib/uploads";
 
 export type ThreadStatus = "open" | "waiting" | "closed" | "spam";
 export type Direction = "inbound" | "outbound" | "note";
@@ -124,7 +125,7 @@ export const api = {
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),
     members: q<"query", { mailbox: string }, Member[]>("inbox:members"),
     attachments: q<"query", { threadId: string }, Record<string, string | null>>("inbox:attachments"),
-    reply: q<"mutation", { threadId: string; text: string }, { emailId: string; messageId: string; status: string }>("inbox:reply"),
+    reply: q<"mutation", { threadId: string; text: string; attachments?: AttachmentArg[] }, { emailId: string; messageId: string; status: string }>("inbox:reply"),
     note: q<"mutation", { threadId: string; text: string }, string>("inbox:note"),
     markRead: q<"mutation", { threadId: string }, boolean>("inbox:markRead"),
     markUnread: q<"mutation", { threadId: string }, boolean>("inbox:markUnread"),
@@ -132,7 +133,7 @@ export const api = {
     assign: q<"mutation", { threadId: string; userId: string | null }, string | null>("inbox:assign"),
     compose: q<
       "mutation",
-      { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string },
+      { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] },
       { threadId: string; emailId: string; messageId: string; status: string; number: number }
     >("inbox:compose"),
     registerDevice: q<
@@ -141,6 +142,7 @@ export const api = {
       string
     >("inbox:registerDevice"),
     unregisterDevice: q<"mutation", { token: string }, boolean>("inbox:unregisterDevice"),
+    generateUploadUrl: q<"mutation", { contentType?: string; size: number; sha256?: string; multipart?: boolean }, unknown>("inbox:generateUploadUrl"),
   },
 };
 

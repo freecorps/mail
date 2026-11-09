@@ -6,12 +6,14 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AttachmentList } from "../components/Attachments";
+import { UploadStrip } from "../components/Uploads";
 import { EmailHtmlView } from "../components/EmailHtmlView";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
 import { Avatar, Chip, ConnectionBanner, EmptyState, IconButton, Loading, NativeButton, Segmented, StatusPill } from "../components/ui";
 import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf, displayAddress, formatFull } from "../lib/format";
+import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { useThread, type MessageItem } from "../model/thread";
 import { usePalette } from "../theme";
 
@@ -142,13 +144,14 @@ const MessageCard = memo(function MessageCard({ item, loadImages, urls, online }
   );
 });
 
-function Composer({ onReply, onNote }: { onReply(text: string): Promise<unknown>; onNote(text: string): Promise<unknown> }) {
+function Composer({ onReply, onNote }: { onReply(text: string, attachments?: AttachmentArg[]): Promise<unknown>; onNote(text: string): Promise<unknown> }) {
   const p = usePalette();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const input = useRef<TextInputRef>(null);
   const [mode, setMode] = useState<"reply" | "note">("reply");
   const [text, setText] = useState("");
+  const uploads = useUploads(useUploadOne());
   // The home-indicator inset only matters while the bar sits at the bottom; above the keyboard it is empty space.
   const [keyboard, setKeyboard] = useState(false);
   useEffect(() => {
@@ -163,11 +166,14 @@ function Composer({ onReply, onNote }: { onReply(text: string): Promise<unknown>
   const placeholder = mode === "reply" ? t("thread.replyPlaceholder") : t("thread.notePlaceholder");
   const send = () => {
     const body = text.trim();
-    if (!body) return;
-    // Optimistic: the message shows at once (queued when offline); the input clears right away.
-    void (mode === "reply" ? onReply(body) : onNote(body)).catch(() => {});
+    if (!body || uploads.busy || uploads.failed) return;
+    // Optimistic: the message shows at once (queued when offline); the input clears right away. Attachments go with
+    // replies only (an internal note is never emailed).
+    const files = mode === "reply" ? uploads.attachments : [];
+    void (mode === "reply" ? onReply(body, files.length ? files : undefined) : onNote(body)).catch(() => {});
     input.current?.clear();
     setText("");
+    uploads.clear();
   };
   return (
     <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 8) }]}>
@@ -180,7 +186,9 @@ function Composer({ onReply, onNote }: { onReply(text: string): Promise<unknown>
           { value: "note", label: t("thread.noteMode") },
         ]}
       />
+      {mode === "reply" ? <UploadStrip items={uploads.items} onRemove={uploads.remove} /> : null}
       <View style={styles.inputRow}>
+        {mode === "reply" ? <IconButton icon={Icons.attach} label={t("attach.add")} onPress={() => void uploads.add().catch(() => {})} /> : null}
         <Host matchContents={{ vertical: true }} style={[styles.input, { backgroundColor: mode === "note" ? p.noteBg : p.grouped, borderColor: p.separator }]}>
           <TextInput
             ref={input}
@@ -192,7 +200,7 @@ function Composer({ onReply, onNote }: { onReply(text: string): Promise<unknown>
             style={{ paddingHorizontal: 14, paddingVertical: 10 }}
           />
         </Host>
-        <IconButton icon={mode === "reply" ? Icons.send : Icons.note} label={mode === "reply" ? t("thread.send") : t("thread.addNote")} onPress={send} disabled={!text.trim()} />
+        <IconButton icon={mode === "reply" ? Icons.send : Icons.note} label={mode === "reply" ? t("thread.send") : t("thread.addNote")} onPress={send} disabled={!text.trim() || (mode === "reply" && (uploads.busy || uploads.failed))} />
       </View>
     </View>
   );

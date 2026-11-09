@@ -9,6 +9,7 @@ no repositório.
 |---|---|---|
 | Worker | `ember-mail-prod` (projeto Ember `mail`, env `prod`; Durable Objects `Shard`, `System` e `Auth`; cron `* * * * *`) | `ember deploy` |
 | Segredos do Worker | `EMBER_ADMIN_TOKEN`, `EMBER_STORAGE_SECRET`, `EMBER_AUTH_SECRET`, `EMBER_AUTH_JWKS` | `ember deploy` |
+| Segredos de arquivos | `EMBER_R2_ACCESS_KEY_ID`, `EMBER_R2_SECRET_ACCESS_KEY`: token do R2 com "Object Read & Write" só no bucket `ember-mail-prod`. Com eles, os anexos sobem direto para o R2 por URL pré-assinada (multipart acima de 32 MiB), sem passar pelo Worker | `ops deploy` com as duas variáveis no ambiente, uma vez (o deploy mantém os segredos depois) |
 | Segredos de push | `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID` (a chave de APNs da equipe FreeCorps, a mesma do relay do Brigade) e `FCM_SERVICE_ACCOUNT` (projeto Firebase `freecorps-brigade`); `APNS_TOPIC` = `app.freecorps.mail` é variável em `ember.json` | `ember env set … --env prod` (valores por stdin) |
 | R2 | bucket `ember-mail-prod` (`.eml` e anexos), com notificação de eventos → fila `ember-mail-prod-files` | `ember deploy` (`resources.files`) |
 | Queues | `ember-mail-prod-email-events` (eventos de entrega do Email Service → componente `email`), `ember-mail-prod-files` (eventos do R2) | `ember deploy` |
