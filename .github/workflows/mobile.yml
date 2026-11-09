@@ -93,6 +93,12 @@ jobs:
         working-directory: apps/mobile
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      # The fingerprint covers the app config, so everything it reads from the environment is pinned here: the same
+      # value when this job computes it, when `eas update` stamps an update with it, and inside the build. Without it,
+      # @freecorps/ember-expo-push reads `production` inside the build (EAS_BUILD) and `development` outside, the
+      # runtime versions differ and the build refuses to start; an update saying `development` would also register
+      # phones with the APNs sandbox, where no push reaches an App Store build.
+      EMBER_APS_ENVIRONMENT: production
     steps:
       - uses: actions/checkout@v5
         with:
