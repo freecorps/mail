@@ -166,14 +166,15 @@ function Composer({ onReply, onNote }: { onReply(text: string, attachments?: Att
   const placeholder = mode === "reply" ? t("thread.replyPlaceholder") : t("thread.notePlaceholder");
   const send = () => {
     const body = text.trim();
-    if (!body || uploads.busy || uploads.failed) return;
+    if (!body || (mode === "reply" && (uploads.busy || uploads.failed))) return;
     // Optimistic: the message shows at once (queued when offline); the input clears right away. Attachments go with
     // replies only (an internal note is never emailed).
     const files = mode === "reply" ? uploads.attachments : [];
     void (mode === "reply" ? onReply(body, files.length ? files : undefined) : onNote(body)).catch(() => {});
     input.current?.clear();
     setText("");
-    uploads.clear();
+    // A note keeps the files picked for the next reply.
+    if (mode === "reply") uploads.clear();
   };
   return (
     <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 8) }]}>

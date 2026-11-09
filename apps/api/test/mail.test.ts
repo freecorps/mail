@@ -280,6 +280,12 @@ describe("mail app", () => {
     // The email goes out with the small file only.
     const sent = await until(() => call("query", "testing:email", { id: c.value.emailId }), (x) => x.value?.status === "sent");
     expect(sent.value).toMatchObject({ status: "sent", attachments: [{ filename: "note.txt", file: small }] });
+    // Only one's own uploads: another member's upload, or an inbound attachment's file id, is refused.
+    expect((await admin.inbox.addMember({ user_id: "agent-3", mailboxes: ["support"], name: "Agent Three" })).error).toBeNull();
+    expect((await call("mutation", "inbox:reply", { threadId: c.value.threadId, text: "x", attachments: [{ file: small, filename: "note.txt", contentType: "text/plain" }] }, "user:agent-3")).error.message).toMatch(/not an upload of yours/);
+    const inboundFile = (await call("query", "inbox:recent", {}, "user:agent-1")).value.messages.flatMap((m: any) => m.attachments).find((x: any) => !x.link && x.file !== small)?.file;
+    if (inboundFile) expect((await call("mutation", "inbox:compose", { mailbox: "support", to: ["x@user.test"], subject: "s", text: "t", attachments: [{ file: inboundFile, filename: "a", contentType: "x/y" }] }, "user:agent-1")).error.message).toMatch(/not an upload of yours/);
+    expect((await call("mutation", "inbox:generateUploadUrl", { size: -1 }, "user:agent-1")).error.message).toMatch(/non-negative/);
     // A file still uploading is refused.
     const pending = (await call("mutation", "inbox:generateUploadUrl", { contentType: "text/plain", size: 4 }, "user:agent-1")).value;
     expect((await call("mutation", "inbox:reply", { threadId: c.value.threadId, text: "x", attachments: [{ file: pending.storageId, filename: "p.txt", contentType: "text/plain" }] }, "user:agent-1")).error.message).toMatch(/still uploading/);

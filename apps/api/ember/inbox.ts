@@ -60,10 +60,13 @@ const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n 
  * Splits the files into attachments and links (smallest attach first, up to ATTACH_LIMIT) and appends the links to
  * the text. Every file must be uploaded (ready) already.
  */
-export function withAttachments(ctx: Ctx & { now: number }, text: string, list: AttachmentArg[] | undefined) {
+export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined) {
   if (!list?.length) return { text, attachments: undefined };
   if (list.length > 20) throw new Error("at most 20 attachments");
   const files = list.map((a) => {
+    // Only the member's own uploads: a file id seen elsewhere (another mailbox's attachment) is refused.
+    const up = ctx.db.query("uploads").withIndex("by_file", (q: any) => q.eq("file", a.file)).first() as { userId: string } | null;
+    if (!up || up.userId !== m.userId) throw new Error(`attachment ${a.filename}: not an upload of yours`);
     const meta = ctx.storage.getMetadata(a.file) as { size: number | null; state: string } | null;
     if (!meta) throw new Error(`attachment ${a.filename}: file not found`);
     if (meta.state !== "ready") throw new Error(`attachment ${a.filename}: still uploading`);
@@ -90,9 +93,12 @@ export function withAttachments(ctx: Ctx & { now: number }, text: string, list: 
 export const generateUploadUrl = mutation({
   args: { contentType: v.optional(v.string()), size: v.number(), sha256: v.optional(v.string()), multipart: v.optional(v.boolean()) },
   handler: (ctx, a) => {
-    member(ctx);
+    const m = member(ctx);
+    if (!Number.isSafeInteger(a.size) || a.size < 0) throw new Error("size must be a non-negative integer");
     if (a.size > MAX_UPLOAD) throw new Error(`file too large: at most ${mib(MAX_UPLOAD)}`);
-    return ctx.storage.generateUploadUrl(a);
+    const ticket = ctx.storage.generateUploadUrl(a);
+    ctx.db.insert("uploads", { file: ticket.storageId, userId: m.userId, at: ctx.now });
+    return ticket;
   },
 });
 
@@ -131,7 +137,7 @@ export const reply = mutation({
   args: { threadId: v.string(), text: v.string(), attachments: attachmentsArg },
   handler: (ctx, a) => {
     const { m } = threadOf(ctx, a.threadId);
-    const w = withAttachments(ctx, a.text, a.attachments);
+    const w = withAttachments(ctx, m, a.text, a.attachments);
     return ctx.runMutation(email.reply, { threadId: a.threadId, text: w.text, author: displayName(m), ...(w.attachments ? { attachments: w.attachments } : {}) });
   },
 });
@@ -186,7 +192,7 @@ export const compose = mutation({
   handler: (ctx, a) => {
     const m = allowed(ctx, a.mailbox);
     const { attachments: list, ...rest } = a;
-    const w = withAttachments(ctx, a.text, list);
+    const w = withAttachments(ctx, m, a.text, list);
     return ctx.runMutation(email.compose, { ...rest, text: w.text, author: displayName(m), ...(w.attachments ? { attachments: w.attachments } : {}) });
   },
 });
