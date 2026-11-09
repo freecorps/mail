@@ -1,6 +1,7 @@
 // Pure helpers: HTML safety, formatting, i18n, the push seam, optimistic updates.
 import { describe, expect, it } from "vitest";
 import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
+import type { PendingMutationRecord } from "@freecorps/ember-client";
 import type { Mailbox, Page, Thread, ThreadDetail } from "../src/api";
 import { pickLocale, translate } from "../src/i18n/strings";
 import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
@@ -161,6 +162,7 @@ function fakeStore(init: Array<[string, Record<string, unknown>, unknown]>) {
 
 describe("optimistic updates", () => {
   const up = inboxOptimisticUpdates(() => 99);
+  const rec = {} as PendingMutationRecord;
   const all = { mailbox: "support" };
   const open = { mailbox: "support", status: "open" };
   const page = (ts: Thread[]): Page<Thread> => ({ page: ts, isDone: true, continueCursor: null });
@@ -172,7 +174,7 @@ describe("optimistic updates", () => {
       ["inbox:threads", all, page([thread()])],
       ["inbox:threads", open, page([thread()])],
     ]);
-    up["inbox:reply"]!(s.store, { threadId: "email$threads_1", text: "Resolvido" });
+    up["inbox:reply"]!(s.store, { threadId: "email$threads_1", text: "Resolvido" }, rec);
     const d = s.get("inbox:thread", { threadId: "email$threads_1" }) as ThreadDetail;
     expect(d.thread.status).toBe("waiting");
     expect(d.messages).toMatchObject([{ direction: "outbound", text: "Resolvido", at: 99, to: [{ email: "ana@user.test", name: "Ana" }] }]);
@@ -186,10 +188,10 @@ describe("optimistic updates", () => {
       ["inbox:threads", all, page([thread()])],
       ["inbox:mailboxes", {}, boxes],
     ]);
-    up["inbox:markRead"]!(s.store, { threadId: "email$threads_1" });
+    up["inbox:markRead"]!(s.store, { threadId: "email$threads_1" }, rec);
     expect(s.get("inbox:threads", all).page[0].unreadCount).toBe(0);
     expect(s.get("inbox:mailboxes", {})[0].unread).toBe(3);
-    up["inbox:markUnread"]!(s.store, { threadId: "email$threads_1" });
+    up["inbox:markUnread"]!(s.store, { threadId: "email$threads_1" }, rec);
     expect(s.get("inbox:threads", all).page[0].unreadCount).toBe(1);
     expect(s.get("inbox:mailboxes", {})[0].unread).toBe(4);
   });
@@ -200,14 +202,14 @@ describe("optimistic updates", () => {
       ["inbox:threads", open, page([thread()])],
       ["inbox:members", { mailbox: "support" }, [{ userId: "u2", name: "Caio" }]],
     ]);
-    up["inbox:setStatus"]!(s.store, { threadId: "email$threads_1", status: "closed" });
+    up["inbox:setStatus"]!(s.store, { threadId: "email$threads_1", status: "closed" }, rec);
     expect(s.get("inbox:threads", all).page[0].status).toBe("closed");
     expect(s.get("inbox:threads", open).page).toEqual([]);
-    up["inbox:assign"]!(s.store, { threadId: "email$threads_1", userId: "u2" });
+    up["inbox:assign"]!(s.store, { threadId: "email$threads_1", userId: "u2" }, rec);
     expect(s.get("inbox:threads", all).page[0]).toMatchObject({ assignee: "u2", assigneeName: "Caio" });
-    up["inbox:assign"]!(s.store, { threadId: "email$threads_1", userId: null });
+    up["inbox:assign"]!(s.store, { threadId: "email$threads_1", userId: null }, rec);
     expect(s.get("inbox:threads", all).page[0].assignee).toBeUndefined();
-    up["inbox:compose"]!(s.store, { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Oi", text: "Tudo bem?" });
+    up["inbox:compose"]!(s.store, { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Oi", text: "Tudo bem?" }, rec);
     const first = s.get("inbox:threads", all).page[0] as Thread;
     expect(first).toMatchObject({ contact: "lia@user.test", subject: "Oi", status: "waiting" });
     expect(threadRow(first).pending).toBe(true);

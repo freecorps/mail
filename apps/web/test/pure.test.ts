@@ -1,7 +1,7 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
 import { describe, expect, it, vi } from "vite-plus/test";
-import type { OptimisticLocalStore } from "@freecorps/ember-client";
+import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
 import { pickLocale, translate } from "@/i18n/strings";
 import type { Mailbox, Message, Page, Thread, ThreadDetail } from "@/lib/api";
 import { jwtExpMs, jwtSource } from "@/lib/auth";
@@ -261,6 +261,7 @@ function store(init: Record<string, Array<{ args: any; value: any }>>): Optimist
 
 describe("optimistic updates", () => {
   const u = inboxOptimisticUpdates(() => 5000);
+  const rec = {} as PendingMutationRecord;
   const page = (ts: Thread[]): Page<Thread> => ({ page: ts, isDone: true, continueCursor: null });
   const boxes: Mailbox[] = [{ name: "support", address: "s@x", displayName: null, unread: 3, threads: 4 }];
 
@@ -272,10 +273,10 @@ describe("optimistic updates", () => {
       ],
       "inbox:mailboxes": [{ args: {}, value: boxes }],
     });
-    u["inbox:markRead"]!(s, { threadId: "t1" });
+    u["inbox:markRead"]!(s, { threadId: "t1" }, rec);
     expect(s.dump("inbox:threads")[0].page[0].unreadCount).toBe(0);
     expect(s.dump("inbox:mailboxes")[0][0].unread).toBe(1);
-    u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" });
+    u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
     expect(s.dump("inbox:threads").map((p: Page<Thread>) => p.page.length)).toEqual([1, 0]);
   });
 
@@ -285,7 +286,7 @@ describe("optimistic updates", () => {
       "inbox:thread": [{ args: { threadId: "t1" }, value: detail }],
       "inbox:threads": [{ args: { mailbox: "support" }, value: page([thread()]) }],
     });
-    u["inbox:reply"]!(s, { threadId: "t1", text: "Corrigido" });
+    u["inbox:reply"]!(s, { threadId: "t1", text: "Corrigido" }, rec);
     const d = s.dump("inbox:thread")[0] as ThreadDetail;
     expect(d.messages).toHaveLength(1);
     expect(isOptimisticId(d.messages[0]!._id)).toBe(true);
@@ -300,7 +301,7 @@ describe("optimistic updates", () => {
         { args: { mailbox: "support", status: "closed" }, value: page([]) },
       ],
     });
-    u["inbox:compose"]!(s, { mailbox: "support", to: ["Rui <rui@u.test>"], subject: "Oi", text: "Olá" });
+    u["inbox:compose"]!(s, { mailbox: "support", to: ["Rui <rui@u.test>"], subject: "Oi", text: "Olá" }, rec);
     const [all, closed] = s.dump("inbox:threads");
     expect(all.page[0]).toMatchObject({ contact: "rui@u.test", status: "waiting" });
     expect(closed.page).toHaveLength(0);
