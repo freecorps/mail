@@ -267,6 +267,7 @@ export class EmberMail {
   }
 
   private async once<T>(method: string, path: string, body: unknown, headers: Record<string, string>, r: Pick<RequestOptions, "signal" | "timeoutMs">): Promise<Result<T> & { retryAfterMs?: number }> {
+    if (r.signal?.aborted) return { data: null, error: { statusCode: 0, name: "aborted", message: "the request was aborted", outcome: "not_sent", retryable: false } };
     const timeout = r.timeoutMs ?? this.opts.timeoutMs ?? 30_000;
     const ctl = new AbortController();
     const onAbort = () => ctl.abort(r.signal?.reason);
@@ -331,23 +332,38 @@ export class EmberMail {
      */
     waitFor: async (id: string, o: WaitOptions = {}): Promise<Result<Email>> => {
       const until = new Set<EmailStatus>([...(o.until ?? ["sent", "delivered"]), ...FAILED_STATUSES]);
-      const end = Date.now() + (o.timeoutMs ?? 30_000);
+      const total = o.timeoutMs ?? 30_000;
+      const end = Date.now() + total;
+      // One deadline for the whole wait: it also cuts a check (and its retries) in flight.
+      const deadline = new AbortController();
+      const timer = setTimeout(() => deadline.abort(new Error("timeout")), total);
+      const onAbort = () => deadline.abort(o.signal?.reason);
+      o.signal?.addEventListener("abort", onAbort, { once: true });
       let last: Email | null = null;
-      for (;;) {
-        const r = await this.emails.get(id, { ...(o.signal ? { signal: o.signal } : {}) });
-        if (r.error && !r.error.retryable) return r;
-        if (r.data) {
-          last = r.data;
-          if (until.has(r.data.last_event)) return r;
+      const timedOut = (): Result<Email> => ({ data: null, error: { statusCode: 0, name: "timeout", message: `${id} is ${last?.last_event ?? "unknown"} after ${total} ms`, outcome: "unknown", retryable: true } });
+      const aborted = (): Result<Email> => ({ data: null, error: { statusCode: 0, name: "aborted", message: "the wait was aborted", outcome: "unknown", retryable: false } });
+      try {
+        for (;;) {
+          const left = end - Date.now();
+          if (left <= 0) return timedOut();
+          const r = await this.emails.get(id, { signal: deadline.signal, timeoutMs: left });
+          if (o.signal?.aborted) return aborted();
+          if (deadline.signal.aborted) return timedOut();
+          if (r.error && !r.error.retryable) return r;
+          if (r.data) {
+            last = r.data;
+            if (until.has(r.data.last_event)) return r;
+          }
+          if (Date.now() + (o.intervalMs ?? 1000) > end) return timedOut();
+          try {
+            await sleep(o.intervalMs ?? 1000, deadline.signal);
+          } catch {
+            return o.signal?.aborted ? aborted() : timedOut();
+          }
         }
-        if (Date.now() + (o.intervalMs ?? 1000) > end) {
-          return { data: null, error: { statusCode: 0, name: "timeout", message: `${id} is ${last?.last_event ?? "unknown"} after ${o.timeoutMs ?? 30_000} ms`, outcome: "unknown", retryable: true } };
-        }
-        try {
-          await sleep(o.intervalMs ?? 1000, o.signal);
-        } catch {
-          return { data: null, error: { statusCode: 0, name: "aborted", message: "the wait was aborted", outcome: "unknown", retryable: false } };
-        }
+      } finally {
+        clearTimeout(timer);
+        o.signal?.removeEventListener("abort", onAbort);
       }
     },
     cancel: (id: string) => this.request<{ object: "email"; id: string }>("POST", `/emails/${encodeURIComponent(id)}/cancel`),

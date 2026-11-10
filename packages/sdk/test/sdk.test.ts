@@ -86,6 +86,11 @@ describe("EmberMail", () => {
     const p = mail.emails.send({ from: "a@acme.test", to: "b@x.test", subject: "s", text: "t" }, { signal: ctl.signal });
     ctl.abort();
     expect((await p).error).toMatchObject({ name: "aborted", retryable: false });
+    // An already-aborted signal sends nothing.
+    let sent = 0;
+    const counting = new EmberMail("em_x", { baseUrl: "https://mail.test", fetch: (async () => (sent++, Response.json({ id: "e1" }))) as typeof fetch });
+    expect((await counting.emails.send({ from: "a@acme.test", to: "b@x.test", subject: "s", text: "t" }, { signal: AbortSignal.abort() })).error).toMatchObject({ name: "aborted", outcome: "not_sent" });
+    expect(sent).toBe(0);
   });
 
   test("emails.list: filters in the query string; emails.waitFor polls until sent, delivered or a failure", async () => {
@@ -104,5 +109,10 @@ describe("EmberMail", () => {
     expect((await failing.emails.waitFor("e2", { intervalMs: 5 })).data).toMatchObject({ last_event: "bounced" });
     const stuck = new EmberMail("em_x", { baseUrl: "https://mail.test", fetch: (async () => Response.json({ id: "e3", last_event: "queued" })) as typeof fetch });
     expect((await stuck.emails.waitFor("e3", { timeoutMs: 30, intervalMs: 5 })).error).toMatchObject({ name: "timeout", message: expect.stringMatching(/queued/) });
+    // A check that hangs is cut at the deadline too (no per-check 30 s wait).
+    const hangs = new EmberMail("em_x", { baseUrl: "https://mail.test", fetch: (async (_u: string, init: RequestInit) => new Promise<Response>((_, reject) => init.signal!.addEventListener("abort", () => reject(new Error("aborted"))))) as typeof fetch });
+    const t0 = Date.now();
+    expect((await hangs.emails.waitFor("e4", { timeoutMs: 50 })).error).toMatchObject({ name: "timeout" });
+    expect(Date.now() - t0).toBeLessThan(1000);
   });
 });
