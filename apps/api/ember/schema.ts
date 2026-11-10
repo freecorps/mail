@@ -41,6 +41,8 @@ export default defineSchema({
       ruleIds: v.array(v.string()),
       subscriptionId: v.optional(v.string()),
       createdSending: v.optional(v.boolean()),
+      /** The zone's catch-all rule points at this Worker (the Worker's name): a mailbox of the apex is its catch-all. */
+      catchAll: v.optional(v.string()),
       notes: v.array(v.string()),
       createdAt: v.number(),
       checkedAt: v.optional(v.number()),

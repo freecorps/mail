@@ -18,6 +18,9 @@ export const get = internalQuery({ args: { name: v.string() }, handler: (ctx, { 
 export const getById = internalQuery({ args: { id: v.string() }, handler: (ctx, { id }) => { const n = ctx.db.normalizeId("domains", id); return n ? ctx.db.get(n) : null; } });
 export const list = internalQuery({ args: {}, handler: (ctx) => ctx.db.query("domains").collect() });
 
+/** Whether a mailbox of `domain` is its catch-all (then the zone's catch-all rule → this Worker). */
+export const hasCatchAll = (boxes: Array<{ address: string; catchAll?: boolean }>, domain: string) => boxes.some((b) => b.catchAll && b.address.toLowerCase().endsWith(`@${domain}`));
+
 export const save = internalMutation({
   args: {
     name: v.string(),
@@ -32,6 +35,7 @@ export const save = internalMutation({
     ruleIds: v.array(v.string()),
     subscriptionId: v.optional(v.string()),
     createdSending: v.optional(v.boolean()),
+    catchAll: v.optional(v.string()),
     notes: v.array(v.string()),
   },
   handler: (ctx, a) => {
@@ -55,8 +59,13 @@ export const sync = internalAction({
   handler: async (ctx, a) => {
     const name = a.name.toLowerCase();
     const prev = (await ctx.runQuery("domains:get" as any, { name })) as DomainState | null;
-    const mailboxes = ((await ctx.runQuery(components.email.lib.mailboxes, {})) as Array<{ address: string }>).map((b) => b.address);
-    const state = await syncDomain(creds(ctx.env), { name, ...(a.enableRouting ? { enableRouting: true } : {}), ...(a.sending !== undefined ? { sending: a.sending } : {}), ...(a.receiving !== undefined ? { receiving: a.receiving } : {}) }, { prev, mailboxes, worker: names(ctx.env).worker, queue: names(ctx.env).eventsQueue });
+    const boxes = (await ctx.runQuery(components.email.lib.mailboxes, {})) as Array<{ address: string; catchAll?: boolean }>;
+    const mailboxes = boxes.map((b) => b.address);
+    const state = await syncDomain(
+      creds(ctx.env),
+      { name, ...(a.enableRouting ? { enableRouting: true } : {}), ...(a.sending !== undefined ? { sending: a.sending } : {}), ...(a.receiving !== undefined ? { receiving: a.receiving } : {}) },
+      { prev, mailboxes, worker: names(ctx.env).worker, queue: names(ctx.env).eventsQueue, catchAll: hasCatchAll(boxes, name) },
+    );
     await ctx.runMutation("domains:save" as any, state);
     return { name, status: state.status, notes: state.notes };
   },
