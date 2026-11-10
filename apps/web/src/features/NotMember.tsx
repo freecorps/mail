@@ -16,10 +16,10 @@ export function NotMember({ userId, error }: { userId: string | null; error: str
   const [copied, setCopied] = useState(false);
   // Lists this sign-in for the admins (with its email), so access is granted without passing the id around.
   const requestAccess = useMutation(api.inbox.requestAccess);
-  const signedIn = !!session.data?.user.id;
+  // Keyed by the Ember identity's id (or the session's): a new sign-in asks again; "check again" retries a failed ask.
   useEffect(() => {
-    if (signedIn) requestAccess({}).catch(() => {});
-  }, [signedIn, requestAccess]);
+    if (id) requestAccess({}).catch(() => {});
+  }, [id, requestAccess]);
   return (
     <main className="grid min-h-full place-items-center px-6">
       <div className="w-full max-w-md space-y-6">
@@ -54,6 +54,7 @@ export function NotMember({ userId, error }: { userId: string | null; error: str
             onClick={() => {
               emberToken.reset();
               ember.setAuth(emberToken);
+              if (id) requestAccess({}).catch(() => {});
             }}
           >
             <RefreshCw aria-hidden="true" />

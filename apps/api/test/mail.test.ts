@@ -446,6 +446,8 @@ describe("mail app", () => {
     const first = (await admin.inbox.members()).data!.requests.find((r) => r.user_id === "lia-1")!.requested_at;
     await new Promise((r) => setTimeout(r, 5));
     expect((await call("mutation", "inbox:requestAccess", {}, "user:lia-1|lia@acme.test|Lia Souza")).error ?? null).toBeNull();
+    // A sign-in without claims never clears what was stored.
+    expect((await call("mutation", "inbox:requestAccess", {}, "user:lia-1")).error ?? null).toBeNull();
     let list = (await admin.inbox.members()).data!;
     // Asking again keeps when they first asked; a new name is taken.
     expect(list.requests.find((r) => r.user_id === "lia-1")).toMatchObject({ requested_at: first, name: "Lia Souza" });
@@ -463,6 +465,8 @@ describe("mail app", () => {
     list = (await admin.inbox.members()).data!;
     expect(list.requests.filter((r) => ["lia-1", "rui-1"].includes(r.user_id))).toEqual([]);
     expect(list.data.find((m) => m.user_id === "lia-1")).toMatchObject({ name: "Lia Souza", personal_mailbox: "lia", mailboxes: [] });
+    // Granted without a name: the one they signed in with.
+    expect(list.data.find((m) => m.user_id === "rui-1")).toMatchObject({ name: "Rui", mailboxes: ["support"] });
     expect((await call("query", "inbox:me", {}, lia)).value).toMatchObject({ member: true, mailboxes: ["lia"] });
   });
 

@@ -301,7 +301,11 @@ export const requestAccess = mutation({
     const prev = ctx.db.query("accessRequests").withIndex("by_user", (q) => q.eq("userId", who.subject)).first();
     if (!prev) ctx.db.insert("accessRequests", row);
     // Asking again keeps when they first asked; only a changed email or name is written.
-    else if (prev.email !== row.email || prev.name !== row.name) ctx.db.patch(prev._id, { email: row.email, name: row.name });
+    else {
+      // A sign-in without an email or a name never clears the one stored.
+      const changed = { ...(email && email.slice(0, 320) !== prev.email ? { email: email.slice(0, 320) } : {}), ...(name && name.slice(0, 200) !== prev.name ? { name: name.slice(0, 200) } : {}) };
+      if (Object.keys(changed).length) ctx.db.patch(prev._id, changed);
+    }
     return null;
   },
 });

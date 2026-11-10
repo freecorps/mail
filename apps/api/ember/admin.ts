@@ -20,7 +20,9 @@ export const upsertMember = internalMutation({
     // Granted: no longer waiting for access.
     const asked = ctx.db.query("accessRequests").withIndex("by_user", (q) => q.eq("userId", a.userId)).first();
     if (asked) ctx.db.delete(asked._id);
-    return ctx.db.insert("members", { userId: a.userId, mailboxes: a.mailboxes ?? [], ...(a.name ? { name: a.name } : {}), ...(a.admin !== undefined ? { admin: a.admin } : {}) });
+    // Absent `name`: the one they signed in with, from their request.
+    const name = a.name !== undefined ? a.name : (asked?.name ?? null);
+    return ctx.db.insert("members", { userId: a.userId, mailboxes: a.mailboxes ?? [], ...(name ? { name } : {}), ...(a.admin !== undefined ? { admin: a.admin } : {}) });
   },
 });
 
