@@ -261,6 +261,41 @@ const byId = (ctx: { db: Db }, id: string) => {
   return w;
 };
 
+/**
+ * Pausing holds a webhook's pending deliveries (their attempts canceled); turning it back on schedules them. One batch
+ * of 500 pending rows from `from` (their `at`, oldest first); true when there may be more (the caller schedules
+ * `setPendingJob` to go on). Rows already in the wanted state are skipped, so a batch boundary never repeats work.
+ */
+function setPending(ctx: MCtx, webhookId: string, enabled: boolean, from: number): number | false {
+  const rows = ctx.db
+    .query("webhookDeliveries")
+    .withIndex("by_webhook_status", (q: any) => q.eq("webhookId", webhookId).eq("status", "pending").gte("at", from))
+    .take(500) as Array<{ _id: string; at: number; jobId?: string }>;
+  for (const d of rows) {
+    if (!enabled && d.jobId) {
+      ctx.scheduler.cancel(d.jobId);
+      ctx.db.patch(d._id, { jobId: undefined });
+    } else if (enabled && !d.jobId) {
+      ctx.db.patch(d._id, { jobId: ctx.scheduler.runAfter(0, "webhooks:deliver" as any, { id: d._id }), nextAt: ctx.now });
+    }
+  }
+  const last = rows[rows.length - 1]?.at;
+  // A full batch goes on from its last `at` (no progress: 500 rows share one instant, stop rather than loop).
+  return rows.length === 500 && last !== undefined && last > from ? last : false;
+}
+
+export const setPendingJob = internalMutation({
+  args: { webhookId: v.string(), enabled: v.boolean(), from: v.number() },
+  handler: (ctx, a) => {
+    const w = ctx.db.get(a.webhookId as any) as WebhookDoc | null;
+    // Toggled again meanwhile: the newer toggle runs its own pass.
+    if (!w || w.enabled !== a.enabled) return null;
+    const next = setPending(ctx as any, a.webhookId, a.enabled, a.from);
+    if (next !== false) ctx.scheduler.runAfter(0, "webhooks:setPendingJob" as any, { ...a, from: next });
+    return null;
+  },
+});
+
 /** Patch: absent fields keep their value; null clears project, mailboxes and description. */
 export const update = internalMutation({
   args: {
@@ -277,16 +312,8 @@ export const update = internalMutation({
     const w = byId(ctx as any, a.id);
     checkScope(ctx as any, a);
     if (a.enabled !== undefined && a.enabled !== w.enabled) {
-      // Pausing holds the pending deliveries (their attempts are canceled); turning back on sends them.
-      for (const d of ctx.db.query("webhookDeliveries").withIndex("by_webhook", (q) => q.eq("webhookId", w._id as any)).order("desc").take(500) as Array<{ _id: string; status: string; jobId?: string }>) {
-        if (d.status !== "pending") continue;
-        if (!a.enabled) {
-          if (d.jobId) ctx.scheduler.cancel(d.jobId);
-          ctx.db.patch(d._id as any, { jobId: undefined });
-        } else if (!d.jobId) {
-          ctx.db.patch(d._id as any, { jobId: ctx.scheduler.runAfter(0, "webhooks:deliver" as any, { id: d._id }), nextAt: ctx.now });
-        }
-      }
+      const next = setPending(ctx as any, w._id, a.enabled, 0);
+      if (next !== false) ctx.scheduler.runAfter(0, "webhooks:setPendingJob" as any, { webhookId: w._id, enabled: a.enabled, from: next });
     }
     ctx.db.patch(w._id as any, {
       ...(a.endpoint !== undefined ? { endpoint: checkEndpoint(a.endpoint) } : {}),

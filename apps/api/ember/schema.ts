@@ -95,6 +95,7 @@ export default defineSchema({
       deliveredAt: v.optional(v.number()),
     })
       .index("by_webhook", ["webhookId", "at"])
+      .index("by_webhook_status", ["webhookId", "status", "at"])
       .index("by_at", ["at"]),
   },
 });
