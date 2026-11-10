@@ -10,7 +10,7 @@
 //   GET    /api-keys               POST /api-keys { name, permission?, project?, domain? }   DELETE /api-keys/:id
 //   GET    /templates              POST /templates { name, subject, html, text?, layout? }   DELETE /templates/:name
 //   POST   /suppressions { email } DELETE /suppressions/:email
-//   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply? }
+//   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner? }
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
 //
@@ -22,6 +22,12 @@ import { ApiError, authenticate, body, errorResponse, iso, json, need, newToken,
 
 const email = components.email.lib;
 const http = httpRouter();
+
+/** The personal mailboxes and their owners (ember/access.ts): no key reads or answers them. */
+const personalMailboxes = async (ctx: ActionCtx) => (await ctx.runQuery("access:personalMailboxes" as any, {})) as Record<string, string>;
+const notPersonal = (personal: Record<string, string>, mailbox: string) => {
+  if (Object.hasOwn(personal, mailbox)) throw new ApiError(403, "personal_mailbox", "A personal mailbox is read only in its owner's inbox");
+};
 
 type Handler = (ctx: ActionCtx, request: Request, p: Principal, url: URL) => Promise<Response>;
 const route = (h: Handler) =>
@@ -351,15 +357,37 @@ http.route({
 
 // ------------------------------------------------------------------------------------------------ inbox (dashboard, scripts)
 
-http.route({ path: "/inbox/mailboxes", method: "GET", handler: route(async (ctx, _r, p) => { need(p, "inbox"); const boxes = (await ctx.runQuery(email.mailboxes, {})) as any[]; const unread = await ctx.runQuery(email.unread, {}); return json({ data: boxes.map((b) => ({ name: b.name, address: b.address, display_name: b.displayName ?? null, ...(unread as any)[b.name] })) }); }) });
+http.route({
+  path: "/inbox/mailboxes",
+  method: "GET",
+  handler: route(async (ctx, _r, p) => {
+    need(p, "inbox");
+    const boxes = (await ctx.runQuery(email.mailboxes, {})) as any[];
+    const unread = await ctx.runQuery(email.unread, {});
+    const personal = await personalMailboxes(ctx);
+    // A personal mailbox is listed (with its owner) but its counts are its owner's business.
+    return json({
+      data: boxes.map((b) => ({
+        name: b.name,
+        address: b.address,
+        display_name: b.displayName ?? null,
+        owner: personal[b.name] ?? null,
+        ...(Object.hasOwn(personal, b.name) ? {} : (unread as any)[b.name]),
+      })),
+    });
+  }),
+});
 http.route({
   path: "/inbox/mailboxes",
   method: "POST",
   handler: route(async (ctx, request, p) => {
     need(p);
-    const b = await body<{ name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null }>(request);
+    const b = await body<{ name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null }>(request);
+    if (b.owner !== undefined && b.owner !== null && (typeof b.owner !== "string" || !b.owner)) throw new ApiError(422, "validation_error", "owner must be a user id, or null to make the mailbox shared");
     // Absent fields keep their stored value; null (or "" for display_name) clears them.
     const id = await ctx.runMutation(email.upsertMailbox, { name: b.name, address: b.address, ...(b.display_name !== undefined ? { displayName: b.display_name || null } : {}), ...(b.auto_reply !== undefined ? { autoReply: b.auto_reply } : {}) });
+    // `owner`: personal to that user (only they see it); null: shared again; absent: as it was.
+    if (b.owner !== undefined) await ctx.runMutation("access:setOwner" as any, { mailbox: b.name, userId: b.owner });
     return json({ id }, 201);
   }),
 });
@@ -370,6 +398,7 @@ http.route({
     need(p, "inbox");
     const mailbox = url.searchParams.get("mailbox");
     if (!mailbox) throw new ApiError(422, "missing_required_field", "mailbox is required");
+    notPersonal(await personalMailboxes(ctx), mailbox);
     const status = url.searchParams.get("status");
     const r = await ctx.runQuery(email.threads, { mailbox, ...(status ? { status } : {}), paginationOpts: { numItems: pageLimit(url, 30), cursor: url.searchParams.get("cursor") } });
     return json(r);
@@ -382,6 +411,7 @@ http.route({
     need(p, "inbox");
     const t = await ctx.runQuery(email.thread, { threadId: tail(url, "/inbox/threads/")[0] ?? "" });
     if (!t) throw new ApiError(404, "not_found", "Thread not found");
+    notPersonal(await personalMailboxes(ctx), (t as any).thread.mailbox);
     return json(t);
   }),
 });
@@ -392,6 +422,9 @@ http.route({
     need(p, "inbox");
     const [id, action] = tail(url, "/inbox/threads/");
     const b = await body<{ text?: string; status?: string; author?: string }>(request);
+    const t = (await ctx.runQuery(email.thread, { threadId: id ?? "" })) as { thread: { mailbox: string } } | null;
+    if (!t) throw new ApiError(404, "not_found", "Thread not found");
+    notPersonal(await personalMailboxes(ctx), t.thread.mailbox);
     if (action === "reply") return json(await ctx.runMutation(email.reply, { threadId: id ?? "", text: b.text ?? "", ...(b.author ? { author: b.author } : {}) }), 201);
     if (action === "status") return json({ status: await ctx.runMutation(email.setStatus, { threadId: id ?? "", status: b.status ?? "" }) });
     if (action === "read") return json({ ok: await ctx.runMutation(email.markRead, { threadId: id ?? "" }) });
@@ -404,7 +437,10 @@ http.route({
   handler: route(async (ctx, _r, p, url) => {
     need(p, "inbox");
     const mailbox = url.searchParams.get("mailbox");
-    return json({ data: await ctx.runQuery(email.search, { query: url.searchParams.get("q") ?? "", ...(mailbox ? { mailbox } : {}) }) });
+    const personal = await personalMailboxes(ctx);
+    if (mailbox) notPersonal(personal, mailbox);
+    const rows = (await ctx.runQuery(email.search, { query: url.searchParams.get("q") ?? "", ...(mailbox ? { mailbox } : {}) })) as Array<{ mailbox: string }>;
+    return json({ data: rows.filter((r) => !Object.hasOwn(personal, r.mailbox)) });
   }),
 });
 http.route({
