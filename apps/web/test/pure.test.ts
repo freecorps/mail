@@ -175,10 +175,14 @@ describe("compose", () => {
 describe("route", () => {
   it("round-trips through the URL and drops defaults", () => {
     const r = parseRoute("?m=support&f=waiting&t=email%24threads_1&q=fatura");
-    expect(r).toEqual({ mailbox: "support", filter: "waiting", thread: "email$threads_1", query: "fatura" });
+    expect(r).toEqual({ admin: null, mailbox: "support", filter: "waiting", thread: "email$threads_1", query: "fatura" });
     expect(parseRoute(formatRoute(r))).toEqual(r);
-    expect(formatRoute({ mailbox: null, filter: "all", thread: null, query: "" })).toBe("");
+    expect(formatRoute({ admin: null, mailbox: null, filter: "all", thread: null, query: "" })).toBe("");
     expect(parseRoute("?f=bogus").filter).toBe("all");
+    // The admin screen's section; an unknown one is the inbox.
+    expect(parseRoute("?a=keys")).toMatchObject({ admin: "keys" });
+    expect(formatRoute({ ...parseRoute(""), admin: "members" })).toBe("?a=members");
+    expect(parseRoute("?a=bogus").admin).toBeNull();
   });
 });
 

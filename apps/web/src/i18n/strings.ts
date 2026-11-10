@@ -1,7 +1,10 @@
 // UI strings. Portuguese (pt-BR) is the default; English is the alternative. Keys are shared, so a missing
 // translation is a type error. `{name}` placeholders are filled by `translate`.
 
+import { adminEn, adminPtBR } from "./admin";
+
 const ptBR = {
+  ...adminPtBR,
   "app.name": "Ember Mail",
   "common.cancel": "Cancelar",
   "common.close": "Fechar",
@@ -158,6 +161,7 @@ export type Locale = "pt-BR" | "en";
 export const LOCALES: Locale[] = ["pt-BR", "en"];
 
 const en: Record<StringKey, string> = {
+  ...adminEn,
   "app.name": "Ember Mail",
   "common.cancel": "Cancel",
   "common.close": "Close",

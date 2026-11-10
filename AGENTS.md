@@ -7,7 +7,7 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 
 | Path | What | Status |
 |---|---|---|
-| `apps/api` | The service: an Ember app (Worker `ember-mail-<env>`). HTTP API (`ember/http.ts`), domains (`ember/domains.ts`, via `@freecorps/ember-email/cloudflare`), inbox functions for clients (`ember/inbox.ts`), Better Auth (`ember/auth.config.ts`), push on inbound (`ember/support.ts`). Ops scripts in `scripts/` | in production |
+| `apps/api` | The service: an Ember app (Worker `ember-mail-<env>`). HTTP API (`ember/http.ts`), domains (`ember/domains.ts`, via `@freecorps/ember-email/cloudflare`), inbox functions for clients (`ember/inbox.ts`), the admin screen's functions (`ember/console.ts`, admins only), Better Auth (`ember/auth.config.ts`), push on inbound (`ember/support.ts`). Ops scripts in `scripts/` | in production |
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) | builds/tests; not shipped |
 | `apps/web` | Web inbox: Vite+ (`vp`), React, shadcn/ui, Better Auth client, `@freecorps/ember-react`. Same-origin proxy (dev: Vite; prod: `worker/index.ts` on Workers static assets). See `apps/web/README.md` | builds/tests; not deployed |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client, Resend-style `{ data, error }` | private, unpublished |

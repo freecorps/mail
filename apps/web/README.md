@@ -31,9 +31,29 @@ same `inbox:*` functions as mobile.
 | Theme                          | System, light or dark, set in the account menu. It is applied before first paint (`public/theme.js`). Email bodies stay on white, as senders design them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Not in the web inbox: push and the offline replica. Mobile keeps mail on the device. The web keeps nothing in browser
-storage, because browsers are often shared. Admin screens (members, API keys) are also missing: the API exposes those
-only to `full_access` API keys over HTTP (`/inbox/members`, `/api-keys`), not to signed-in members, so a browser
-session cannot manage them yet.
+storage, because browsers are often shared.
+
+## Administration
+
+Admins (members with `admin`) get **Administração** in the sidebar and the account menu (`?a=<section>`). It runs on
+the `console:*` functions (`apps/api/ember/console.ts`), which check `admin` on every call:
+
+| Section          | What                                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Visão geral      | Counts, and what the Worker runs: project, environment, Ember release (`EMBER_RUNTIME_VERSION`), Worker version, whether it manages domains |
+| Domínios         | Status of sending and receiving, routing rules, DNS records (copy) and what is left; re-check or add when the Worker has a Cloudflare token |
+| Caixas           | Personal (owner only) or shared, who has access, retention, auto-reply; create and edit                                                     |
+| Pessoas          | Access requests (grant or decline), shared mailboxes per person, admin, remove                                                              |
+| Chaves de API    | Active keys (prefix only), create (the token shows once), revoke                                                                            |
+| E-mails enviados | A project's send log with each email's delivery events                                                                                      |
+| Supressões       | A project's blocked addresses; block and unblock                                                                                            |
+
+A personal mailbox stays its owner's business here too: admins see that it exists and who owns it, never its counts,
+its sent emails or its suppressions.
+
+| Light                                                      | Dark                                                      |
+| ---------------------------------------------------------- | --------------------------------------------------------- |
+| ![Admin overview, light](docs/screenshots/admin-light.png) | ![Admin mailboxes, dark](docs/screenshots/admin-dark.png) |
 
 ## Same origin
 

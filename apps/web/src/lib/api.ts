@@ -121,6 +121,133 @@ export type SentArgs = { mailbox: string; limit?: number };
 export type PageOpts = { numItems: number; cursor: string | null };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
+// ---------------------------------------------------------------------------------------------- admin (console:*)
+
+export interface ServerInfo {
+  project: string | null;
+  env: string | null;
+  /** The Ember release the Worker runs (EMBER_RUNTIME_VERSION, set by `ember deploy`). */
+  ember: string | null;
+  worker: { id: string; tag: string | null; deployedAt: string | null } | null;
+  /** The Worker holds a Cloudflare token: domains can be added and re-checked from here. */
+  manageDomains: boolean;
+  files: boolean;
+}
+
+export interface Overview {
+  domains: number;
+  domainsVerified: number;
+  mailboxes: number;
+  personalMailboxes: number;
+  threads: number;
+  unread: number;
+  keys: number;
+  members: number;
+  requests: number;
+}
+
+export interface DnsRecord {
+  type: string;
+  name: string;
+  value: string;
+  priority?: number;
+  ttl?: number;
+  purpose: string;
+}
+
+export interface DomainRow {
+  id: string;
+  name: string;
+  status: string;
+  sending: boolean;
+  receiving: boolean;
+  routingStatus: string | null;
+  records: DnsRecord[];
+  notes: string[];
+  rules: number;
+  events: boolean;
+  catchAll: boolean;
+  createdAt: number;
+  checkedAt: number | null;
+}
+
+export type Permission = "full_access" | "sending_access" | "inbox";
+
+export interface KeyRow {
+  id: string;
+  name: string;
+  prefix: string;
+  permission: Permission;
+  project: string;
+  domain: string | null;
+  createdAt: number;
+}
+
+export interface Retention {
+  closedDays?: number;
+  spamDays?: number;
+}
+
+export interface MailboxRow {
+  name: string;
+  address: string;
+  displayName: string | null;
+  owner: string | null;
+  ownerName: string | null;
+  catchAll: boolean;
+  autoReply: { subject: string; text: string } | null;
+  retention: Retention | null;
+  granted: Array<{ userId: string; name: string | null }>;
+  /** Null for a personal mailbox (its counts are its owner's business). */
+  counts: { unread: number; threads: number } | null;
+}
+
+export interface MemberRow {
+  userId: string;
+  name: string | null;
+  mailboxes: string[];
+  admin: boolean;
+  personalMailbox: string | null;
+}
+
+export interface AccessRequest {
+  userId: string;
+  email: string | null;
+  name: string | null;
+  requestedAt: number;
+}
+
+export interface EmailRow {
+  id: string;
+  createdAt: number;
+  from: Address;
+  to: string[];
+  cc: string[];
+  subject: string;
+  status: string;
+  sentAt: number | null;
+  error: { code: string; message: string } | null;
+  tags: Record<string, string>;
+  threadId: string | null;
+}
+
+export interface EmailEvent {
+  type: string;
+  recipient: string | null;
+  at: number;
+  reason: string | null;
+  bounceType: string | null;
+}
+
+export interface SuppressionRow {
+  email: string;
+  reason: string;
+  at: number;
+}
+
+type Paged<T> = { page: T[]; isDone: boolean; continueCursor: string };
+type ProjectPage = { project: string; paginationOpts: PageOpts };
+
 const q = makeFunctionReference;
 export const api = {
   inbox: {
@@ -158,6 +285,47 @@ export const api = {
       string
     >("inbox:registerDevice"),
     unregisterDevice: q<"mutation", { token: string }, boolean>("inbox:unregisterDevice"),
+  },
+  console: {
+    server: q<"action", Record<string, never>, ServerInfo>("console:server"),
+    overview: q<"query", Record<string, never>, Overview>("console:overview"),
+    domains: q<"query", Record<string, never>, DomainRow[]>("console:domains"),
+    syncDomain: q<
+      "action",
+      { name: string; sending?: boolean; receiving?: boolean; enableRouting?: boolean },
+      { name: string; status: string; notes: string[] }
+    >("console:syncDomain"),
+    keys: q<"query", Record<string, never>, KeyRow[]>("console:keys"),
+    createKey: q<
+      "action",
+      { name: string; permission: Permission; project: string; domain?: string },
+      { id: string; token: string; prefix: string }
+    >("console:createKey"),
+    revokeKey: q<"mutation", { id: string }, boolean>("console:revokeKey"),
+    mailboxes: q<"query", Record<string, never>, MailboxRow[]>("console:mailboxes"),
+    saveMailbox: q<
+      "mutation",
+      {
+        name: string;
+        address: string;
+        displayName?: string | null;
+        autoReply?: { subject: string; text: string } | null;
+        retention?: Retention | null;
+      },
+      string
+    >("console:saveMailbox"),
+    members: q<"query", Record<string, never>, { me: string; members: MemberRow[]; requests: AccessRequest[] }>("console:members"),
+    saveMember: q<"mutation", { userId: string; name?: string | null; mailboxes?: string[]; admin?: boolean }, string>(
+      "console:saveMember",
+    ),
+    removeMember: q<"mutation", { userId: string }, boolean>("console:removeMember"),
+    dismissRequest: q<"mutation", { userId: string }, boolean>("console:dismissRequest"),
+    projects: q<"query", Record<string, never>, string[]>("console:projects"),
+    emails: q<"query", ProjectPage, Paged<EmailRow>>("console:emails"),
+    emailEvents: q<"query", { id: string }, EmailEvent[]>("console:emailEvents"),
+    suppressions: q<"query", ProjectPage, Paged<SuppressionRow>>("console:suppressions"),
+    suppress: q<"mutation", { project: string; email: string }, string>("console:suppress"),
+    unsuppress: q<"mutation", { project: string; email: string }, boolean>("console:unsuppress"),
   },
 };
 

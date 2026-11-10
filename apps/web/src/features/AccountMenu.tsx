@@ -1,4 +1,4 @@
-import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, Sun } from "lucide-react";
+import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, Settings, Sun } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import {
   DropdownMenu,
@@ -16,7 +16,15 @@ import { authClient } from "@/lib/auth";
 import { usePrefs, type ThemePref } from "@/lib/prefs";
 import type { Locale } from "@/i18n/strings";
 
-export function AccountMenu({ me, onShortcuts }: { me: Extract<Me, { member: true }>; onShortcuts: () => void }) {
+export function AccountMenu({
+  me,
+  onShortcuts,
+  onAdmin,
+}: {
+  me: Extract<Me, { member: true }>;
+  onShortcuts: () => void;
+  onAdmin?: () => void;
+}) {
   const { t } = useI18n();
   const prefs = usePrefs();
   const session = authClient.useSession();
@@ -70,6 +78,12 @@ export function AccountMenu({ me, onShortcuts }: { me: Extract<Me, { member: tru
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
+        {me.admin && onAdmin && (
+          <DropdownMenuItem onSelect={onAdmin}>
+            <Settings aria-hidden="true" />
+            {t("admin.open")}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuItem onSelect={onShortcuts}>
           <Keyboard aria-hidden="true" />
           {t("account.shortcuts")}

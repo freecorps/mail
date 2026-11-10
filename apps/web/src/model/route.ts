@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { THREAD_FILTERS, useDebounced, type ThreadFilter } from "./threads";
 
+/** Sections of the admin screen (`?a=`). */
+export const ADMIN_SECTIONS = ["overview", "domains", "mailboxes", "members", "keys", "emails", "suppressions"] as const;
+export type AdminSection = (typeof ADMIN_SECTIONS)[number];
+
 export interface Route {
+  /** The admin screen's section; null for the inbox. */
+  admin: AdminSection | null;
   mailbox: string | null;
   filter: ThreadFilter;
   thread: string | null;
@@ -13,7 +19,9 @@ export interface Route {
 export function parseRoute(search: string): Route {
   const p = new URLSearchParams(search);
   const f = p.get("f") as ThreadFilter | null;
+  const a = p.get("a") as AdminSection | null;
   return {
+    admin: a && ADMIN_SECTIONS.includes(a) ? a : null,
     mailbox: p.get("m") || null,
     filter: f && THREAD_FILTERS.includes(f) ? f : "all",
     thread: p.get("t") || null,
@@ -23,6 +31,7 @@ export function parseRoute(search: string): Route {
 
 export function formatRoute(r: Route): string {
   const p = new URLSearchParams();
+  if (r.admin) p.set("a", r.admin);
   if (r.mailbox) p.set("m", r.mailbox);
   if (r.filter !== "all") p.set("f", r.filter);
   if (r.query) p.set("q", r.query);
