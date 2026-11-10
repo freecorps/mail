@@ -114,5 +114,13 @@ describe("EmberMail", () => {
     const t0 = Date.now();
     expect((await hangs.emails.waitFor("e4", { timeoutMs: 50 })).error).toMatchObject({ name: "timeout" });
     expect(Date.now() - t0).toBeLessThan(1000);
+    // An already-aborted signal makes no check; a check that answers right at the deadline still counts.
+    let checks = 0;
+    const counted = new EmberMail("em_x", { baseUrl: "https://mail.test", fetch: (async () => (checks++, Response.json({ id: "e5", last_event: "sent" }))) as typeof fetch });
+    expect((await counted.emails.waitFor("e5", { signal: AbortSignal.abort() })).error).toMatchObject({ name: "aborted" });
+    expect(checks).toBe(0);
+    // (this fetch ignores the abort and answers after the 30 ms deadline: its answer is still used)
+    const slow = new EmberMail("em_x", { baseUrl: "https://mail.test", fetch: (async () => (await new Promise((r) => setTimeout(r, 60)), Response.json({ id: "e6", last_event: "delivered" }))) as typeof fetch });
+    expect((await slow.emails.waitFor("e6", { timeoutMs: 30 })).data).toMatchObject({ last_event: "delivered" });
   });
 });

@@ -341,6 +341,10 @@ export class EmberMail {
       const deadline = new AbortController();
       const timer = setTimeout(() => deadline.abort(new Error("timeout")), total);
       const onAbort = () => deadline.abort(o.signal?.reason);
+      if (o.signal?.aborted) {
+        clearTimeout(timer);
+        return { data: null, error: { statusCode: 0, name: "aborted", message: "the wait was aborted", outcome: "unknown", retryable: false } };
+      }
       o.signal?.addEventListener("abort", onAbort, { once: true });
       let last: Email | null = null;
       const timedOut = (): Result<Email> => ({ data: null, error: { statusCode: 0, name: "timeout", message: `${id} is ${last?.last_event ?? "unknown"} after ${total} ms`, outcome: "unknown", retryable: true } });
@@ -350,13 +354,14 @@ export class EmberMail {
           const left = end - Date.now();
           if (left <= 0) return timedOut();
           const r = await this.emails.get(id, { signal: deadline.signal, timeoutMs: left });
-          if (o.signal?.aborted) return aborted();
-          if (deadline.signal.aborted) return timedOut();
-          if (r.error && !r.error.retryable) return r;
+          // A check that came back is used even if the deadline passed meanwhile.
           if (r.data) {
             last = r.data;
             if (until.has(r.data.last_event)) return r;
           }
+          if (o.signal?.aborted) return aborted();
+          if (deadline.signal.aborted) return timedOut();
+          if (r.error && !r.error.retryable) return r;
           if (Date.now() + (o.intervalMs ?? 1000) > end) return timedOut();
           try {
             await sleep(o.intervalMs ?? 1000, deadline.signal);
