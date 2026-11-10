@@ -20,7 +20,7 @@ no repositório.
 | Assinatura de eventos | `ember-mail-prod-email-events atendimento.freecorps.com.br` (`email.sending` → fila `ember-mail-prod-email-events`) | onboarding |
 | Email Sending (apex) | domínio de envio `freecorps.com.br` (só envio: DKIM `cf-bounce._domainkey`, `cf-bounce` MX/SPF; o MX, o SPF e o DMARC do apex não mudaram e continuam no servidor de email próprio) | `bun run domains add freecorps.com.br` (sem `--enable-routing`), 2026-11-10 |
 | Assinatura de eventos (apex) | `ember-mail-prod-email-events freecorps.com.br` | o mesmo onboarding |
-| Mailbox pessoal | `heitor@freecorps.com.br` (dono: o membro Heitor). Recebe só depois de o MX do apex ir para o Email Routing | `POST /inbox/mailboxes { owner }`, 2026-11-10 |
+| Mailboxes pessoais | `heitor@freecorps.com.br` (dono: o membro Heitor) e `wolf.stievano@freecorps.com.br` (dono: o membro Wolf). Recebem só depois de o MX do apex ir para o Email Routing | `POST /inbox/mailboxes { owner }`, 2026-11-10 |
 | Worker web | `ember-mail-web` (inbox web em workers.dev: assets + proxy de `/api/*` e `/ws`, binding `API` → `ember-mail-prod`) | `wrangler deploy` com uma config temporária fora do repositório (a URL da API não é commitada), 2026-11-10 |
 | Token admin | Keychain do macOS: serviço `ember-mail-prod-admin`, conta `ember` | `ops deploy` (primeiro) |
 
