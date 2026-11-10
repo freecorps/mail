@@ -1,0 +1,4 @@
+# GitHub-hosted labels actionlint does not know yet (the Xcode 27 image, .github/workflows/mobile.yml).
+self-hosted-runner:
+  labels:
+    - xcode-27
