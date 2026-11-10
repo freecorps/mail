@@ -45,7 +45,11 @@ export function UploadStrip({ items, onRemove }: { items: Upload[]; onRemove(id:
   );
 }
 
-/** A section of the compose form: the add button, one row per file (tap Remove to drop it). */
+/**
+ * A section of the compose form: the add button, one row per file (tap Remove to drop it).
+ * Buttons take `label`, never a bare string child: on iOS the universal Button hands children to SwiftUI, and a raw
+ * string there mounts an unregistered RN text view, which crashes release builds (TestFlight 1.1.0 (8) and (9)).
+ */
 export function UploadSection({ items, onAdd, onRemove }: { items: Upload[]; onAdd(): void; onRemove(id: string): void }) {
   const p = usePalette();
   const { t } = useI18n();
@@ -58,13 +62,9 @@ export function UploadSection({ items, onAdd, onRemove }: { items: Upload[]; onA
         </ListItem>
       ))}
       {items.map((u) => (
-        <Button key={`rm-${u.id}`} variant="text" onPress={() => onRemove(u.id)}>
-          {t("attach.remove", { name: u.name })}
-        </Button>
+        <Button key={`rm-${u.id}`} variant="text" onPress={() => onRemove(u.id)} label={t("attach.remove", { name: u.name })} />
       ))}
-      <Button variant="text" onPress={onAdd}>
-        {t("attach.add")}
-      </Button>
+      <Button variant="text" onPress={onAdd} label={t("attach.add")} />
       {items.length ? <UIText textStyle={{ color: p.secondary, fontSize: 13 }}>{t("attach.limitNote")}</UIText> : null}
     </FieldGroup.Section>
   );
