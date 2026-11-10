@@ -1,10 +1,11 @@
 // Hooks the email component calls (function handles in ember.config.ts), in the transaction that files the message.
 import { anyComponents as components, internalMutationGeneric as internalMutation, v } from "@freecorps/ember-server";
 import { PushNotifications } from "@freecorps/ember-push";
+import { canSeeWith, owners, type Member } from "./access.ts";
 
 const push = new PushNotifications(components.push);
 
-/** A new inbound message: push to every member of the mailbox (the mobile inbox). Spam and automated mail stay quiet. */
+/** A new inbound message: push to everyone who can see the mailbox (the mobile inbox). Spam and automated mail stay quiet. */
 export const onInbound = internalMutation({
   args: {
     threadId: v.string(),
@@ -20,11 +21,9 @@ export const onInbound = internalMutation({
   },
   handler: (ctx, e) => {
     if (e.status === "spam" || e.autoSubmitted) return null;
-    const users = ctx.db
-      .query("members")
-      .collect()
-      .filter((m) => m.mailboxes.includes(e.mailbox) || m.admin)
-      .map((m) => m.userId);
+    // A personal mailbox's mail reaches only its owner (ember/access.ts); a shared one's, its members and the admins.
+    const personal = owners(ctx.db);
+    const users = (ctx.db.query("members").collect() as Member[]).filter((m) => canSeeWith(personal, m, e.mailbox)).map((m) => m.userId);
     if (!users.length) return null;
     push.send(ctx, users, {
       title: `${e.from.name ?? e.from.email} · #${e.number}`,

@@ -327,6 +327,58 @@ describe("mail app", () => {
     expect(await resolveAccountId("t", { env: { CLOUDFLARE_ACCOUNT_ID: "x" }, fetch: accounts([]) })).toBe("x");
   });
 
+  it("personal mailboxes: only the owner sees, answers and is pushed their mail; no admin, member or key reads it", async () => {
+    // Heitor is an admin (every shared mailbox), Wolf a member of support; each has their own address.
+    expect((await admin.inbox.addMember({ user_id: "heitor", name: "Heitor", admin: true })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "wolf", name: "Wolf", mailboxes: ["support"] })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "heitor", address: "heitor@acme.test", display_name: "Heitor", owner: "heitor" })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf" })).error).toBeNull();
+    const box = (await admin.inbox.mailboxes()).data!.data;
+    expect(box.find((b) => b.name === "wolf")).toEqual({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf" });
+    expect(box.find((b) => b.name === "support")).toMatchObject({ owner: null, threads: expect.any(Number) });
+
+    const m = inbound("ana@user.test", "wolf@acme.test", mime({ from: '"Ana" <ana@user.test>', to: "wolf@acme.test", subject: "Lunch?", text: "Lunch on Friday?", id: "in-wolf@user.test" }));
+    await worker.email(m.msg as never, env as never, createExecutionContext());
+    expect(m.out.rejected).toBeNull();
+
+    const names = async (who: string) => (await call("query", "inbox:mailboxes", {}, `user:${who}`)).value.map((b: any) => `${b.name}${b.personal ? "*" : ""}`).sort();
+    // Each sees their own mailbox (marked personal); the admin sees every shared one but not Wolf's.
+    expect(await names("heitor")).toEqual(["heitor*", "privacy", "support"]);
+    expect(await names("wolf")).toEqual(["support", "wolf*"]);
+    expect((await call("query", "inbox:me", {}, "user:heitor")).value.mailboxes.sort()).toEqual(["heitor", "privacy", "support"]);
+    expect((await call("query", "inbox:threads", { mailbox: "wolf" }, "user:heitor")).error.message).toMatch(/no access/);
+    const t = (await call("query", "inbox:threads", { mailbox: "wolf" }, "user:wolf")).value.page[0];
+    expect(t).toMatchObject({ subject: "Lunch?", contact: "ana@user.test" });
+    expect((await call("query", "inbox:thread", { threadId: t._id }, "user:heitor")).error.message).toMatch(/no access/);
+    expect((await call("query", "inbox:search", { query: "lunch" }, "user:heitor")).value).toEqual([]);
+    expect((await call("query", "inbox:search", { query: "lunch" }, "user:wolf")).value).toMatchObject([{ threadId: t._id }]);
+    expect((await call("query", "inbox:recent", {}, "user:heitor")).value.threads.some((x: any) => x._id === t._id)).toBe(false);
+    // No assignment in a personal mailbox; its member list is its owner.
+    expect((await call("mutation", "inbox:assign", { threadId: t._id, userId: "wolf" }, "user:wolf")).error.message).toMatch(/personal mailbox/);
+    expect((await call("query", "inbox:members", { mailbox: "wolf" }, "user:wolf")).value).toEqual([{ userId: "wolf", name: "Wolf" }]);
+    // The owner answers it.
+    expect((await call("mutation", "inbox:reply", { threadId: t._id, text: "Sure!" }, "user:wolf")).error ?? null).toBeNull();
+    expect((await call("mutation", "inbox:reply", { threadId: t._id, text: "Me too" }, "user:heitor")).error.message).toMatch(/no access/);
+
+    // No API key reads, answers or searches it (the inbox permission is for shared mailboxes).
+    const key = (await admin.apiKeys.create({ name: "reader", permission: "inbox", project: "acme" })).data!.token;
+    const get = (path: string, init?: RequestInit) => SELF.fetch(`${BASE}${path}`, { ...init, headers: { authorization: `Bearer ${key}`, "content-type": "application/json" } });
+    expect((await get("/inbox/threads?mailbox=wolf")).status).toBe(403);
+    expect(await (await get(`/inbox/threads/${t._id}`)).json()).toMatchObject({ name: "personal_mailbox" });
+    expect((await get(`/inbox/threads/${t._id}/reply`, { method: "POST", body: JSON.stringify({ text: "x" }) })).status).toBe(403);
+    expect((await get("/inbox/search?q=lunch&mailbox=wolf")).status).toBe(403);
+    expect(((await (await get("/inbox/search?q=lunch")).json()) as any).data).toEqual([]);
+
+    // Shared again (owner: null): back to admins and its members (none), and the admin sees it.
+    expect((await admin.inbox.upsertMailbox({ name: "wolf", address: "wolf@acme.test", owner: null })).error).toBeNull();
+    expect(await names("heitor")).toEqual(["heitor*", "privacy", "support", "wolf"]);
+    expect(await names("wolf")).toEqual(["support"]);
+    expect((await admin.inbox.upsertMailbox({ name: "wolf", address: "wolf@acme.test", owner: "wolf" })).error).toBeNull();
+    // An owner who was not a member yet becomes one (with no shared mailboxes).
+    expect((await admin.inbox.upsertMailbox({ name: "caio", address: "caio@acme.test", owner: "caio" })).error).toBeNull();
+    expect(await names("caio")).toEqual(["caio*"]);
+  });
+
   it("members: POST /inbox/members is a patch (absent fields keep their stored value)", async () => {
     const member = async () => (await call("mutation", "testing:member", { userId: "boss-1" })).value;
     const names = async () => (await call("query", "inbox:mailboxes", {}, "user:boss-1")).value.map((b: any) => b.name).sort();

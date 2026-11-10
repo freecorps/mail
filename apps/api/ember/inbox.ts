@@ -1,14 +1,15 @@
 // The inbox for the dashboard and the mobile client (apps/mobile): reactive queries over the email component's
 // mailboxes, threads and search, for signed-in members only (identity from the app's auth provider: Ember auth
-// via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see all. Push devices register here.
+// via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see every shared one; a personal mailbox
+// only its owner (ember/access.ts). Push devices register here.
 import { anyComponents as components, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
 import { PushNotifications } from "@freecorps/ember-push";
+import { canSee, canSeeWith, ownerOf, owners, type Member } from "./access.ts";
 
 const push = new PushNotifications(components.push);
 const email = components.email.lib;
 
 type Ctx = { auth: { getUserIdentity(): { subject: string; name?: string; email?: string } | null }; db: any; runQuery: any; storage?: any };
-type Member = { userId: string; mailboxes: string[]; admin?: boolean; name?: string };
 
 const displayName = (m: Member) => m.name ?? m.userId;
 
@@ -21,13 +22,13 @@ function member(ctx: Ctx) {
 }
 
 function memberMailboxes(ctx: Ctx, m: Member): string[] {
-  const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name);
-  return m.admin ? all : all.filter((n) => m.mailboxes.includes(n));
+  const personal = owners(ctx.db);
+  return (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name).filter((n) => canSeeWith(personal, m, n));
 }
 
 function allowed(ctx: Ctx, mailbox: string) {
   const m = member(ctx);
-  if (!m.admin && !m.mailboxes.includes(mailbox)) throw new Error(`no access to mailbox ${mailbox}`);
+  if (!canSee(ctx.db, m, mailbox)) throw new Error(`no access to mailbox ${mailbox}`);
   return m;
 }
 
@@ -102,14 +103,15 @@ export const generateUploadUrl = mutation({
   },
 });
 
-/** Mailboxes this member can see, with unread counts (aggregate). */
+/** Mailboxes this member can see, with unread counts (aggregate); `personal`: their own mailbox, no one else's. */
 export const mailboxes = query({
   args: {},
   handler: (ctx) => {
     const m = member(ctx);
-    const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string; address: string; displayName?: string }>).filter((b) => m.admin || m.mailboxes.includes(b.name));
+    const personal = owners(ctx.db);
+    const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string; address: string; displayName?: string }>).filter((b) => canSeeWith(personal, m, b.name));
     const unread = ctx.runQuery(email.unread, { mailboxes: all.map((b) => b.name) }) as Record<string, { unread: number; threads: number }>;
-    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, ...unread[b.name]! }));
+    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), ...unread[b.name]! }));
   },
 });
 
@@ -129,7 +131,8 @@ export const search = query({
     const m = member(ctx);
     if (a.mailbox) allowed(ctx, a.mailbox);
     const rows = ctx.runQuery(email.search, { query: a.query, ...(a.mailbox ? { mailbox: a.mailbox } : {}), limit: 50 }) as Array<{ mailbox: string }>;
-    return rows.filter((r) => m.admin || m.mailboxes.includes(r.mailbox));
+    const personal = owners(ctx.db);
+    return rows.filter((r) => canSeeWith(personal, m, r.mailbox));
   },
 });
 
@@ -174,14 +177,15 @@ export const markUnread = mutation({
   },
 });
 
-/** Assigns a thread to a member who can see its mailbox (`userId: null` clears it). */
+/** Assigns a thread to a member who can see its mailbox (`userId: null` clears it). Not in a personal mailbox. */
 export const assign = mutation({
   args: { threadId: v.string(), userId: v.union(v.string(), v.null()) },
   handler: (ctx, a) => {
     const { t } = threadOf(ctx, a.threadId);
+    if (ownerOf(ctx.db, t.thread.mailbox) !== null) throw new Error("a personal mailbox has no assignment");
     if (a.userId === null) return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: null });
     const target = ctx.db.query("members").withIndex("by_user", (q) => q.eq("userId", a.userId!)).first() as Member | null;
-    if (!target || (!target.admin && !target.mailboxes.includes(t.thread.mailbox))) throw new Error(`${a.userId} cannot see mailbox ${t.thread.mailbox}`);
+    if (!target || !canSee(ctx.db, target, t.thread.mailbox)) throw new Error(`${a.userId} cannot see mailbox ${t.thread.mailbox}`);
     return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: target.userId, assigneeName: displayName(target) });
   },
 });
@@ -214,8 +218,9 @@ export const members = query({
   args: { mailbox: v.string() },
   handler: (ctx, a) => {
     allowed(ctx, a.mailbox);
+    const personal = owners(ctx.db);
     return (ctx.db.query("members").collect() as Member[])
-      .filter((m) => m.admin || m.mailboxes.includes(a.mailbox))
+      .filter((m) => canSeeWith(personal, m, a.mailbox))
       .map((m) => ({ userId: m.userId, name: displayName(m) }));
   },
 });

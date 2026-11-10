@@ -55,7 +55,8 @@ cd apps/web && bun run dev   # inbox web em http://localhost:5180 (proxy para a 
    O deploy cria o Worker, as filas (eventos de email, arquivos), o bucket R2 e o registro D1, e liga o binding
    `send_email`.
 4. Crie mailboxes e faça o onboarding do domínio:
-   - mailboxes: `POST /inbox/mailboxes { name, address }`;
+   - mailboxes: `POST /inbox/mailboxes { name, address }`; com `owner` (o id de um usuário), a caixa é pessoal
+     (`heitor@`): só o dono a vê, nem admins nem chaves de API;
    - domínio: `bun run domains add mail.seudominio.com --url <url> [--enable-routing]`, com
      `EMBER_ADMIN_TOKEN` no ambiente.
 
@@ -140,7 +141,8 @@ cd apps/web && bun run dev   # web inbox at http://localhost:5180 (proxies to th
    The deploy creates the Worker, the queues (email events, files), the R2 bucket and the D1 registry, and binds
    `send_email`.
 4. Create mailboxes and onboard the domain:
-   - mailboxes: `POST /inbox/mailboxes { name, address }`;
+   - mailboxes: `POST /inbox/mailboxes { name, address }`; with `owner` (a user id), the mailbox is personal
+     (`heitor@`): only its owner sees it, not admins or API keys;
    - domain: `bun run domains add mail.yourdomain.com --url <url> [--enable-routing]`, with `EMBER_ADMIN_TOKEN` in
      the environment.
 

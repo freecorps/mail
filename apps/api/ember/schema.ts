@@ -48,5 +48,11 @@ export default defineSchema({
 
     /** Who may read and answer which mailboxes (identity subject from the auth provider). */
     members: defineTable({ userId: v.string(), name: v.optional(v.string()), mailboxes: v.array(v.string()), admin: v.optional(v.boolean()) }).index("by_user", ["userId"]),
+
+    /**
+     * Personal mailboxes (heitor@, a person's own address): seen only by their owner, never by admins or API keys
+     * (ember/access.ts). A mailbox without a row here is shared.
+     */
+    personal: defineTable({ mailbox: v.string(), userId: v.string() }).index("by_mailbox", ["mailbox"]).index("by_user", ["userId"]),
   },
 });
