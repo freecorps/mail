@@ -285,7 +285,7 @@ export const me = query({
 /**
  * Asks for access: the signed-in user, not a member yet, is listed for admins (GET /inbox/members `requests`) with the
  * email and name of their sign-in, so an admin grants them (or makes their own mailbox) without asking for an id. A
- * member's call does nothing; calling again only refreshes the row.
+ * member's call does nothing; calling again keeps the first `at` and only updates a changed email or name.
  */
 export const requestAccess = mutation({
   args: {},
@@ -299,8 +299,9 @@ export const requestAccess = mutation({
     const name = claim("name");
     const row = { userId: who.subject, at: ctx.now, ...(email ? { email: email.slice(0, 320) } : {}), ...(name ? { name: name.slice(0, 200) } : {}) };
     const prev = ctx.db.query("accessRequests").withIndex("by_user", (q) => q.eq("userId", who.subject)).first();
-    if (prev) ctx.db.patch(prev._id, row);
-    else ctx.db.insert("accessRequests", row);
+    if (!prev) ctx.db.insert("accessRequests", row);
+    // Asking again keeps when they first asked; only a changed email or name is written.
+    else if (prev.email !== row.email || prev.name !== row.name) ctx.db.patch(prev._id, { email: row.email, name: row.name });
     return null;
   },
 });

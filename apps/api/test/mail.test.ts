@@ -443,9 +443,14 @@ describe("mail app", () => {
     expect((await call("mutation", "inbox:requestAccess", {}, lia)).error ?? null).toBeNull();
     expect((await call("mutation", "inbox:requestAccess", {}, "user:rui-1|rui@acme.test|Rui")).error ?? null).toBeNull();
     expect((await call("mutation", "inbox:requestAccess", {})).error.message).toMatch(/unauthenticated/);
+    const first = (await admin.inbox.members()).data!.requests.find((r) => r.user_id === "lia-1")!.requested_at;
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await call("mutation", "inbox:requestAccess", {}, "user:lia-1|lia@acme.test|Lia Souza")).error ?? null).toBeNull();
     let list = (await admin.inbox.members()).data!;
+    // Asking again keeps when they first asked; a new name is taken.
+    expect(list.requests.find((r) => r.user_id === "lia-1")).toMatchObject({ requested_at: first, name: "Lia Souza" });
     expect(list.requests.map((r) => r.user_id).sort()).toEqual(["lia-1", "rui-1"]);
-    expect(list.requests.find((r) => r.user_id === "lia-1")).toMatchObject({ email: "lia@acme.test", name: "Lia", requested_at: expect.any(String) });
+    expect(list.requests.find((r) => r.user_id === "lia-1")).toMatchObject({ email: "lia@acme.test", requested_at: expect.any(String) });
     expect(list.data.find((m) => m.user_id === "wolf")).toMatchObject({ personal_mailbox: "wolf", mailboxes: ["support"] });
     // A member asking does nothing; only a full-access key or the admin token lists anyone.
     expect((await call("mutation", "inbox:requestAccess", {}, "user:agent-1|a@acme.test")).error ?? null).toBeNull();
@@ -457,7 +462,7 @@ describe("mail app", () => {
     expect((await admin.inbox.upsertMailbox({ name: "lia", address: "lia@acme.test", owner: "lia-1" })).error).toBeNull();
     list = (await admin.inbox.members()).data!;
     expect(list.requests.filter((r) => ["lia-1", "rui-1"].includes(r.user_id))).toEqual([]);
-    expect(list.data.find((m) => m.user_id === "lia-1")).toMatchObject({ name: "Lia", personal_mailbox: "lia", mailboxes: [] });
+    expect(list.data.find((m) => m.user_id === "lia-1")).toMatchObject({ name: "Lia Souza", personal_mailbox: "lia", mailboxes: [] });
     expect((await call("query", "inbox:me", {}, lia)).value).toMatchObject({ member: true, mailboxes: ["lia"] });
   });
 
