@@ -21,7 +21,7 @@ async function until<T>(get: () => Promise<T>, ok: (v: T) => boolean, ms = 8000)
   }
 }
 
-const call = async (kind: "query" | "mutation", fn: string, args: unknown, token?: string) => {
+const call = async (kind: "query" | "mutation" | "action", fn: string, args: unknown, token?: string) => {
   const r = await SELF.fetch(`${BASE}/api/${kind}`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ fn, args, shard: "global:main" }) });
   return (await r.json()) as any;
 };
@@ -590,5 +590,60 @@ describe("mail app", () => {
     expect(await member()).toMatchObject({ admin: false, mailboxes: ["privacy"] });
     expect((await member()).name).toBeUndefined();
     expect(await names()).toEqual(["privacy"]);
+  });
+
+  it("admin screen (console:*): admins only; keys, mailboxes, members, emails and suppressions; personal mailboxes stay private", async () => {
+    const as = (kind: "query" | "mutation" | "action", fn: string, args: unknown = {}) => call(kind, `console:${fn}`, args, "user:root-1");
+    expect((await call("query", "console:overview", {}, "user:wolf")).error.message).toMatch(/admins only/);
+    expect((await call("action", "console:server", {}, "user:wolf")).error.message).toMatch(/admins only/);
+    expect((await admin.inbox.addMember({ user_id: "root-1", name: "Root", admin: true })).error).toBeNull();
+
+    const server = (await as("action", "server")).value;
+    expect(server).toMatchObject({ project: "mail", env: "test", manageDomains: true });
+    expect((await as("query", "overview")).value).toMatchObject({ domains: expect.any(Number), mailboxes: expect.any(Number), personalMailboxes: expect.any(Number) });
+    expect((await as("query", "domains")).value.map((d: any) => d.name)).toContain("acme.test");
+
+    // Keys: the token comes back once; the list shows the prefix; inbox projects and bad scopes are refused.
+    const k = (await as("action", "createKey", { name: "crm", permission: "sending_access", project: "crm", domain: "acme.test" })).value;
+    expect(k.token).toMatch(/^em_[0-9a-f]{8}_/);
+    const listed = (await as("query", "keys")).value.find((x: any) => x.id === k.id);
+    expect(listed).toMatchObject({ name: "crm", prefix: k.prefix, permission: "sending_access", project: "crm", domain: "acme.test" });
+    expect(JSON.stringify(listed)).not.toContain(k.token);
+    expect((await as("action", "createKey", { name: "x", permission: "inbox", project: "mailbox:support" })).error.message).toMatch(/belong to the inbox/);
+    expect((await as("action", "createKey", { name: "x", permission: "full_access", project: "crm", domain: "acme.test" })).error.message).toMatch(/only sending_access/);
+    expect((await as("mutation", "revokeKey", { id: k.id })).value).toBe(true);
+    expect((await as("query", "keys")).value.some((x: any) => x.id === k.id)).toBe(false);
+
+    // Mailboxes: personal ones show their owner, never their counts.
+    const boxes = (await as("query", "mailboxes")).value;
+    expect(boxes.find((b: any) => b.name === "wolf")).toMatchObject({ owner: "wolf", ownerName: "Wolf", counts: null, granted: [] });
+    expect(boxes.find((b: any) => b.name === "support")).toMatchObject({ owner: null, counts: { threads: expect.any(Number) } });
+    expect((await as("mutation", "saveMailbox", { name: "sales", address: "sales@acme.test", displayName: "Sales", retention: { closedDays: 90 } })).ok).toBe(true);
+    expect((await as("query", "mailboxes")).value.find((b: any) => b.name === "sales")).toMatchObject({ displayName: "Sales", retention: { closedDays: 90 } });
+    expect((await as("mutation", "saveMailbox", { name: "sales", address: "sales@acme.test", retention: null, displayName: null })).ok).toBe(true);
+    expect((await as("query", "mailboxes")).value.find((b: any) => b.name === "sales")).toMatchObject({ displayName: null, retention: null });
+
+    // Members: grant shared mailboxes only; no self-demotion or self-removal; an owner of a personal mailbox stays.
+    expect((await as("mutation", "saveMember", { userId: "new-1", mailboxes: ["sales"] })).ok).toBe(true);
+    expect((await as("query", "members")).value.members.find((m: any) => m.userId === "new-1")).toMatchObject({ mailboxes: ["sales"], admin: false });
+    expect((await as("mutation", "saveMember", { userId: "new-1", mailboxes: ["wolf"] })).error.message).toMatch(/personal mailbox/);
+    expect((await as("mutation", "saveMember", { userId: "root-1", admin: false })).error.message).toMatch(/your own admin/);
+    expect((await as("mutation", "removeMember", { userId: "root-1" })).error.message).toMatch(/yourself/);
+    expect((await as("mutation", "removeMember", { userId: "wolf" })).error.message).toMatch(/personal mailbox wolf/);
+    expect((await as("mutation", "removeMember", { userId: "new-1" })).value).toBe(true);
+
+    // Emails and suppressions by project; a personal mailbox's project is refused.
+    const projects = (await as("query", "projects")).value as string[];
+    expect(projects).toEqual(expect.arrayContaining(["default", "acme", "mailbox:support"]));
+    expect(projects).not.toContain("mailbox:wolf");
+    const page = (await as("query", "emails", { project: "acme", paginationOpts: { numItems: 5, cursor: null } })).value;
+    expect(page.page.length).toBeGreaterThan(0);
+    expect(page.page[0]).toMatchObject({ id: expect.any(String), status: expect.any(String), to: expect.any(Array) });
+    expect((await as("query", "emailEvents", { id: page.page[0].id })).ok).toBe(true);
+    expect((await as("query", "emails", { project: "mailbox:wolf", paginationOpts: { numItems: 5, cursor: null } })).error.message).toMatch(/owner's business/);
+    expect((await as("mutation", "suppress", { project: "acme", email: "Block@User.test" })).ok).toBe(true);
+    const sup = (await as("query", "suppressions", { project: "acme", paginationOpts: { numItems: 50, cursor: null } })).value.page;
+    expect(sup.map((x: any) => x.email)).toContain("block@user.test");
+    expect((await as("mutation", "unsuppress", { project: "acme", email: "block@user.test" })).value).toBe(true);
   });
 });

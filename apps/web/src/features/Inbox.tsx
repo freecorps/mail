@@ -23,6 +23,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar } from "./Sidebar";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
+import { AdminView } from "./admin/AdminView";
 
 export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const { t } = useI18n();
@@ -32,6 +33,8 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const current = boxes.mailboxes.find((b) => b.name === mailbox) ?? null;
 
   const [query, setQuery] = useSearchBox(route.query, navigate);
+  // The admin screen, for admins only (a non-admin following an `?a=` link stays in the inbox).
+  const adminSection = me.admin ? route.admin : null;
 
   const list = useThreadList({ mailbox: mailbox ?? "", filter: route.filter, query: route.query });
   const rows = mailbox ? list.rows : [];
@@ -54,12 +57,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
 
   // Title with the unread count (tabs in the background still tell there is mail).
   useEffect(() => {
+    if (adminSection) return; // the admin screen titles the tab itself
     document.title = boxes.totalUnread > 0 ? `(${boxes.totalUnread}) ${t("app.name")}` : t("app.name");
-  }, [boxes.totalUnread, t]);
+  }, [boxes.totalUnread, t, adminSection]);
 
-  const state = useRef({ rows, cursor, thread: route.thread, dialogs: composeOpen || helpOpen });
+  const state = useRef({ rows, cursor, thread: route.thread, dialogs: composeOpen || helpOpen || !!adminSection });
   useLayoutEffect(() => {
-    state.current = { rows, cursor, thread: route.thread, dialogs: composeOpen || helpOpen };
+    state.current = { rows, cursor, thread: route.thread, dialogs: composeOpen || helpOpen || !!adminSection };
   });
 
   useEffect(() => {
@@ -162,54 +166,67 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           mailboxes={boxes.mailboxes}
           loading={boxes.status === "loading"}
           current={mailbox}
+          inAdmin={!!adminSection}
+          onAdmin={me.admin ? () => navigate({ admin: "overview", thread: null }, { push: true }) : undefined}
           onSelect={(name) => {
             setCursor(null);
-            navigate({ mailbox: name, thread: null });
+            navigate({ admin: null, mailbox: name, thread: null }, { push: !!adminSection });
           }}
           onCompose={() => setComposeOpen(true)}
           onShortcuts={() => setHelpOpen(true)}
         />
-        <main className="flex min-w-0 flex-1">
-          <ThreadList
-            className={route.thread ? "hidden w-full md:flex md:w-[360px] lg:w-[400px]" : "flex w-full md:w-[360px] lg:w-[400px]"}
-            title={current?.displayName ?? mailbox ?? ""}
-            mailboxPicker={picker}
-            rows={rows}
-            loading={list.status === "loading" || boxes.status === "loading"}
-            error={list.error ? list.error.message : null}
-            searching={list.searching}
-            query={query}
-            onQuery={setQuery}
-            filter={route.filter}
-            onFilter={(f) => {
-              setCursor(null);
-              navigate({ filter: f });
-            }}
-            openId={route.thread}
-            cursorId={cursor}
-            onOpen={open}
-            canLoadMore={list.canLoadMore}
-            onLoadMore={list.loadMore}
-            searchRef={search}
+        {adminSection ? (
+          <AdminView
+            section={adminSection}
+            onSection={(a) => navigate({ admin: a }, { push: true })}
+            onClose={() => navigate({ admin: null }, { push: true })}
           />
-          {route.thread ? (
-            <ThreadView
-              key={route.thread}
-              threadId={route.thread}
-              onBack={() => navigate({ thread: null }, { push: true })}
-              composerRef={composer}
-              onOpenThread={(id) => navigate({ thread: id }, { push: true })}
+        ) : (
+          <main className="flex min-w-0 flex-1">
+            <ThreadList
+              className={route.thread ? "hidden w-full md:flex md:w-[360px] lg:w-[400px]" : "flex w-full md:w-[360px] lg:w-[400px]"}
+              title={current?.displayName ?? mailbox ?? ""}
+              mailboxPicker={picker}
+              rows={rows}
+              loading={list.status === "loading" || boxes.status === "loading"}
+              error={list.error ? list.error.message : null}
+              searching={list.searching}
+              query={query}
+              onQuery={setQuery}
+              filter={route.filter}
+              onFilter={(f) => {
+                setCursor(null);
+                navigate({ filter: f });
+              }}
+              openId={route.thread}
+              cursorId={cursor}
+              onOpen={open}
+              canLoadMore={list.canLoadMore}
+              onLoadMore={list.loadMore}
+              searchRef={search}
             />
-          ) : (
-            <section className="hidden flex-1 flex-col items-center justify-center gap-3 text-center md:flex" aria-label={t("thread.none")}>
-              <Logo className="size-10 opacity-20 grayscale" />
-              <p className="text-sm font-medium text-foreground/80">{t("thread.none")}</p>
-              <p className="text-xs text-muted-foreground">{t("thread.noneHint")}</p>
-            </section>
-          )}
-        </main>
+            {route.thread ? (
+              <ThreadView
+                key={route.thread}
+                threadId={route.thread}
+                onBack={() => navigate({ thread: null }, { push: true })}
+                composerRef={composer}
+                onOpenThread={(id) => navigate({ thread: id }, { push: true })}
+              />
+            ) : (
+              <section
+                className="hidden flex-1 flex-col items-center justify-center gap-3 text-center md:flex"
+                aria-label={t("thread.none")}
+              >
+                <Logo className="size-10 opacity-20 grayscale" />
+                <p className="text-sm font-medium text-foreground/80">{t("thread.none")}</p>
+                <p className="text-xs text-muted-foreground">{t("thread.noneHint")}</p>
+              </section>
+            )}
+          </main>
+        )}
       </div>
-      {!route.thread && (
+      {!route.thread && !adminSection && (
         <Button
           className="fixed right-4 bottom-4 size-12 rounded-full shadow-lg md:hidden"
           size="icon"

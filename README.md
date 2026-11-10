@@ -19,7 +19,7 @@ elas.
 |---|---|
 | `apps/api` | O serviço (app Ember → Worker `ember-mail-<env>`) |
 | `apps/mobile` | App Expo da inbox (iOS primeiro, Android pronto) |
-| `apps/web` | Inbox web (Vite+, React, shadcn/ui, Better Auth, cliente React do Ember); deploy em Workers static assets, ver [`apps/web/README.md`](apps/web/README.md) |
+| `apps/web` | Inbox web (Vite+, React, shadcn/ui, Better Auth, cliente React do Ember), com a tela de administração para admins (domínios, caixas, pessoas, chaves, envios, supressões); deploy em Workers static assets, ver [`apps/web/README.md`](apps/web/README.md) |
 | `packages/sdk` | `@freecorps/mail-sdk`: cliente HTTP tipado, no npm (`npm i @freecorps/mail-sdk`; release com a tag `sdk-v<versão>`) |
 | `docs/operations.md` | Operação da produção da FreeCorps e lista exata para apagar tudo |
 
@@ -105,7 +105,7 @@ them.
 |---|---|
 | `apps/api` | The service (Ember app → Worker `ember-mail-<env>`) |
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) |
-| `apps/web` | Web inbox (Vite+, React, shadcn/ui, Better Auth, Ember React client); deploys to Workers static assets, see [`apps/web/README.md`](apps/web/README.md) |
+| `apps/web` | Web inbox (Vite+, React, shadcn/ui, Better Auth, Ember React client), with the admin screen for admins (domains, mailboxes, people, keys, sends, suppressions); deploys to Workers static assets, see [`apps/web/README.md`](apps/web/README.md) |
 | `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client, on npm (`npm i @freecorps/mail-sdk`; released by the `sdk-v<version>` tag) |
 | `docs/operations.md` | Operating FreeCorps' production, with the exact teardown list (pt-BR) |
 

@@ -1,4 +1,4 @@
-import { PenSquare } from "lucide-react";
+import { PenSquare, Settings } from "lucide-react";
 import { Kbd } from "@/components/Kbd";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,9 @@ export function Sidebar(p: {
   mailboxes: Mailbox[];
   loading: boolean;
   current: string | null;
+  /** The admin screen is open (the mailbox list then shows none as current). */
+  inAdmin?: boolean;
+  onAdmin?: () => void;
   onSelect: (name: string) => void;
   onCompose: () => void;
   onShortcuts: () => void;
@@ -46,7 +49,7 @@ export function Sidebar(p: {
         ) : (
           <ul className="space-y-0.5">
             {p.mailboxes.map((b) => {
-              const active = b.name === p.current;
+              const active = !p.inAdmin && b.name === p.current;
               const label = b.displayName ?? b.name;
               return (
                 <li key={b.name}>
@@ -76,8 +79,24 @@ export function Sidebar(p: {
           </ul>
         )}
       </nav>
+      {p.me.admin && p.onAdmin && (
+        <div className="px-3 pb-2">
+          <button
+            type="button"
+            onClick={p.onAdmin}
+            aria-current={p.inAdmin ? "page" : undefined}
+            className={cn(
+              "pressable flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm",
+              p.inAdmin ? "bg-selected font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
+            )}
+          >
+            <Settings className="size-4" aria-hidden="true" />
+            {t("admin.open")}
+          </button>
+        </div>
+      )}
       <div className="border-t p-2">
-        <AccountMenu me={p.me} onShortcuts={p.onShortcuts} />
+        <AccountMenu me={p.me} onShortcuts={p.onShortcuts} onAdmin={p.onAdmin} />
       </div>
     </aside>
   );
