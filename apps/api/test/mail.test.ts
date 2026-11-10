@@ -359,7 +359,7 @@ describe("mail app", () => {
     expect((await admin.inbox.upsertMailbox({ name: "heitor", address: "heitor@acme.test", display_name: "Heitor", owner: "heitor" })).error).toBeNull();
     expect((await admin.inbox.upsertMailbox({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf" })).error).toBeNull();
     const box = (await admin.inbox.mailboxes()).data!.data;
-    expect(box.find((b) => b.name === "wolf")).toEqual({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf", catch_all: false });
+    expect(box.find((b) => b.name === "wolf")).toEqual({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf", catch_all: false, retention: null });
     expect(box.find((b) => b.name === "support")).toMatchObject({ owner: null, threads: expect.any(Number) });
 
     const m = inbound("ana@user.test", "wolf@acme.test", mime({ from: '"Ana" <ana@user.test>', to: "wolf@acme.test", subject: "Lunch?", text: "Lunch on Friday?", id: "in-wolf@user.test" }));
@@ -525,6 +525,16 @@ describe("mail app", () => {
     await worker.email(other.msg as never, env as never, createExecutionContext());
     expect(other.out.rejected).toMatch(/not found/i);
     expect((await admin.inbox.upsertMailbox({ name: "support", address: "support@acme.test", catch_all: true })).error?.message).toMatch(/already has a catch-all/);
+
+    // Retention: set, kept by an upsert without it, validated, cleared with null.
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", retention: { closed_days: 730, spam_days: 30 } })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", display_name: "Acme" })).error).toBeNull();
+    const kept = (await admin.inbox.mailboxes()).data!.data.find((b) => b.name === "geral");
+    expect(kept).toMatchObject({ retention: { closed_days: 730, spam_days: 30 }, catch_all: true });
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", retention: { closed_days: 0 } })).error?.message).toMatch(/whole number of days/);
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", retention: { closedDays: 5 } as never })).error?.message).toMatch(/unknown field closedDays/);
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", retention: null })).error).toBeNull();
+    expect((await admin.inbox.mailboxes()).data!.data.find((b) => b.name === "geral")!.retention).toBeNull();
 
     // Onboarding (operator script): the zone's catch-all rule → this Worker; the domain record keeps it; remove turns it off.
     const cfState = { catchAll: { enabled: false, matchers: [{ type: "all" }], actions: [{ type: "drop" }] } as any, puts: [] as any[] };

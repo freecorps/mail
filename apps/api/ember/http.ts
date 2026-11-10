@@ -11,7 +11,7 @@
 //   GET    /api-keys               POST /api-keys { name, permission?, project?, domain? }   DELETE /api-keys/:id
 //   GET    /templates              POST /templates { name, subject, html, text?, layout? }   DELETE /templates/:name
 //   POST   /suppressions { email } DELETE /suppressions/:email
-//   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner?, catch_all? }
+//   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner?, catch_all?, retention? }
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
 //   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
@@ -427,21 +427,41 @@ http.route({
         display_name: b.displayName ?? null,
         owner: personal[b.name] ?? null,
         catch_all: !!b.catchAll,
+        retention: b.retention ? { closed_days: b.retention.closedDays ?? null, spam_days: b.retention.spamDays ?? null } : null,
         ...(Object.hasOwn(personal, b.name) ? {} : (unread as any)[b.name]),
       })),
     });
   }),
 });
+/**
+ * `retention` of POST /inbox/mailboxes: `{ closed_days?, spam_days? }` (whole days; a missing or null kind is kept
+ * forever), null clears the policy, absent keeps it. The component validates the numbers.
+ */
+function retentionArg(r: unknown): { closedDays?: number; spamDays?: number } | null | undefined {
+  if (r === undefined || r === null) return r;
+  if (typeof r !== "object" || Array.isArray(r)) throw new ApiError(422, "validation_error", "retention must be { closed_days?, spam_days? } or null");
+  const { closed_days, spam_days, ...rest } = r as Record<string, unknown>;
+  if (Object.keys(rest).length) throw new ApiError(422, "validation_error", `retention: unknown field ${Object.keys(rest)[0]}`);
+  const out: { closedDays?: number; spamDays?: number } = {};
+  for (const [k, v, to] of [["closed_days", closed_days, "closedDays"], ["spam_days", spam_days, "spamDays"]] as const) {
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "number") throw new ApiError(422, "validation_error", `retention.${k} must be a number of days`);
+    out[to] = v;
+  }
+  return out.closedDays === undefined && out.spamDays === undefined ? null : out;
+}
+
 http.route({
   path: "/inbox/mailboxes",
   method: "POST",
   handler: route(async (ctx, request, p) => {
     need(p);
-    const b = await body<{ name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null; catch_all?: boolean | null }>(request);
+    const b = await body<{ name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null; catch_all?: boolean | null; retention?: { closed_days?: number | null; spam_days?: number | null } | null }>(request);
     if (b.catch_all !== undefined && b.catch_all !== null && typeof b.catch_all !== "boolean") throw new ApiError(422, "validation_error", "catch_all must be a boolean");
+    const retention = retentionArg(b.retention);
     if (b.owner !== undefined && b.owner !== null && (typeof b.owner !== "string" || !b.owner)) throw new ApiError(422, "validation_error", "owner must be a user id, or null to make the mailbox shared");
     // Absent fields keep their stored value; null (or "" for display_name) clears them.
-    const id = await ctx.runMutation(email.upsertMailbox, { name: b.name, address: b.address, ...(b.display_name !== undefined ? { displayName: b.display_name || null } : {}), ...(b.auto_reply !== undefined ? { autoReply: b.auto_reply } : {}), ...(b.catch_all !== undefined ? { catchAll: b.catch_all } : {}) });
+    const id = await ctx.runMutation(email.upsertMailbox, { name: b.name, address: b.address, ...(b.display_name !== undefined ? { displayName: b.display_name || null } : {}), ...(b.auto_reply !== undefined ? { autoReply: b.auto_reply } : {}), ...(b.catch_all !== undefined ? { catchAll: b.catch_all } : {}), ...(retention !== undefined ? { retention } : {}) });
     // `owner`: personal to that user (only they see it); null: shared again; absent: as it was.
     if (b.owner !== undefined) await ctx.runMutation("access:setOwner" as any, { mailbox: b.name, userId: b.owner });
     return json({ id }, 201);
