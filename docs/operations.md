@@ -18,10 +18,12 @@ no repositório.
 | Email Routing | subdomínio de roteamento `atendimento.freecorps.com.br` (MX/SPF só nesse nome; o apex continua no servidor de email próprio) | onboarding com `enableRouting` |
 | Regras de roteamento | `support@atendimento.freecorps.com.br` → Worker `ember-mail-prod`; `privacy@atendimento.freecorps.com.br` → Worker `ember-mail-prod` | onboarding |
 | Assinatura de eventos | `ember-mail-prod-email-events atendimento.freecorps.com.br` (`email.sending` → fila `ember-mail-prod-email-events`) | onboarding |
-| Email Sending (apex) | domínio de envio `freecorps.com.br` (só envio: DKIM `cf-bounce._domainkey`, `cf-bounce` MX/SPF; o MX, o SPF e o DMARC do apex não mudaram e continuam no servidor de email próprio) | `bun run domains add freecorps.com.br` (sem `--enable-routing`), 2026-11-10 |
+| Email Sending (apex) | domínio de envio `freecorps.com.br` (DKIM `cf-bounce._domainkey`, `cf-bounce` MX/SPF) | `bun run domains add freecorps.com.br`, 2026-11-10 |
+| Email Routing (apex) | `freecorps.com.br` saiu do Openship em 2026-11-10: MX `route1–3.mx.cloudflare.net`, SPF `v=spf1 include:_spf.mx.cloudflare.net ~all` (o DMARC `p=quarantine` ficou; os relatórios para `postmaster@` caem no catch-all) | troca do MX, abaixo |
+| Regras do apex | `heitor@`, `wolf.stievano@`, `geral@` → Worker `ember-mail-prod`; **catch-all da zona** → Worker `ember-mail-prod` (o resto do domínio vai para `geral@`) | `bun run domains add freecorps.com.br` com a mailbox `geral` `catch_all` |
 | Assinatura de eventos (apex) | `ember-mail-prod-email-events freecorps.com.br` | o mesmo onboarding |
-| Mailboxes pessoais | `heitor@freecorps.com.br` (dono: o membro Heitor) e `wolf.stievano@freecorps.com.br` (dono: o membro Wolf). Recebem só depois de o MX do apex ir para o Email Routing | `POST /inbox/mailboxes { owner }`, 2026-11-10 |
-| Worker web | `ember-mail-web` (inbox web em workers.dev: assets + proxy de `/api/*` e `/ws`, binding `API` → `ember-mail-prod`) | `wrangler deploy` com uma config temporária fora do repositório (a URL da API não é commitada), 2026-11-10 |
+| Mailboxes | pessoais: `heitor@freecorps.com.br` (dono Heitor) e `wolf.stievano@freecorps.com.br` (dono Wolf); compartilhada: `geral@freecorps.com.br` ("FreeCorps", catch-all do domínio, vista pelos admins) | `POST /inbox/mailboxes`, 2026-11-10 |
+| Worker web | `ember-mail-web` em `mail.freecorps.com.br` (custom domain) e workers.dev: assets + proxy de `/api/*` e `/ws`, binding `API` → `ember-mail-prod` | `wrangler deploy` com uma config temporária fora do repositório, 2026-11-10 |
 | Token admin | Keychain do macOS: serviço `ember-mail-prod-admin`, conta `ember` | `ops deploy` (primeiro) |
 
 Medido em 2026-11-05, com envios entre `support@` e `privacy@`:
@@ -99,6 +101,22 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
   schemas dos componentes nem o runtime mudaram, por isso não houve ensaio. O shard migrou no deploy. Inventário
   antes e depois: só adição. `ops e2e` passou: entregas em 2–7 s, SPF, DKIM e DMARC `pass`, e as respostas entraram
   nas threads certas.
+- **Troca do MX do apex, 2026-11-10** (`freecorps.com.br` saiu do Openship; o conteúdo de lá não foi importado):
+  1. API publicada com o catch-all (#20, Ember 0.5.7) e mailbox `geral` criada com `catch_all: true`.
+  2. Com um token da API da Cloudflare (DNS Edit + Email Routing Rules Edit na zona; o login OAuth do wrangler não
+     edita DNS): os MX `route1–3` e o SPF do Email Routing entraram **antes** de sair o MX `mail.freecorps.com.br` e
+     o SPF do Openship; os registros A/AAAA de `mail.freecorps.com.br` saíram.
+  3. O status do apex ficou `unlocked` (registros certos, mas não travados), e o onboarding só aceita `ready`.
+     `POST /zones/{zona}/email/routing/enable` travou os registros e deixou `ready`. (`POST /email/routing/dns`
+     com o nome do apex é recusado: aceita só subdomínio.)
+  4. `bun run domains add freecorps.com.br`: regras de `heitor@`, `wolf.stievano@`, `geral@` e catch-all → Worker;
+     status `verified`.
+  5. `mail.freecorps.com.br` virou custom domain do `ember-mail-web` (`PUT /accounts/{conta}/workers/domains`, com o
+     login do wrangler; o token de DNS não tinha permissão de Workers).
+  6. Prova: envios de `support@atendimento` para `heitor@`, `wolf.stievano@` e `contato@` saíram sem bounce, e o
+     de `contato@` entrou em `geral@`. Inventário antes e depois: só as mudanças acima.
+  - Para voltar ao Openship: recoloque o MX `10 mail.freecorps.com.br`, o SPF antigo e o A/AAAA de
+    `mail.freecorps.com.br` (o IP está no snapshot `antes-mx`), e tire o custom domain do `ember-mail-web`.
 - Logs: `bunx ember logs --env prod` (em `apps/api`).
 
 ## Domínios
