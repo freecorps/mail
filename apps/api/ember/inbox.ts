@@ -127,6 +127,35 @@ export const threads = query({
   },
 });
 
+/** Most sent conversations one `sent` read returns (the list grows its `limit` as it scrolls, up to here). */
+export const SENT_MAX = 300;
+
+/**
+ * The mailbox's Sent view: the conversations it wrote in (a reply or a new conversation), by its latest send, newest
+ * first. `limit` grows as the list scrolls, like `threads`; the component pages by 100, so this reads its pages on.
+ */
+export const sent = query({
+  args: { mailbox: v.string(), limit: v.optional(v.number()) },
+  handler: (ctx, a) => {
+    allowed(ctx, a.mailbox);
+    const want = Math.min(Math.max(Math.trunc(a.limit ?? 30), 1), SENT_MAX);
+    const page: Array<Record<string, unknown>> = [];
+    let before: string | undefined;
+    // A component page can come back short (it scans a window of sends); a few more reads fill it, bounded.
+    for (let reads = 1; ; reads++) {
+      const r = ctx.runQuery(email.sent, { mailbox: a.mailbox, limit: Math.min(want - page.length, 100), ...(before ? { before } : {}) }) as {
+        page: Array<Record<string, unknown>>;
+        next: string | null;
+      };
+      page.push(...r.page);
+      if (!r.next) return { page, isDone: true };
+      // At the cap the list ends there (older sends: search); otherwise a bigger `limit` reads on.
+      if (page.length >= want || reads >= 10) return { page, isDone: want >= SENT_MAX };
+      before = r.next;
+    }
+  },
+});
+
 export const thread = query({ args: { threadId: v.string() }, handler: (ctx, a) => threadOf(ctx, a.threadId).t });
 
 export const search = query({

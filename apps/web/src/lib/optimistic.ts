@@ -2,7 +2,7 @@
 // client, so a reply shows in the thread with a "sending" mark, the thread moves to "waiting", unread counters drop,
 // and the server's answer replaces all of it.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-client";
-import type { Mailbox, Message, Page, Thread, ThreadDetail, ThreadStatus, ThreadsArgs } from "./api";
+import type { Mailbox, Message, Page, SentArgs, SentThread, Thread, ThreadDetail, ThreadStatus, ThreadsArgs } from "./api";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
 export const OPTIMISTIC_PREFIX = "optimistic:";
@@ -37,7 +37,27 @@ function patchThread(store: Store, threadId: string, patch: (t: Thread) => Threa
         : value.page.map((t, j) => (j === i ? next : t));
     store.setQuery<any>("inbox:threads", args, { ...value, page });
   }
+  // The Sent view lists it too, whatever its status: patched in place (its place is when the mailbox last wrote).
+  for (const { args, value } of store.getAllQueries<any>("inbox:sent") as Array<{ args: SentArgs; value: SentPage | undefined }>) {
+    const i = value ? value.page.findIndex((t) => t._id === threadId) : -1;
+    if (!value || i < 0) continue;
+    const next: SentThread = { ...patch(value.page[i]!), lastSentAt: value.page[i]!.lastSentAt };
+    found ??= next;
+    store.setQuery<any>("inbox:sent", args, { ...value, page: value.page.map((t, j) => (j === i ? next : t)) });
+  }
   return found;
+}
+
+type SentPage = { page: SentThread[]; isDone: boolean };
+
+/** The mailbox just wrote in `thread`: it goes to the top of that mailbox's Sent lists (once). */
+function sentNow(store: Store, thread: Thread, at: number) {
+  for (const { args, value } of store.getAllQueries<any>("inbox:sent") as Array<{ args: SentArgs; value: SentPage | undefined }>) {
+    if (!value || args.mailbox !== thread.mailbox) continue;
+    const { lastSentAt: _l, ...plain } = thread as SentThread;
+    const rest = value.page.filter((t) => t._id !== thread._id);
+    store.setQuery<any>("inbox:sent", args, { ...value, page: [{ ...plain, lastSentAt: at }, ...rest] });
+  }
 }
 
 function adjustUnread(store: Store, mailbox: string, delta: number) {
@@ -76,12 +96,13 @@ function append(store: Store, args: { threadId: string; text: string }, directio
     };
     store.setQuery<any>("inbox:thread", { threadId: args.threadId }, { ...detail, messages: [...detail.messages, msg] });
   }
-  patchThread(store, args.threadId, (t) => ({
+  const thread = patchThread(store, args.threadId, (t) => ({
     ...t,
     messageCount: t.messageCount + 1,
     lastMessageAt: now,
     ...(direction === "note" ? {} : { status: t.status === "spam" ? "spam" : ("waiting" as ThreadStatus), snippet }),
   }));
+  if (thread && direction === "outbound") sentNow(store, thread, now);
 }
 
 /** `now` is injectable for tests. */
@@ -151,6 +172,7 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         if (!value || qa.mailbox !== args.mailbox || (qa.status !== undefined && qa.status !== "waiting")) continue;
         store.setQuery<any>("inbox:threads", qa, { ...value, page: [thread, ...value.page] });
       }
+      sentNow(store, thread, at);
     },
   };
   // A forward is a new conversation from the forwarded thread's mailbox: it shows at the top as a compose does.

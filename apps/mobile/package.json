@@ -16,11 +16,11 @@
   },
   "dependencies": {
     "@expo/ui": "~58.0.27",
-    "@freecorps/ember-email": "^0.5.4",
-    "@freecorps/ember-expo-push": "^0.5.4",
-    "@freecorps/ember-offline": "^0.5.4",
-    "@freecorps/ember-react-native": "^0.5.4",
-    "@freecorps/ember-server": "^0.5.4",
+    "@freecorps/ember-email": "^0.5.6",
+    "@freecorps/ember-expo-push": "^0.5.6",
+    "@freecorps/ember-offline": "^0.5.6",
+    "@freecorps/ember-react-native": "^0.5.6",
+    "@freecorps/ember-server": "^0.5.6",
     "@freecorps/mail-email-html": "workspace:*",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/netinfo": "12.0.1",
@@ -51,7 +51,7 @@
     "react-native-worklets": "0.13.0"
   },
   "devDependencies": {
-    "@freecorps/ember-client": "^0.5.4",
+    "@freecorps/ember-client": "^0.5.6",
     "@testing-library/react": "^16.3.3",
     "@types/react": "19",
     "happy-dom": "^21.0.4",

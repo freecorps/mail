@@ -1,12 +1,13 @@
 // View models of the mailbox and thread-list screens (hooks over live queries; the row builders are pure).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuerySnapshot } from "@freecorps/ember-react-native";
-import { api, type Mailbox, type SearchHit, type Thread, type ThreadStatus } from "../api";
+import { api, type Mailbox, type SearchHit, type SentThread, type Thread, type ThreadStatus } from "../api";
 import { contactOf, displayAddress } from "../lib/format";
 import { isOptimisticId } from "../offline/optimistic";
 
-export type ThreadFilter = "all" | "open" | "waiting" | "closed";
-export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed"];
+/** A status, or `sent`: the conversations the mailbox wrote in, by its latest send (not a status). */
+export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent";
+export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed", "sent"];
 export const PAGE = 30;
 
 export interface ThreadRow {
@@ -44,6 +45,9 @@ export function threadRow(t: Thread): ThreadRow {
     pending: isOptimisticId(t._id),
   };
 }
+
+/** A Sent row: the thread, at when the mailbox last wrote in it (not its latest message, maybe an answer). */
+export const sentRow = (t: SentThread): ThreadRow => ({ ...threadRow(t), at: t.lastSentAt });
 
 /** Search hits are messages: one row per thread (its best-ranked hit). */
 export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
@@ -101,15 +105,20 @@ export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query:
   const n = limit.key === key ? limit.n : PAGE;
   const q = o.query.trim();
   const searching = q.length >= MIN_QUERY;
-  const list = useQuerySnapshot(
+  const sentView = o.filter === "sent";
+  const inbox = useQuerySnapshot(
     api.inbox.threads,
-    searching ? "skip" : { mailbox: o.mailbox, ...(o.filter === "all" ? {} : { status: o.filter }), paginationOpts: { numItems: n, cursor: null } },
+    searching || sentView
+      ? "skip"
+      : { mailbox: o.mailbox, ...(o.filter === "all" ? {} : { status: o.filter }), paginationOpts: { numItems: n, cursor: null } },
   );
+  const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox: o.mailbox, limit: n } : "skip");
+  const list = sentView ? sent : inbox;
   const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, mailbox: o.mailbox } : "skip");
   const s = searching ? search : list;
   const fresh = useMemo(
-    () => (s.value === undefined ? null : searching ? searchRows(search.value ?? []) : (list.value?.page ?? []).map(threadRow)),
-    [searching, s.value, search.value, list.value],
+    () => (s.value === undefined ? null : searching ? searchRows(search.value ?? []) : sentView ? (sent.value?.page ?? []).map(sentRow) : (inbox.value?.page ?? []).map(threadRow)),
+    [searching, sentView, s.value, search.value, sent.value, inbox.value],
   );
   // While a bigger page (or a new search) loads, keep showing the previous rows of the same list.
   const last = useRef<{ key: string; rows: ThreadRow[] }>({ key: "", rows: [] });

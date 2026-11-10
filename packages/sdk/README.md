@@ -20,6 +20,7 @@ await mail.templates.create({ name: "welcome", subject: "Welcome {{name}}", html
 await mail.emails.send({ from: "hello@acme.com", to: "bo@example.com", template: { name: "welcome", data: { name: "Bo" } } });
 await mail.domains.create({ name: "mail.acme.com" });  // DNS records to check, then domains.verify(id)
 await mail.inbox.threads({ mailbox: "support", status: "open" });
+await mail.inbox.sent({ mailbox: "support" }); // what it sent, newest first; `next` goes on as `before`
 ```
 
 It has no dependencies and runs on Node 18+, Workers, Deno, Bun and browsers. License: MIT.
