@@ -101,6 +101,10 @@ const ptBR = {
   "thread.failed": "Não foi possível enviar: {message}",
   "thread.messageFrame": "Mensagem de {from}",
   "thread.archived": "Conversa arquivada",
+  "thread.delete": "Excluir conversa",
+  "thread.deleteTitle": "Excluir esta conversa?",
+  "thread.deleteBody": "A conversa, as mensagens, as notas e os anexos são apagados de vez. Uma resposta ainda na fila não sai.",
+  "thread.deleted": "Conversa excluída",
   "thread.reopened": "Conversa reaberta",
 
   "assign.title": "Atribuir a",
@@ -258,6 +262,10 @@ const en: Record<StringKey, string> = {
   "thread.failed": "Could not send: {message}",
   "thread.messageFrame": "Message from {from}",
   "thread.archived": "Conversation archived",
+  "thread.delete": "Delete conversation",
+  "thread.deleteTitle": "Delete this conversation?",
+  "thread.deleteBody": "The conversation, its messages, notes and attachments are deleted for good. A reply still queued does not go.",
+  "thread.deleted": "Conversation deleted",
   "thread.reopened": "Conversation reopened",
 
   "assign.title": "Assign to",

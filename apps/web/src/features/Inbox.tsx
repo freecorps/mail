@@ -224,6 +224,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
                 onBack={() => navigate({ thread: null }, { push: true })}
                 composerRef={composer}
                 onOpenThread={(id) => navigate({ thread: id }, { push: true })}
+                admin={me.admin}
               />
             ) : (
               <section

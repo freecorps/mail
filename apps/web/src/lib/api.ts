@@ -318,6 +318,7 @@ export const api = {
     markRead: q<"mutation", { threadId: string }, boolean>("inbox:markRead"),
     markUnread: q<"mutation", { threadId: string }, boolean>("inbox:markUnread"),
     setStatus: q<"mutation", { threadId: string; status: ThreadStatus }, ThreadStatus>("inbox:setStatus"),
+    deleteThread: q<"mutation", { threadId: string }, { deleted: boolean; canceled?: number }>("inbox:deleteThread"),
     assign: q<"mutation", { threadId: string; userId: string | null }, string | null>("inbox:assign"),
     compose: q<
       "mutation",

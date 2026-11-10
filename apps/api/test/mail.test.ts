@@ -758,4 +758,33 @@ describe("mail app", () => {
       globalThis.fetch = real;
     }
   });
+
+  it("delete a conversation: admins in shared mailboxes, owners in their own; members and keys on personal ones cannot", async () => {
+    const send = async (to: string, subject: string, id: string) => {
+      const m = inbound("lia@user.test", to, mime({ from: "lia@user.test", to, subject, text: "delete me", id }));
+      await worker.email(m.msg as never, env as never, createExecutionContext());
+    };
+    await send("support@acme.test", "Delete shared", "del-1@user.test");
+    await send("wolf@acme.test", "Delete personal", "del-2@user.test");
+    await send("support@acme.test", "Delete by key", "del-3@user.test");
+    const find = async (who: string, mailbox: string, subject: string) =>
+      ((await call("query", "inbox:threads", { mailbox }, `user:${who}`)).value.page as any[]).find((t) => t.subject === subject);
+    const shared = await find("root-1", "support", "Delete shared");
+    const own = await find("wolf", "wolf", "Delete personal");
+    // Wolf is a member of support, not an admin: no deleting there.
+    expect((await call("mutation", "inbox:deleteThread", { threadId: shared._id }, "user:wolf")).error.message).toMatch(/only an admin/);
+    // An admin cannot even see Wolf's personal mailbox.
+    expect((await call("mutation", "inbox:deleteThread", { threadId: own._id }, "user:root-1")).error.message).toMatch(/no access/);
+    expect((await call("mutation", "inbox:deleteThread", { threadId: shared._id }, "user:root-1")).value).toMatchObject({ deleted: true, mailbox: "support" });
+    expect(await find("root-1", "support", "Delete shared")).toBeUndefined();
+    expect((await call("mutation", "inbox:deleteThread", { threadId: own._id }, "user:wolf")).value).toMatchObject({ deleted: true });
+    // HTTP, full_access: a shared conversation yes, a personal one never.
+    const byKey = (await admin.inbox.threads({ mailbox: "support" })).data!.page.find((t) => t.subject === "Delete by key")!;
+    const del = await SELF.fetch(`${BASE}/inbox/threads/${byKey._id}`, { method: "DELETE", headers: { authorization: "Bearer admin-secret" } });
+    expect(await del.json()).toMatchObject({ object: "thread", deleted: true });
+    await send("wolf@acme.test", "Personal again", "del-4@user.test");
+    const again = await find("wolf", "wolf", "Personal again");
+    const refused = await SELF.fetch(`${BASE}/inbox/threads/${again._id}`, { method: "DELETE", headers: { authorization: "Bearer admin-secret" } });
+    expect(refused.status).toBe(403);
+  });
 });
