@@ -148,6 +148,31 @@ describe("mail app", () => {
     expect((await sender.emails.get(again.data!.id)).data!.last_event).toBe("suppressed");
   });
 
+  it("GET /emails lists the project's emails newest first, filtered by tag, status, recipient and time, page by page", async () => {
+    const tagged = async (n: number, to: string) => (await sender.emails.send({ from: "hello@acme.test", to, subject: `list ${n}`, text: "x", tags: [{ name: "order", value: String(n) }] })).data!.id;
+    const a = await tagged(1, "ana@user.test");
+    const b = await tagged(2, "bia@user.test");
+    const c = await tagged(3, "ana@user.test");
+    const all = (await sender.emails.list({ tag: "order" })).data!;
+    expect(all.data.map((e) => e.id)).toEqual([c, b, a]);
+    expect((await sender.emails.list({ tag: "order:2" })).data!.data.map((e) => e.id)).toEqual([b]);
+    expect((await sender.emails.list({ tag: "order", to: "ANA@user.test" })).data!.data.map((e) => e.id)).toEqual([c, a]);
+    // Paging: two by two, nothing skipped or repeated.
+    const first = (await sender.emails.list({ tag: "order", limit: 2 })).data!;
+    expect(first.data.map((e) => e.id)).toEqual([c, b]);
+    expect(first.has_more).toBe(true);
+    const second = (await sender.emails.list({ tag: "order", limit: 2, cursor: first.next_cursor! })).data!;
+    expect(second.data.map((e) => e.id)).toEqual(expect.arrayContaining([a]));
+    expect(second.data.map((e) => e.id)).not.toContain(b);
+    // Time and status filters; a bad date is a 422; another project's key sees none of them.
+    expect((await sender.emails.list({ tag: "order", since: new Date(Date.now() + 60_000) })).data!.data).toEqual([]);
+    expect((await sender.emails.list({ tag: "order", status: "canceled" })).data!.data).toEqual([]);
+    expect((await sender.emails.list({ since: "not a date" })).error).toMatchObject({ statusCode: 422 });
+    const other = (await admin.apiKeys.create({ name: "other", permission: "sending_access", project: "else" })).data!.token;
+    const elsewhere = new EmberMail(other, { baseUrl: BASE, fetch: f });
+    expect((await elsewhere.emails.list({ tag: "order" })).data!.data).toEqual([]);
+  });
+
   it("inbound: email() → mailbox thread (attachment in R2), auto-reply sent, unknown addresses rejected", async () => {
     expect((await admin.inbox.upsertMailbox({ name: "support", address: "support@acme.test", display_name: "Acme Support", auto_reply: { subject: "Re: {{subject}} [#{{number}}]", text: "Hi {{name}}, ticket #{{number}} is open." } })).error).toBeNull();
     expect((await admin.inbox.upsertMailbox({ name: "privacy", address: "privacy@acme.test" })).error).toBeNull();

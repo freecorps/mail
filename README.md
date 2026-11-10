@@ -20,7 +20,7 @@ elas.
 | `apps/api` | O serviço (app Ember → Worker `ember-mail-<env>`) |
 | `apps/mobile` | App Expo da inbox (iOS primeiro, Android pronto) |
 | `apps/web` | Inbox web (Vite+, React, shadcn/ui, Better Auth, cliente React do Ember); deploy em Workers static assets, ver [`apps/web/README.md`](apps/web/README.md) |
-| `packages/sdk` | `@freecorps/mail-sdk`: cliente HTTP tipado (ainda não publicado) |
+| `packages/sdk` | `@freecorps/mail-sdk`: cliente HTTP tipado, no npm (`npm i @freecorps/mail-sdk`; release com a tag `sdk-v<versão>`) |
 | `docs/operations.md` | Operação da produção da FreeCorps e lista exata para apagar tudo |
 
 ## Começar
@@ -68,7 +68,7 @@ Operação, deploy de produção e remoção: [`docs/operations.md`](docs/operat
 
 ## API (resumo)
 
-`POST /emails` (+ `Idempotency-Key`), `POST /emails/batch`, `GET /emails/:id`, `GET /emails/:id/events`,
+`POST /emails` (+ `Idempotency-Key`), `POST /emails/batch`, `GET /emails` (filtros: `status`, `tag`, `to`, `since`, `until`), `GET /emails/:id`, `GET /emails/:id/events`,
 `POST /emails/:id/cancel`, `/domains`, `/api-keys` (`full_access | sending_access | inbox`), `/templates`,
 `/suppressions`, `/inbox/*`. Erros no formato do Resend: `{ statusCode, name, message }`. Os detalhes estão em
 `apps/api/ember/http.ts`.
@@ -106,7 +106,7 @@ them.
 | `apps/api` | The service (Ember app → Worker `ember-mail-<env>`) |
 | `apps/mobile` | Expo inbox app (iOS first, Android ready) |
 | `apps/web` | Web inbox (Vite+, React, shadcn/ui, Better Auth, Ember React client); deploys to Workers static assets, see [`apps/web/README.md`](apps/web/README.md) |
-| `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client (not published yet) |
+| `packages/sdk` | `@freecorps/mail-sdk`: typed HTTP client, on npm (`npm i @freecorps/mail-sdk`; released by the `sdk-v<version>` tag) |
 | `docs/operations.md` | Operating FreeCorps' production, with the exact teardown list (pt-BR) |
 
 ### Getting started
