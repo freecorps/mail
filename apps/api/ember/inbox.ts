@@ -61,15 +61,17 @@ const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n 
 
 /**
  * Splits the files into attachments and links (smallest attach first, up to ATTACH_LIMIT) and appends the links to
- * the text. Every file must be uploaded (ready) already.
+ * the text. Every file must be uploaded (ready) already. `list`: the member's own uploads; `trusted`: files already
+ * in a thread they can see (a forwarded message's attachments), which need no upload of theirs.
  */
-export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined) {
-  if (!list?.length) return { text, attachments: undefined };
-  if (list.length > 20) throw new Error("at most 20 attachments");
-  const files = list.map((a) => {
+export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = []) {
+  const own = list ?? [];
+  if (!own.length && !trusted.length) return { text, attachments: undefined };
+  if (own.length + trusted.length > 20) throw new Error("at most 20 attachments");
+  const files = [...trusted.map((a) => ({ ...a, trusted: true })), ...own.map((a) => ({ ...a, trusted: false }))].map(({ trusted: ok, ...a }) => {
     // Only the member's own uploads: a file id seen elsewhere (another mailbox's attachment) is refused.
-    const up = ctx.db.query("uploads").withIndex("by_file", (q: any) => q.eq("file", a.file)).first() as { userId: string } | null;
-    if (!up || up.userId !== m.userId) throw new Error(`attachment ${a.filename}: not an upload of yours`);
+    const up = ok ? null : (ctx.db.query("uploads").withIndex("by_file", (q: any) => q.eq("file", a.file)).first() as { userId: string } | null);
+    if (!ok && (!up || up.userId !== m.userId)) throw new Error(`attachment ${a.filename}: not an upload of yours`);
     const meta = ctx.storage.getMetadata(a.file) as { size: number | null; state: string } | null;
     if (!meta) throw new Error(`attachment ${a.filename}: file not found`);
     if (meta.state !== "ready") throw new Error(`attachment ${a.filename}: still uploading`);
@@ -138,12 +140,47 @@ export const search = query({
   },
 });
 
+/** Most people a reply or a forward copies (`cc`), well past any real "reply all". */
+export const MAX_CC = 50;
+
+const ccArg = v.optional(v.array(v.string()));
+function ccOf(cc: string[] | undefined) {
+  if (cc && cc.length > MAX_CC) throw new Error(`at most ${MAX_CC} people in copy`);
+  return cc?.length ? { cc } : {};
+}
+
+/** Answers the thread's contact; `cc` copies others too (reply all: the client lists who else was on the message). */
 export const reply = mutation({
-  args: { threadId: v.string(), text: v.string(), attachments: attachmentsArg },
+  args: { threadId: v.string(), text: v.string(), cc: ccArg, attachments: attachmentsArg },
   handler: (ctx, a) => {
     const { m } = threadOf(ctx, a.threadId);
     const w = withAttachments(ctx, m, a.text, a.attachments);
-    return ctx.runMutation(email.reply, { threadId: a.threadId, text: w.text, author: displayName(m), ...(w.attachments ? { attachments: w.attachments } : {}) });
+    return ctx.runMutation(email.reply, { threadId: a.threadId, text: w.text, author: displayName(m), ...ccOf(a.cc), ...(w.attachments ? { attachments: w.attachments } : {}) });
+  },
+});
+
+/**
+ * Forwards a message of a thread the member can see, as a new conversation from the same mailbox. The client writes
+ * `subject` and `text` (what the member wrote above the quoted original, in their language); the original's files go
+ * along (attached up to ATTACH_LIMIT, the rest as links), with any the member uploaded. Not a note.
+ */
+export const forward = mutation({
+  args: { threadId: v.string(), messageId: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg },
+  handler: (ctx, a) => {
+    const { t, m } = threadOf(ctx, a.threadId);
+    const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string }> }>).find((x) => x._id === a.messageId);
+    if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
+    const original = msg.attachments.map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
+    const w = withAttachments(ctx, m, a.text, a.attachments, original);
+    return ctx.runMutation(email.compose, {
+      mailbox: t.thread.mailbox,
+      to: a.to,
+      ...ccOf(a.cc),
+      subject: a.subject,
+      text: w.text,
+      author: displayName(m),
+      ...(w.attachments ? { attachments: w.attachments } : {}),
+    });
   },
 });
 

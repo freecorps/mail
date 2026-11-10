@@ -53,6 +53,7 @@ export const Icons = {
   sendMail: icon("paperplane", "send"),
   note: icon("note.text", "sticky_note_2"),
   attach: icon("paperclip", "attach_file"),
+  forward: icon("arrowshape.turn.up.right", "forward"),
   check: icon("checkmark", "check"),
   mail: icon("envelope.fill", "mail"),
 } satisfies Record<string, IconSpec>;

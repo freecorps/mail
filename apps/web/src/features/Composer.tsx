@@ -23,7 +23,9 @@ export function Composer({
   ref?: Ref<ComposerHandle>;
   contactName: string;
   disabled: boolean;
-  onReply: (text: string) => Promise<unknown>;
+  onReply: (text: string, cc?: string[]) => Promise<unknown>;
+  /** Everyone else on the latest message received: "Reply all" copies them (shown only when there is someone). */
+  others?: string[];
   onNote: (text: string) => Promise<unknown>;
   /** A personal mailbox: replies only, no internal notes. */
   notes?: boolean;
@@ -32,6 +34,8 @@ export function Composer({
   const [picked, setMode] = useState<ComposerMode>("reply");
   const mode = composerMode(picked, p.notes);
   const [text, setText] = useState("");
+  const [all, setAll] = useState(false);
+  const others = p.others ?? [];
   const [busy, setBusy] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
 
@@ -50,7 +54,8 @@ export function Composer({
     const m = mode;
     setText("");
     setBusy(true);
-    (m === "reply" ? p.onReply(value) : p.onNote(value))
+    const cc = m === "reply" && all && others.length ? others : undefined;
+    (m === "reply" ? p.onReply(value, cc) : p.onNote(value))
       .then(() => toast.success(m === "reply" ? t("thread.sent") : t("thread.noteSaved")))
       .catch((e: unknown) => {
         setText((cur) => (cur ? `${value}\n\n${cur}` : value));
@@ -115,6 +120,15 @@ export function Composer({
             </ToggleGroup>
           )}
           <div className="flex items-center gap-3">
+            {!note && others.length > 0 && (
+              <label
+                className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
+                title={t("thread.replyAllHint", { list: others.join(", ") })}
+              >
+                <input type="checkbox" className="size-3.5 accent-primary" checked={all} onChange={(e) => setAll(e.target.checked)} />
+                {t("thread.replyAll")}
+              </label>
+            )}
             <span className="hidden text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
             <Button type="submit" size="sm" disabled={!text.trim() || busy}>
               {busy && <Loader2 className="animate-spin" aria-hidden="true" />}

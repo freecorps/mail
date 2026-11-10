@@ -1,5 +1,17 @@
-import { Fragment, useEffect, useRef, type Ref } from "react";
-import { Archive, ArchiveRestore, ArrowLeft, Check, Download, FileText, Mail, MailOpen, StickyNote, UserRound } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState, type Ref } from "react";
+import {
+  Archive,
+  ArchiveRestore,
+  ArrowLeft,
+  Check,
+  Download,
+  FileText,
+  Forward,
+  Mail,
+  MailOpen,
+  StickyNote,
+  UserRound,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Avatar } from "@/components/Avatar";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -22,15 +34,65 @@ import { contactOf, displayAddress, fileSize, formatFull } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMembers, useThread, type MessageItem } from "@/model/thread";
 import { isPersonal, useMailboxes } from "@/model/threads";
+import { forwardSubject, forwardText, replyAllCc } from "@/model/forward";
+import { ComposeDialog, type ForwardSource } from "./ComposeDialog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { EmailFrame } from "./EmailFrame";
 
-export function ThreadView({ threadId, onBack, composerRef }: { threadId: string; onBack: () => void; composerRef: Ref<ComposerHandle> }) {
-  const { t } = useI18n();
+export function ThreadView({
+  threadId,
+  onBack,
+  composerRef,
+  onOpenThread,
+}: {
+  threadId: string;
+  onBack: () => void;
+  composerRef: Ref<ComposerHandle>;
+  /** Opens another thread (a forwarded message's new conversation). */
+  onOpenThread?: (threadId: string) => void;
+}) {
+  const { t, locale } = useI18n();
   const vm = useThread(threadId);
   const members = useMembers(vm.thread?.mailbox ?? null);
+  const boxes = useMailboxes().mailboxes;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
-  const personal = isPersonal(useMailboxes().mailboxes, vm.thread?.mailbox);
+  const personal = isPersonal(boxes, vm.thread?.mailbox);
+  const own = boxes.find((b) => b.name === vm.thread?.mailbox)?.address ?? "";
+  const others = useMemo(
+    () =>
+      vm.thread
+        ? replyAllCc(
+            vm.items.map((i) => i.message),
+            own,
+            vm.thread.contact,
+          )
+        : [],
+    [vm.items, vm.thread, own],
+  );
+  // The message being forwarded stays while the dialog is closed, so a failed send can reopen it with its draft.
+  const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
+  const [forwardOpen, setForwardOpen] = useState(false);
+  const forward = (m: Message) => {
+    setForwardOpen(true);
+    setForwarding({
+      threadId,
+      messageId: m._id,
+      mailbox: m.mailbox,
+      subject: forwardSubject(m.subject || (vm.thread?.subject ?? "")),
+      text: forwardText(
+        m,
+        {
+          header: t("forward.header"),
+          from: t("forward.from"),
+          date: t("forward.date"),
+          subject: t("forward.subject"),
+          to: t("forward.to"),
+        },
+        formatFull(m.at, locale),
+      ),
+      files: m.attachments.map((a) => a.filename),
+    });
+  };
   const scroller = useRef<HTMLOListElement>(null);
   const count = vm.items.length;
   // Open on the newest message (the view is keyed by thread, so `stick` starts true per thread) and follow new ones
@@ -146,7 +208,7 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
       >
         {vm.items.map((item) => (
           <li key={item.message._id}>
-            <MessageCard item={item} urls={vm.attachmentUrls} />
+            <MessageCard item={item} urls={vm.attachmentUrls} onForward={item.pending ? undefined : () => forward(item.message)} />
           </li>
         ))}
       </ol>
@@ -158,6 +220,16 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
         onReply={vm.reply}
         onNote={vm.note}
         notes={!personal}
+        others={others}
+      />
+      <ComposeDialog
+        key={forwarding?.messageId ?? "none"}
+        open={forwardOpen && forwarding !== null}
+        onOpenChange={setForwardOpen}
+        mailboxes={boxes}
+        defaultMailbox={vm.thread?.mailbox ?? null}
+        forward={forwarding}
+        onSent={(id) => onOpenThread?.(id)}
       />
     </Pane>
   );
@@ -194,7 +266,7 @@ function Action({ label, kbd, onClick, children }: { label: string; kbd: string;
   );
 }
 
-function MessageCard({ item, urls }: { item: MessageItem; urls: Record<string, string | null> }) {
+function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Record<string, string | null>; onForward?: () => void }) {
   const { t, locale } = useI18n();
   const m = item.message;
   const from = displayAddress(m.from);
@@ -237,6 +309,16 @@ function MessageCard({ item, urls }: { item: MessageItem; urls: Record<string, s
         <time className="shrink-0 text-xs text-muted-foreground" dateTime={new Date(m.at).toISOString()}>
           {item.pending ? t("thread.sending") : formatFull(m.at, locale)}
         </time>
+        {onForward && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" className="-mt-1 -mr-2" aria-label={t("thread.forward")} onClick={onForward}>
+                <Forward aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("thread.forward")}</TooltipContent>
+          </Tooltip>
+        )}
       </header>
       <div className="px-4 pb-4">
         {m.html && m.direction === "inbound" ? (

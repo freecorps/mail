@@ -100,6 +100,30 @@ describe("compose dialog", () => {
   });
 });
 
+describe("forwarding", () => {
+  it("starts from the message: its mailbox (fixed), subject and quoted text, and names the files going along", () => {
+    const { wrapper } = setup();
+    const source = {
+      threadId: "t1",
+      messageId: "m1",
+      mailbox: "privacy",
+      subject: "Fwd: Contrato",
+      text: "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>",
+      files: ["contrato.pdf"],
+    };
+    render(<ComposeDialog open onOpenChange={() => {}} mailboxes={boxes} defaultMailbox="support" forward={source} onSent={() => {}} />, {
+      wrapper,
+    });
+    expect(screen.getByRole("heading").textContent).toBe("Encaminhar mensagem");
+    const from = screen.getByLabelText("De") as HTMLSelectElement;
+    expect(from.value).toBe("privacy");
+    expect(from.disabled).toBe(true);
+    expect((screen.getByLabelText("Assunto") as HTMLInputElement).value).toBe("Fwd: Contrato");
+    expect((screen.getByLabelText("Mensagem") as HTMLTextAreaElement).value).toContain("Mensagem encaminhada");
+    expect(screen.getByText("Vão junto: contrato.pdf")).toBeTruthy();
+  });
+});
+
 describe("sign in", () => {
   it("only sign-up enforces the 8-character password minimum", () => {
     render(

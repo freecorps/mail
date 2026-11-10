@@ -198,6 +198,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
               threadId={route.thread}
               onBack={() => navigate({ thread: null }, { push: true })}
               composerRef={composer}
+              onOpenThread={(id) => navigate({ thread: id }, { push: true })}
             />
           ) : (
             <section className="hidden flex-1 flex-col items-center justify-center gap-3 text-center md:flex" aria-label={t("thread.none")}>

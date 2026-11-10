@@ -1,6 +1,7 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
 import { composerMode, isPersonal, ownFirst } from "@/model/threads";
+import { forwardSubject, forwardText, replyAllCc } from "@/model/forward";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
 import { pickLocale, translate } from "@/i18n/strings";
@@ -329,5 +330,47 @@ describe("personal mailboxes", () => {
     expect(composerMode("note", true)).toBe("note");
     expect(composerMode("note", undefined)).toBe("note");
     expect(composerMode("reply", false)).toBe("reply");
+  });
+});
+
+describe("reply all and forward", () => {
+  const msg = (o: Partial<Message>): Message =>
+    ({
+      _id: "m",
+      direction: "inbound",
+      from: { email: "ana@user.test", name: "Ana" },
+      to: [],
+      cc: [],
+      subject: "Contrato",
+      text: "Segue.",
+      attachments: [],
+      ...o,
+    }) as Message;
+
+  it("reply all copies everyone else on the latest message received, never this mailbox (or a +tag) nor the contact", () => {
+    const messages = [
+      msg({ to: [{ email: "old@user.test" }] }),
+      msg({ direction: "outbound", to: [{ email: "ignored@user.test" }] }),
+      msg({
+        to: [{ email: "Heitor@freecorps.test" }, { email: "bia@user.test", name: "Bia" }],
+        cc: [{ email: "heitor+t_x@freecorps.test" }, { email: "ana@user.test" }, { email: "BIA@user.test" }, { email: "caio@user.test" }],
+      }),
+    ];
+    expect(replyAllCc(messages, "heitor@freecorps.test", "ana@user.test")).toEqual(["Bia <bia@user.test>", "caio@user.test"]);
+    expect(replyAllCc([msg({ to: [{ email: "heitor@freecorps.test" }] })], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+    expect(replyAllCc([], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+  });
+
+  it("a forward says Fwd: once, and quotes the original under a header", () => {
+    expect(forwardSubject("Contrato")).toBe("Fwd: Contrato");
+    for (const s of ["Fwd: Contrato", "FW: Contrato", "Enc: Contrato", "tr : Contrato"]) expect(forwardSubject(s)).toBe(s);
+    const text = forwardText(
+      msg({ to: [{ email: "heitor@freecorps.test", name: "Heitor" }] }),
+      { header: "Mensagem encaminhada", from: "De", date: "Data", subject: "Assunto", to: "Para" },
+      "10 nov 2026",
+    );
+    expect(text).toBe(
+      "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>\nData: 10 nov 2026\nAssunto: Contrato\nPara: Heitor <heitor@freecorps.test>\n\nSegue.",
+    );
   });
 });

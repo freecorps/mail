@@ -381,6 +381,34 @@ describe("mail app", () => {
     expect(await names("caio")).toEqual(["caio*"]);
   });
 
+  it("reply all copies the others; forward sends a message on, with its files, as a new conversation", async () => {
+    const t = (await call("query", "inbox:threads", { mailbox: "support" }, "user:agent-1")).value.page.find((x: any) => x.number === 1);
+    const full = (await call("query", "inbox:thread", { threadId: t._id }, "user:agent-1")).value;
+    const inbound = full.messages.find((m: any) => m.direction === "inbound");
+
+    const all = await call("mutation", "inbox:reply", { threadId: t._id, text: "Copying finance.", cc: ["Fin <fin@user.test>"] }, "user:agent-1");
+    expect(all.error ?? null).toBeNull();
+    expect((await call("query", "testing:email", { id: all.value.emailId })).value).toMatchObject({ cc: [{ email: "fin@user.test", name: "Fin" }] });
+    const many = Array.from({ length: 51 }, (_, i) => `p${i}@user.test`);
+    expect((await call("mutation", "inbox:reply", { threadId: t._id, text: "x", cc: many }, "user:agent-1")).error.message).toMatch(/at most 50/);
+
+    const fwd = await call(
+      "mutation",
+      "inbox:forward",
+      { threadId: t._id, messageId: inbound._id, to: ["Boss <boss@user.test>"], subject: "Fwd: Invoice wrong", text: "See below.\n\n> My invoice total is wrong." },
+      "user:agent-1",
+    );
+    expect(fwd.error ?? null).toBeNull();
+    const out = (await call("query", "inbox:thread", { threadId: fwd.value.threadId }, "user:agent-1")).value;
+    expect(out.thread).toMatchObject({ mailbox: "support", subject: "Fwd: Invoice wrong", contact: "boss@user.test" });
+    // The original's file goes along, the same stored file (no copy, no upload by the member).
+    expect(out.messages[0].attachments).toMatchObject([{ filename: "invoice.pdf", file: inbound.attachments[0].file }]);
+    expect((await call("query", "testing:email", { id: fwd.value.emailId })).value.attachments).toMatchObject([{ filename: "invoice.pdf" }]);
+    // Only a message of that thread, never a note, and only by someone who can see it.
+    expect((await call("mutation", "inbox:forward", { threadId: t._id, messageId: out.messages[0]._id, to: ["x@user.test"], subject: "s", text: "t" }, "user:agent-1")).error.message).toMatch(/not found in this thread/);
+    expect((await call("mutation", "inbox:forward", { threadId: t._id, messageId: inbound._id, to: ["x@user.test"], subject: "s", text: "t" }, "user:agent-2")).error.message).toMatch(/no access/);
+  });
+
   it("members: POST /inbox/members is a patch (absent fields keep their stored value)", async () => {
     const member = async () => (await call("mutation", "testing:member", { userId: "boss-1" })).value;
     const names = async () => (await call("query", "inbox:mailboxes", {}, "user:boss-1")).value.map((b: any) => b.name).sort();

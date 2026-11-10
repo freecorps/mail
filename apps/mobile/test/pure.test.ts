@@ -1,5 +1,6 @@
 // Pure helpers: HTML safety, formatting, i18n, the push seam, optimistic updates.
 import { composerMode, isPersonal, ownFirst } from "../src/model/threads";
+import { forwardSubject, forwardText, replyAllCc } from "../src/model/forward";
 import { describe, expect, it } from "vitest";
 import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import type { PendingMutationRecord } from "@freecorps/ember-client";
@@ -249,5 +250,24 @@ describe("personal mailboxes", () => {
     expect(composerMode("note", true)).toBe("note");
     expect(composerMode("note", undefined)).toBe("note");
     expect(composerMode("reply", false)).toBe("reply");
+  });
+});
+
+describe("reply all and forward", () => {
+  const msg = (o: Record<string, unknown>) =>
+    ({ _id: "m", direction: "inbound", from: { email: "ana@user.test", name: "Ana" }, to: [], cc: [], subject: "Contrato", text: "Segue.", attachments: [], ...o }) as never;
+
+  it("reply all copies everyone else on the latest message received, never this mailbox (or a +tag) nor the contact", () => {
+    const messages = [msg({ to: [{ email: "heitor@freecorps.test" }, { email: "bia@user.test", name: "Bia" }], cc: [{ email: "heitor+t_x@freecorps.test" }, { email: "ana@user.test" }] })];
+    expect(replyAllCc(messages, "heitor@freecorps.test", "ana@user.test")).toEqual(["Bia <bia@user.test>"]);
+    expect(replyAllCc([], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+  });
+
+  it("a forward says Fwd: once, and quotes the original under a header", () => {
+    expect(forwardSubject("Contrato")).toBe("Fwd: Contrato");
+    expect(forwardSubject("Enc: Contrato")).toBe("Enc: Contrato");
+    expect(forwardText(msg({}), { header: "Forwarded message", from: "From", date: "Date", subject: "Subject", to: "To" }, "Nov 10")).toBe(
+      "\n\n---------- Forwarded message ----------\nFrom: Ana <ana@user.test>\nDate: Nov 10\nSubject: Contrato\n\nSegue.",
+    );
   });
 });
