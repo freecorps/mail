@@ -137,7 +137,7 @@ export const syncDomain = action({
       name,
       ...(a.sending !== undefined ? { sending: a.sending } : {}),
       ...(a.receiving !== undefined ? { receiving: a.receiving } : {}),
-      ...(a.enableRouting ? { enableRouting: true } : {}),
+      ...(a.enableRouting !== undefined ? { enableRouting: a.enableRouting } : {}),
     })) as { name: string; status: string; notes: string[] };
   },
 });

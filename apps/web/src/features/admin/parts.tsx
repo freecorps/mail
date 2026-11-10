@@ -3,6 +3,7 @@
 import { Component, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useQuerySnapshot } from "@freecorps/ember-react";
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -91,10 +92,15 @@ export function CopyButton({ value, label }: { value: string; label?: string }) 
       size="sm"
       variant="outline"
       onClick={() => {
-        void navigator.clipboard.writeText(value).then(() => {
-          setDone(true);
-          setTimeout(() => setDone(false), 1500);
-        });
+        // No Clipboard API (an insecure context, an old browser) or a refusal: say so; the field can still be selected.
+        const write = navigator.clipboard?.writeText(value) ?? Promise.reject(new Error("clipboard unavailable"));
+        write.then(
+          () => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1500);
+          },
+          (e: Error) => toast.error(t("admin.failed", { message: e.message })),
+        );
       }}
     >
       {done ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}

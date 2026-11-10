@@ -92,10 +92,7 @@ export function Overview(p: { server: ServerInfo | null; serverError: string | n
               {row(t("admin.overview.env"), server.env, true)}
               {row(t("admin.overview.ember"), server.ember ? `v${server.ember}` : null, true)}
               {row(t("admin.overview.worker"), server.worker ? (server.worker.tag ?? server.worker.id.slice(0, 8)) : null, true)}
-              {row(
-                t("admin.overview.deployedAt"),
-                server.worker?.deployedAt ? formatFull(Date.parse(server.worker.deployedAt), locale) : null,
-              )}
+              {row(t("admin.overview.deployedAt"), deployedAt(server.worker?.deployedAt ?? null, locale))}
               {row(t("admin.overview.manageDomains"), server.manageDomains ? t("admin.yes") : t("admin.overview.manageDomainsNo"))}
               {row(t("admin.overview.files"), server.files ? t("admin.yes") : t("admin.no"))}
             </dl>
@@ -104,4 +101,10 @@ export function Overview(p: { server: ServerInfo | null; serverError: string | n
       </section>
     </div>
   );
+}
+
+/** The Worker's deploy time, or null when absent or not a date (never a crash on a malformed one). */
+function deployedAt(at: string | null, locale: Parameters<typeof formatFull>[1]) {
+  const t = at ? Date.parse(at) : NaN;
+  return Number.isFinite(t) ? formatFull(t, locale) : null;
 }
