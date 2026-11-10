@@ -419,8 +419,9 @@ http.route({
 /** Errors thrown by webhooks:* (an internal mutation) → 404 / 422 with their message. */
 const hookError = (e: unknown): never => {
   const m = (e as Error)?.message ?? String(e);
+  // Validation first: "mailbox x not found" is a bad field, not a missing webhook.
+  if (/^(endpoint|events|at most|mailbox|a personal|.* is a personal|webhook is paused)/.test(m)) throw new ApiError(422, "validation_error", m);
   if (/not found/.test(m)) throw new ApiError(404, "not_found", m);
-  if (/^(endpoint|events|at most|mailbox|a personal|.* is a personal)/.test(m)) throw new ApiError(422, "validation_error", m);
   throw e;
 };
 const hookCall = async <T>(f: () => Promise<T>) => {

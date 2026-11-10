@@ -664,6 +664,7 @@ describe("mail app", () => {
       }
       expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.opened" as any] })).error).toMatchObject({ statusCode: 422 });
       expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], mailboxes: ["wolf"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/personal/) });
+      expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], mailboxes: ["nope"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/mailbox nope not found/) });
 
       const all = await admin.webhooks.create({ endpoint: "https://hooks.test/all", events: ["email.received", "email.delivered"], description: "everything" });
       expect(all.data!.signing_secret).toMatch(/^whsec_/);
@@ -726,6 +727,8 @@ describe("mail app", () => {
       await expect(verifyWebhook({ secret: sales.data!.signing_secret, headers: last.headers, body: last.body })).rejects.toThrow();
       await expect(verifyWebhook({ secret: rotated.data!.signing_secret, headers: last.headers, body: last.body })).resolves.toMatchObject({ type: "webhook.test" });
       expect((await admin.webhooks.update(all.data!.id, { enabled: false })).data).toMatchObject({ enabled: false });
+      // A paused webhook's test is refused (it would never be sent).
+      expect((await admin.webhooks.test(all.data!.id)).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/paused/) });
       const n = got.length;
       const m2 = inbound("rui@user.test", "support@acme.test", mime({ from: "rui@user.test", to: "support@acme.test", subject: "Quiet hook", text: "x", id: "hook-3@user.test" }));
       await worker.email(m2.msg as never, env as never, createExecutionContext());
