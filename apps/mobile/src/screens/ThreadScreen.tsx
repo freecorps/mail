@@ -2,7 +2,7 @@
 // composer with a native segmented control (reply / internal note) and a native text field.
 import { Host, TextInput, type TextInputRef } from "@expo/ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AttachmentList } from "../components/Attachments";
@@ -16,6 +16,7 @@ import { contactOf, displayAddress, formatFull } from "../lib/format";
 import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { useThread, type MessageItem } from "../model/thread";
 import { composerMode, isPersonal, useMailboxes } from "../model/threads";
+import { replyAllCc } from "../model/forward";
 import { usePalette } from "../theme";
 
 export function ThreadScreen() {
@@ -26,7 +27,12 @@ export function ThreadScreen() {
   const [loadImages, setLoadImages] = useState(false);
   const thread = vm.thread;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
-  const personal = isPersonal(useMailboxes().mailboxes, thread?.mailbox);
+  const boxes = useMailboxes().mailboxes;
+  const personal = isPersonal(boxes, thread?.mailbox);
+  const own = boxes.find((b) => b.name === thread?.mailbox)?.address ?? "";
+  // Stable, so the memoized message cards do not re-render for it.
+  const forwardMessage = useCallback((messageId: string) => router.push({ pathname: "/compose", params: { forwardThread: threadId, forwardMessage: messageId } }), [threadId]);
+  const others = useMemo(() => (thread ? replyAllCc(vm.items.map((i) => i.message), own, thread.contact) : []), [vm.items, thread, own]);
   const unread = (thread?.unreadCount ?? 0) > 0;
   const closed = thread?.status === "closed";
   const readIcon = useToolbarIcon(unread ? Icons.markRead : Icons.markUnread, p.tint);
@@ -101,18 +107,39 @@ export function ThreadScreen() {
         data={vm.items}
         keyExtractor={(i) => i.message._id}
         ListHeaderComponent={header}
-        renderItem={({ item }) => <MessageCard item={item} loadImages={loadImages} urls={vm.attachmentUrls} online={vm.online} />}
+        renderItem={({ item }) => (
+          <MessageCard
+            item={item}
+            loadImages={loadImages}
+            urls={vm.attachmentUrls}
+            online={vm.online}
+            onForward={forwardMessage}
+          />
+        )}
         contentContainerStyle={{ paddingBottom: 16 }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {vm.canReply ? <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} /> : <Text style={[styles.spam, { color: p.secondary }]}>{t("thread.spamNoReply")}</Text>}
+      {vm.canReply ? <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} /> : <Text style={[styles.spam, { color: p.secondary }]}>{t("thread.spamNoReply")}</Text>}
     </KeyboardAvoidingView>
   );
 }
 
-const MessageCard = memo(function MessageCard({ item, loadImages, urls, online }: { item: MessageItem; loadImages: boolean; urls: Record<string, string | null>; online: boolean }) {
+const MessageCard = memo(function MessageCard({
+  item,
+  loadImages,
+  urls,
+  online,
+  onForward,
+}: {
+  item: MessageItem;
+  loadImages: boolean;
+  urls: Record<string, string | null>;
+  online: boolean;
+  /** Forwards this message (not offered for a note or a message still sending). */
+  onForward?: (messageId: string) => void;
+}) {
   const p = usePalette();
   const { t, locale } = useI18n();
   const m = item.message;
@@ -136,6 +163,7 @@ const MessageCard = memo(function MessageCard({ item, loadImages, urls, online }
           </Text>
         </View>
         {item.pending ? <Symbol icon={Icons.pending} size={16} color={p.secondary} /> : null}
+        {onForward && !note && !item.pending ? <IconButton icon={Icons.forward} label={t("thread.forward")} onPress={() => onForward(m._id)} /> : null}
       </View>
       {m.html && m.direction === "inbound" ? (
         <EmailHtmlView html={m.html} loadImages={loadImages} cid={item.cid} label={m.text.slice(0, 500)} />
@@ -149,14 +177,30 @@ const MessageCard = memo(function MessageCard({ item, loadImages, urls, online }
   );
 });
 
-/** `notes: false` (a personal mailbox): replies only, no internal-note mode. */
-function Composer({ onReply, onNote, notes = true }: { onReply(text: string, attachments?: AttachmentArg[]): Promise<unknown>; onNote(text: string): Promise<unknown>; notes?: boolean }) {
+/**
+ * `notes: false` (a personal mailbox): replies only, no internal-note mode. `others`: who else was on the latest
+ * message received; "All" (reply all) copies them, shown only when there is someone.
+ */
+function Composer({
+  onReply,
+  onNote,
+  notes = true,
+  others = [],
+}: {
+  onReply(text: string, attachments?: AttachmentArg[], cc?: string[]): Promise<unknown>;
+  onNote(text: string): Promise<unknown>;
+  notes?: boolean;
+  others?: string[];
+}) {
   const p = usePalette();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const input = useRef<TextInputRef>(null);
   const [picked, setMode] = useState<"reply" | "note">("reply");
+  const [all, setAll] = useState(false);
   const mode = composerMode(picked, notes);
+  // Reply all only while there is someone else to copy.
+  const replyAll = mode === "reply" && all && others.length > 0;
   const [text, setText] = useState("");
   const uploads = useUploads(useUploadOne());
   // The home-indicator inset only matters while the bar sits at the bottom; above the keyboard it is empty space.
@@ -177,7 +221,7 @@ function Composer({ onReply, onNote, notes = true }: { onReply(text: string, att
     // Optimistic: the message shows at once (queued when offline); the input clears right away. Attachments go with
     // replies only (an internal note is never emailed).
     const files = mode === "reply" ? uploads.attachments : [];
-    void (mode === "reply" ? onReply(body, files.length ? files : undefined) : onNote(body)).catch(() => {});
+    void (mode === "reply" ? onReply(body, files.length ? files : undefined, replyAll ? others : undefined) : onNote(body)).catch(() => {});
     input.current?.clear();
     setText("");
     // A note keeps the files picked for the next reply.
@@ -185,14 +229,18 @@ function Composer({ onReply, onNote, notes = true }: { onReply(text: string, att
   };
   return (
     <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 8) }]}>
-      {notes ? (
-        <Segmented<"reply" | "note">
+      {notes || others.length > 0 ? (
+        <Segmented<"reply" | "all" | "note">
           label={t("thread.modeLabel")}
-          value={mode}
-          onChange={setMode}
+          value={replyAll ? "all" : mode}
+          onChange={(v) => {
+            setAll(v === "all");
+            setMode(v === "note" ? "note" : "reply");
+          }}
           options={[
             { value: "reply", label: t("thread.replyMode") },
-            { value: "note", label: t("thread.noteMode") },
+            ...(others.length > 0 ? [{ value: "all" as const, label: t("thread.replyAll") }] : []),
+            ...(notes ? [{ value: "note" as const, label: t("thread.noteMode") }] : []),
           ]}
         />
       ) : null}

@@ -1,6 +1,7 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
 import { composerMode, isPersonal, ownFirst } from "@/model/threads";
+import { forwardedFiles, forwardSubject, forwardText, MAX_CC, replyAllCc } from "@/model/forward";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
 import { pickLocale, translate } from "@/i18n/strings";
@@ -307,6 +308,20 @@ describe("optimistic updates", () => {
     expect(all.page[0]).toMatchObject({ contact: "rui@u.test", status: "waiting" });
     expect(closed.page).toHaveLength(0);
   });
+
+  it("forward puts the new conversation on top of the forwarded thread's mailbox lists; unknown thread, nothing", () => {
+    const s = store({ "inbox:threads": [{ args: { mailbox: "support" }, value: page([thread()]) }] });
+    const id = s.dump("inbox:threads")[0].page[0]._id as string;
+    u["inbox:forward"]!(s, { threadId: id, to: ["Bia <bia@u.test>"], subject: "Fwd: Oi", text: "Veja." }, rec);
+    expect(s.dump("inbox:threads")[0].page[0]).toMatchObject({
+      contact: "bia@u.test",
+      subject: "Fwd: Oi",
+      status: "waiting",
+      mailbox: "support",
+    });
+    u["inbox:forward"]!(s, { threadId: "nope", to: ["x@u.test"], subject: "s", text: "t" }, rec);
+    expect(s.dump("inbox:threads")[0].page).toHaveLength(2);
+  });
 });
 
 describe("personal mailboxes", () => {
@@ -329,5 +344,57 @@ describe("personal mailboxes", () => {
     expect(composerMode("note", true)).toBe("note");
     expect(composerMode("note", undefined)).toBe("note");
     expect(composerMode("reply", false)).toBe("reply");
+  });
+});
+
+describe("reply all and forward", () => {
+  const msg = (o: Partial<Message>): Message =>
+    ({
+      _id: "m",
+      direction: "inbound",
+      from: { email: "ana@user.test", name: "Ana" },
+      to: [],
+      cc: [],
+      subject: "Contrato",
+      text: "Segue.",
+      attachments: [],
+      ...o,
+    }) as Message;
+
+  it("reply all copies everyone else on the latest message received, never this mailbox (or a +tag) nor the contact", () => {
+    const messages = [
+      msg({ to: [{ email: "old@user.test" }] }),
+      msg({ direction: "outbound", to: [{ email: "ignored@user.test" }] }),
+      msg({
+        to: [{ email: "Heitor@freecorps.test" }, { email: "bia@user.test", name: "Bia" }],
+        cc: [{ email: "heitor+t_x@freecorps.test" }, { email: "ana@user.test" }, { email: "BIA@user.test" }, { email: "caio@user.test" }],
+      }),
+    ];
+    expect(replyAllCc(messages, "heitor@freecorps.test", "ana@user.test")).toEqual(["Bia <bia@user.test>", "caio@user.test"]);
+    expect(replyAllCc([msg({ to: [{ email: "heitor@freecorps.test" }] })], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+    expect(replyAllCc([], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+    // The mailbox's address not known yet: no reply all (it would copy itself).
+    expect(replyAllCc(messages, "", "ana@user.test")).toEqual([]);
+    // At most what the API takes.
+    const crowd = msg({ cc: Array.from({ length: 80 }, (_, i) => ({ email: `p${i}@user.test` })) });
+    expect(replyAllCc([crowd], "heitor@freecorps.test", "ana@user.test")).toHaveLength(MAX_CC);
+  });
+
+  it("a forward sends the files, not the inline images of the HTML", () => {
+    const files = [{ filename: "a.pdf" }, { filename: "logo.png", inline: true, contentId: "<logo>" }, { filename: "b.png", inline: true }];
+    expect(forwardedFiles(files).map((f) => f.filename)).toEqual(["a.pdf", "b.png"]);
+  });
+
+  it("a forward says Fwd: once, and quotes the original under a header", () => {
+    expect(forwardSubject("Contrato")).toBe("Fwd: Contrato");
+    for (const s of ["Fwd: Contrato", "FW: Contrato", "Enc: Contrato", "tr : Contrato"]) expect(forwardSubject(s)).toBe(s);
+    const text = forwardText(
+      msg({ to: [{ email: "heitor@freecorps.test", name: "Heitor" }] }),
+      { header: "Mensagem encaminhada", from: "De", date: "Data", subject: "Assunto", to: "Para" },
+      "10 nov 2026",
+    );
+    expect(text).toBe(
+      "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>\nData: 10 nov 2026\nAssunto: Contrato\nPara: Heitor <heitor@freecorps.test>\n\nSegue.",
+    );
   });
 });

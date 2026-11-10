@@ -62,7 +62,10 @@ export function useThread(threadId: string) {
   }, [thread, threadId, setStatus]);
   const assign = useCallback((userId: string | null) => swallow(assignTo({ threadId, userId })), [threadId, assignTo]);
   /** Resolves when the server confirmed (the optimistic message shows right away, also offline). */
-  const reply = useCallback((text: string) => replyM({ threadId, text: text.trim() }), [threadId, replyM]);
+  const reply = useCallback(
+    (text: string, cc?: string[]) => replyM({ threadId, text: text.trim(), ...(cc?.length ? { cc } : {}) }),
+    [threadId, replyM],
+  );
   const note = useCallback((text: string) => noteM({ threadId, text: text.trim() }), [threadId, noteM]);
 
   return {

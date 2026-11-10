@@ -127,7 +127,12 @@ export const api = {
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),
     members: q<"query", { mailbox: string }, Member[]>("inbox:members"),
     attachments: q<"query", { threadId: string }, Record<string, string | null>>("inbox:attachments"),
-    reply: q<"mutation", { threadId: string; text: string; attachments?: AttachmentArg[] }, { emailId: string; messageId: string; status: string }>("inbox:reply"),
+    reply: q<"mutation", { threadId: string; text: string; cc?: string[]; attachments?: AttachmentArg[] }, { emailId: string; messageId: string; status: string }>("inbox:reply"),
+    forward: q<
+      "mutation",
+      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] },
+      { threadId: string; emailId: string; messageId: string; status: string; number: number }
+    >("inbox:forward"),
     note: q<"mutation", { threadId: string; text: string }, string>("inbox:note"),
     markRead: q<"mutation", { threadId: string }, boolean>("inbox:markRead"),
     markUnread: q<"mutation", { threadId: string }, boolean>("inbox:markUnread"),
