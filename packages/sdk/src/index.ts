@@ -238,6 +238,12 @@ export class EmberMail {
       const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.status ? { status: o.status } : {}), ...(o.cursor ? { cursor: o.cursor } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });
       return this.request<{ page: Thread[]; isDone: boolean; continueCursor: string }>("GET", `/inbox/threads?${q}`);
     },
+    /** Members, and who signed in asking for access (`requests`: their email and name, to grant by `user_id`). */
+    members: () =>
+      this.request<{
+        data: Array<{ user_id: string; name: string | null; mailboxes: string[]; admin: boolean; personal_mailbox: string | null }>;
+        requests: Array<{ user_id: string; email: string | null; name: string | null; requested_at: string }>;
+      }>("GET", "/inbox/members"),
     /** The Sent view: conversations the mailbox wrote in, newest send first (`lastSentAt`); pass `next` as `before`. */
     sent: (o: { mailbox: string; before?: string; limit?: number }) => {
       const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.before ? { before: o.before } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });

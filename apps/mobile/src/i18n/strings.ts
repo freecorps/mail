@@ -25,7 +25,7 @@ const ptBR = {
   "signin.server": "Servidor: {url}",
 
   "notMember.title": "Quase lá",
-  "notMember.body": "Sua conta ainda não tem acesso a nenhuma caixa. Peça a um administrador para liberar o acesso com este ID:",
+  "notMember.body": "Sua conta ainda não tem acesso a nenhuma caixa. Já avisamos os administradores; se pedirem, este é o seu ID:",
   "notMember.copy": "Copiar ID",
   "notMember.copied": "Copiado",
   "notMember.refresh": "Verificar de novo",
@@ -163,7 +163,7 @@ const en: Record<StringKey, string> = {
   "signin.server": "Server: {url}",
 
   "notMember.title": "Almost there",
-  "notMember.body": "Your account has no mailbox access yet. Ask an admin to grant access to this ID:",
+  "notMember.body": "Your account has no mailbox access yet. The admins can see your request; if they ask, this is your ID:",
   "notMember.copy": "Copy ID",
   "notMember.copied": "Copied",
   "notMember.refresh": "Check again",

@@ -52,7 +52,10 @@ export const setOwner = internalMutation({
     if (prev) ctx.db.patch(prev._id, { userId: a.userId });
     else ctx.db.insert("personal", { mailbox: a.mailbox, userId: a.userId });
     const member = ctx.db.query("members").withIndex("by_user", (q) => q.eq("userId", a.userId!)).first();
-    if (!member) ctx.db.insert("members", { userId: a.userId, mailboxes: [] });
+    // A new member, from their access request if they asked (its name), which is then answered.
+    const asked = ctx.db.query("accessRequests").withIndex("by_user", (q) => q.eq("userId", a.userId!)).first();
+    if (!member) ctx.db.insert("members", { userId: a.userId, mailboxes: [], ...(asked?.name ? { name: asked.name } : {}) });
+    if (asked) ctx.db.delete(asked._id);
     return a.userId;
   },
 });

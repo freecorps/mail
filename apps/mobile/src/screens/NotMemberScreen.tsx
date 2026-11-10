@@ -1,7 +1,9 @@
-// Signed in, but no mailbox yet: show the id an admin grants access to (POST /inbox/members), in the system
+// Signed in, but no mailbox yet: asks for access (GET /inbox/members lists it) and shows the id, in the system
 // content-unavailable layout, with native buttons.
 import * as Clipboard from "expo-clipboard";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation } from "@freecorps/ember-react-native";
+import { api } from "../api";
 import { Text, View } from "react-native";
 import { Icons } from "../components/icons";
 import { EmptyState } from "../components/ui";
@@ -15,6 +17,11 @@ export function NotMemberScreen() {
   const session = useSession();
   const userId = session.userId ?? "";
   const [copied, setCopied] = useState(false);
+  // Lists this sign-in for the admins (with its email), so access is granted without passing the id around.
+  const requestAccess = useMutation(api.inbox.requestAccess);
+  useEffect(() => {
+    if (userId) requestAccess({}).catch(() => {});
+  }, [userId, requestAccess]);
   return (
     <View style={{ flex: 1, backgroundColor: p.grouped, paddingVertical: 48 }}>
       <EmptyState

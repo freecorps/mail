@@ -13,7 +13,7 @@
 //   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner? }
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
-//   GET    /inbox/sent?mailbox=&before=&limit=
+//   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
 //
 // Auth: `Authorization: Bearer em_...` (API keys, hashed at rest) or the Worker's EMBER_ADMIN_TOKEN (bootstrap).
 import { anyComponents as components, httpActionGeneric as httpAction, httpRouter, type ActionCtx } from "@freecorps/ember-server";
@@ -456,6 +456,12 @@ http.route({
     const rows = (await ctx.runQuery(email.search, { query: url.searchParams.get("q") ?? "", ...(mailbox ? { mailbox } : {}) })) as Array<{ mailbox: string }>;
     return json({ data: rows.filter((r) => !Object.hasOwn(personal, r.mailbox)) });
   }),
+});
+// Members, and who signed in asking for access (their email and name), for full-access keys and the admin token.
+http.route({
+  path: "/inbox/members",
+  method: "GET",
+  handler: route(async (ctx, _r, p) => (need(p), json(await ctx.runQuery("admin:listMembers" as any, {})))),
 });
 http.route({
   path: "/inbox/members",

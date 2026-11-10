@@ -1,18 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, LogOut, RefreshCw } from "lucide-react";
-import { useEmberClient } from "@freecorps/ember-react";
+import { useEmberClient, useMutation } from "@freecorps/ember-react";
+import { api } from "@/lib/api";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/context";
 import { authClient, emberToken } from "@/lib/auth";
 
-/** Signed in, but no mailbox yet: show the user id an admin grants access to (POST /inbox/members). */
+/** Signed in, but no mailbox yet: asks for access (the admins see the request) and shows the user id. */
 export function NotMember({ userId, error }: { userId: string | null; error: string | null }) {
   const { t } = useI18n();
   const ember = useEmberClient();
   const session = authClient.useSession();
   const id = userId ?? session.data?.user.id ?? "";
   const [copied, setCopied] = useState(false);
+  // Lists this sign-in for the admins (with its email), so access is granted without passing the id around.
+  const requestAccess = useMutation(api.inbox.requestAccess);
+  // Keyed by the Ember identity's id (or the session's): a new sign-in asks again; "check again" retries a failed ask.
+  useEffect(() => {
+    if (id) requestAccess({}).catch(() => {});
+  }, [id, requestAccess]);
   return (
     <main className="grid min-h-full place-items-center px-6">
       <div className="w-full max-w-md space-y-6">
@@ -47,6 +54,7 @@ export function NotMember({ userId, error }: { userId: string | null; error: str
             onClick={() => {
               emberToken.reset();
               ember.setAuth(emberToken);
+              if (id) requestAccess({}).catch(() => {});
             }}
           >
             <RefreshCw aria-hidden="true" />

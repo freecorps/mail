@@ -27,8 +27,12 @@ export default createEmberWorker({
   app,
   http,
   auth: {
-    // "user:<subject>" tokens stand in for the auth provider (Ember auth / SSO) in tests.
-    verify: (token) => (token.startsWith("user:") ? { subject: token.slice(5) } : null),
+    // "user:<subject>[|<email>|<name>]" tokens stand in for the auth provider (Ember auth / SSO) in tests.
+    verify: (token) => {
+      if (!token.startsWith("user:")) return null;
+      const [subject, email, name] = token.slice(5).split("|");
+      return { subject: subject!, ...(email || name ? { claims: { ...(email ? { email } : {}), ...(name ? { name } : {}) } } : {}) };
+    },
   },
   scheduler: { maxAttempts: 3, backoffBaseMs: 20, backoffMaxMs: 100 },
   files: { gcGraceMs: 60_000 },
