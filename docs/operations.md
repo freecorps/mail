@@ -130,9 +130,13 @@ Ordem: tudo que o onboarding criou → o Worker e o que é dele → o resto. Ant
 
    (`bun run domains remove atendimento.freecorps.com.br --url ...` apaga as regras, a assinatura e o domínio de
    envio pelos ids guardados, e depois o registro no serviço.)
-2. **Assinatura de eventos** `ember-mail-prod-email-events atendimento.freecorps.com.br` (conta → Event subscriptions).
-3. **Domínio de envio** `atendimento.freecorps.com.br` no Email Sending. Apagar o domínio remove os registros
-   gerenciados (`cf-bounce` MX/SPF, DKIM, DMARC). Confira com `dig` depois.
+   Para o apex: `bun run domains remove freecorps.com.br --url ...` apaga o domínio de envio `freecorps.com.br`, a
+   assinatura dele e as regras que o onboarding criou nesse domínio.
+2. **Assinaturas de eventos** `ember-mail-prod-email-events atendimento.freecorps.com.br` e
+   `ember-mail-prod-email-events freecorps.com.br` (conta → Event subscriptions).
+3. **Domínios de envio** `atendimento.freecorps.com.br` e `freecorps.com.br` no Email Sending. Apagar um domínio
+   remove os registros gerenciados dele (`cf-bounce` MX/SPF, DKIM; no subdomínio, também o DMARC). O DMARC do apex
+   (`_dmarc.freecorps.com.br`) não é da Cloudflare e fica. Confira com `dig` depois.
 4. **Subdomínio de roteamento** `atendimento.freecorps.com.br` (Email Routing → Settings → Subdomains). Só pelo
    dashboard. **Não** use `DELETE /email/routing/dns`: ele desliga o Email Routing da zona inteira, incluindo
    `nfe.freecorps.com.br`.
@@ -142,6 +146,8 @@ Ordem: tudo que o onboarding criou → o Worker e o que é dele → o resto. Ant
    - a fila `ember-mail-prod-email-events`;
    - a fila `ember-mail-prod-files` e a notificação de eventos do R2;
    - o bucket, só se estiver vazio.
+   Depois apague o **Worker web** `ember-mail-web`: `bunx wrangler delete --name ember-mail-web` (em `apps/web`). Ele
+   só tem assets e o binding `API`; não tem dados nem segredos.
 6. **Bucket R2** `ember-mail-prod`: esvazie (tem `.eml` e anexos; exporte antes se precisar) e apague, se o
    `destroy` não apagou.
 7. **Queues** `ember-mail-prod-email-events` e `ember-mail-prod-files`, se sobrarem.
