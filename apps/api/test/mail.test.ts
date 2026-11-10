@@ -6,7 +6,7 @@ import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF }
 import { describe, expect, it } from "vitest";
 import { EmberMail } from "@freecorps/mail-sdk";
 import worker from "./worker.ts";
-import { removeDomain, resolveAccountId } from "../src/operator.ts";
+import { addDomain, removeDomain, resolveAccountId } from "../src/operator.ts";
 
 const BASE = "http://mail.test";
 const f = ((url: string, init?: RequestInit) => SELF.fetch(url, init)) as typeof fetch;
@@ -488,6 +488,41 @@ describe("mail app", () => {
     await worker.email(other.msg as never, env as never, createExecutionContext());
     expect(other.out.rejected).toMatch(/not found/i);
     expect((await admin.inbox.upsertMailbox({ name: "support", address: "support@acme.test", catch_all: true })).error?.message).toMatch(/already has a catch-all/);
+
+    // Onboarding (operator script): the zone's catch-all rule → this Worker; the domain record keeps it; remove turns it off.
+    const cfState = { catchAll: { enabled: false, matchers: [{ type: "all" }], actions: [{ type: "drop" }] } as any, puts: [] as any[] };
+    const ok = (result: unknown) => Response.json({ success: true, errors: [], result });
+    const cf = {
+      accountId: "acc",
+      apiToken: "t",
+      fetch: (async (u: string, init: RequestInit = {}) => {
+        const url = new URL(u);
+        const m = `${init.method ?? "GET"} ${url.pathname.replace("/client/v4", "")}`;
+        const body = init.body ? JSON.parse(String(init.body)) : undefined;
+        if (m === "GET /zones") return ok(url.searchParams.get("name") === "acme.test" ? [{ id: "za", name: "acme.test" }] : []);
+        if (m === "GET /zones/za/email/sending/subdomains") return ok([{ tag: "sa", name: "acme.test", enabled: true }]);
+        if (m === "GET /zones/za/email/sending/subdomains/sa/dns") return ok([]);
+        if (m === "GET /zones/za/email/routing") return ok({ enabled: true, status: "ready", subdomains: [] });
+        if (m === "GET /zones/za/email/routing/dns") return ok({ records: [] });
+        if (m === "GET /zones/za/email/routing/rules") return ok([]);
+        if (m === "POST /zones/za/email/routing/rules") return ok({ id: `r-${body.matchers[0].value}`, ...body });
+        if (m === "GET /zones/za/email/routing/rules/catch_all") return ok(cfState.catchAll);
+        if (m === "PUT /zones/za/email/routing/rules/catch_all") return (cfState.puts.push(body), (cfState.catchAll = body), ok(body));
+        if (m === "GET /accounts/acc/queues") return ok([{ queue_id: "q", queue_name: "ember-mail-prod-email-events" }]);
+        if (m === "GET /accounts/acc/event_subscriptions/subscriptions") return ok([{ id: "sa-sub", source: { type: "email.sending", zone_id: "za", domain: "acme.test" }, destination: { queue_id: "q" } }]);
+        if (m.startsWith("DELETE ")) return ok({});
+        return Response.json({ success: false, errors: [{ code: 7003, message: `unexpected ${m}` }] }, { status: 400 });
+      }) as typeof fetch,
+    };
+    await addDomain(cf, BASE, "admin-secret", "acme.test", { project: "mail", env: "prod", fetch: f });
+    expect(cfState.catchAll).toEqual({ enabled: true, matchers: [{ type: "all" }], actions: [{ type: "worker", value: ["ember-mail-prod"] }] });
+    const view = ((await admin.domains.list()).data!.data as any[]).find((d) => d.name === "acme.test");
+    expect(view.cloudflare.catch_all).toBe("ember-mail-prod");
+    expect(await removeDomain(cf, BASE, "admin-secret", "acme.test", { fetch: f })).toEqual([]);
+    expect(cfState.catchAll).toMatchObject({ enabled: false, actions: [{ type: "drop" }] });
+    // The record comes back (later tests send from acme.test).
+    await addDomain(cf, BASE, "admin-secret", "acme.test", { project: "mail", env: "prod", fetch: f });
+    expect(((await admin.domains.list()).data!.data as any[]).some((d) => d.name === "acme.test")).toBe(true);
     expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", catch_all: false })).error).toBeNull();
     const after = inbound("bia@user.test", "contato@acme.test", mime({ from: "bia@user.test", to: "contato@acme.test", subject: "y", text: "y", id: "in-contato2@user.test" }));
     await worker.email(after.msg as never, env as never, createExecutionContext());
