@@ -436,6 +436,8 @@ const hookFields = (b: HookBody) => {
   if (b.events !== undefined && (!Array.isArray(b.events) || b.events.some((x) => typeof x !== "string"))) throw new ApiError(422, "validation_error", "events must be an array of event types");
   if (b.mailboxes !== undefined && b.mailboxes !== null && (!Array.isArray(b.mailboxes) || b.mailboxes.some((x) => typeof x !== "string"))) throw new ApiError(422, "validation_error", "mailboxes must be an array of names");
   if (b.enabled !== undefined && typeof b.enabled !== "boolean") throw new ApiError(422, "validation_error", "enabled must be a boolean");
+  if (b.project !== undefined && b.project !== null && typeof b.project !== "string") throw new ApiError(422, "validation_error", "project must be a string, or null");
+  if (b.description !== undefined && b.description !== null && typeof b.description !== "string") throw new ApiError(422, "validation_error", "description must be a string, or null");
   return {
     ...(b.endpoint !== undefined ? { endpoint: String(b.endpoint) } : {}),
     ...(b.events !== undefined ? { events: b.events } : {}),
