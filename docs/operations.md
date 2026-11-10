@@ -15,12 +15,12 @@ no repositório.
 | Queues | `ember-mail-prod-email-events` (eventos de entrega do Email Service → componente `email`), `ember-mail-prod-files` (eventos do R2) | `ember deploy` |
 | D1 | `ember-registry` (registro de projetos Ember da conta; o dono do nome `mail` é o `fingerprint` de `apps/api/ember.json`) | primeiro `ember deploy` da conta |
 | Email Sending | domínio de envio `atendimento.freecorps.com.br` (registros DNS gerenciados pela Cloudflare: `cf-bounce` MX/SPF, DKIM, DMARC) | onboarding (`ops onboard`) |
-| Email Routing | subdomínio de roteamento `atendimento.freecorps.com.br` (MX/SPF só nesse nome; o apex continua no servidor de email próprio) | onboarding com `enableRouting` |
+| Email Routing | subdomínio de roteamento `atendimento.freecorps.com.br` (MX/SPF só nesse nome) | onboarding com `enableRouting` |
 | Regras de roteamento | `support@atendimento.freecorps.com.br` → Worker `ember-mail-prod`; `privacy@atendimento.freecorps.com.br` → Worker `ember-mail-prod` | onboarding |
 | Assinatura de eventos | `ember-mail-prod-email-events atendimento.freecorps.com.br` (`email.sending` → fila `ember-mail-prod-email-events`) | onboarding |
 | Email Sending (apex) | domínio de envio `freecorps.com.br` (DKIM `cf-bounce._domainkey`, `cf-bounce` MX/SPF) | `bun run domains add freecorps.com.br`, 2026-11-10 |
 | Email Routing (apex) | `freecorps.com.br` saiu do Openship em 2026-11-10: MX `route1–3.mx.cloudflare.net`, SPF `v=spf1 include:_spf.mx.cloudflare.net ~all` (o DMARC `p=quarantine` ficou; os relatórios para `postmaster@` caem no catch-all) | troca do MX, abaixo |
-| Regras do apex | `heitor@`, `wolf.stievano@`, `geral@` → Worker `ember-mail-prod`; **catch-all da zona** → Worker `ember-mail-prod` (o resto do domínio vai para `geral@`) | `bun run domains add freecorps.com.br` com a mailbox `geral` `catch_all` |
+| Regras do apex | `heitor@`, `wolf.stievano@`, `geral@` → Worker `ember-mail-prod`; **catch-all da zona** → Worker `ember-mail-prod`. O resto do apex vai para `geral@`. O catch-all é da zona: um endereço sem regra num subdomínio roteado (`atendimento.`, `nfe.`) também chega à Worker, que o recusa (`Address not found`, sem catch-all nesse domínio), como a zona fazia antes com o catch-all desligado. As regras literais desses subdomínios continuam valendo primeiro | `bun run domains add freecorps.com.br` com a mailbox `geral` `catch_all` |
 | Assinatura de eventos (apex) | `ember-mail-prod-email-events freecorps.com.br` | o mesmo onboarding |
 | Mailboxes | pessoais: `heitor@freecorps.com.br` (dono Heitor) e `wolf.stievano@freecorps.com.br` (dono Wolf); compartilhada: `geral@freecorps.com.br` ("FreeCorps", catch-all do domínio, vista pelos admins) | `POST /inbox/mailboxes`, 2026-11-10 |
 | Worker web | `ember-mail-web` em `mail.freecorps.com.br` (custom domain) e workers.dev: assets + proxy de `/api/*` e `/ws`, binding `API` → `ember-mail-prod` | `wrangler deploy` com uma config temporária fora do repositório, 2026-11-10 |
@@ -149,15 +149,19 @@ Ordem: tudo que o onboarding criou → o Worker e o que é dele → o resto. Ant
    (`bun run domains remove atendimento.freecorps.com.br --url ...` apaga as regras, a assinatura e o domínio de
    envio pelos ids guardados, e depois o registro no serviço.)
    Para o apex: `bun run domains remove freecorps.com.br --url ...` apaga o domínio de envio `freecorps.com.br`, a
-   assinatura dele e as regras que o onboarding criou nesse domínio.
+   assinatura dele e as regras que o onboarding criou nesse domínio, e desliga o catch-all da zona (volta a
+   desligado/`drop`).
+   **Antes disso, decida para onde vai o email do apex.** O MX e o SPF do apex são do Email Routing (`route1–3`), e
+   sem as regras o domínio inteiro deixa de receber. Aponte o MX para o novo servidor (ou o do Openship, que está no
+   snapshot `antes-mx`) **antes** de apagar as regras, e troque o SPF junto.
 2. **Assinaturas de eventos** `ember-mail-prod-email-events atendimento.freecorps.com.br` e
    `ember-mail-prod-email-events freecorps.com.br` (conta → Event subscriptions).
 3. **Domínios de envio** `atendimento.freecorps.com.br` e `freecorps.com.br` no Email Sending. Apagar um domínio
    remove os registros gerenciados dele (`cf-bounce` MX/SPF, DKIM; no subdomínio, também o DMARC). O DMARC do apex
    (`_dmarc.freecorps.com.br`) não é da Cloudflare e fica. Confira com `dig` depois.
 4. **Subdomínio de roteamento** `atendimento.freecorps.com.br` (Email Routing → Settings → Subdomains). Só pelo
-   dashboard. **Não** use `DELETE /email/routing/dns`: ele desliga o Email Routing da zona inteira, incluindo
-   `nfe.freecorps.com.br`.
+   dashboard. **Não** use `DELETE /email/routing/dns`: ele desliga o Email Routing da zona inteira, incluindo o apex
+   (`heitor@`, `wolf.stievano@`, `geral@` e o catch-all) e `nfe.freecorps.com.br`.
 5. **Worker** `ember-mail-prod`, com os Durable Objects `Shard`/`System` (e `Auth`, se já publicado), os dados deles,
    os segredos e o cron. Use `bunx ember destroy --env prod --yes` em `apps/api`. Ele desliga o Worker das filas e
    apaga também:
@@ -165,7 +169,8 @@ Ordem: tudo que o onboarding criou → o Worker e o que é dele → o resto. Ant
    - a fila `ember-mail-prod-files` e a notificação de eventos do R2;
    - o bucket, só se estiver vazio.
    Depois apague o **Worker web** `ember-mail-web`: `bunx wrangler delete --name ember-mail-web` (em `apps/web`). Ele
-   só tem assets e o binding `API`; não tem dados nem segredos.
+   só tem assets e o binding `API`; não tem dados nem segredos. Apagar o Worker tira o custom domain
+   `mail.freecorps.com.br` (e o registro DNS dele); recrie o nome se ele for servir outra coisa.
 6. **Bucket R2** `ember-mail-prod`: esvazie (tem `.eml` e anexos; exporte antes se precisar) e apague, se o
    `destroy` não apagou.
 7. **Queues** `ember-mail-prod-email-events` e `ember-mail-prod-files`, se sobrarem.
@@ -175,5 +180,5 @@ Ordem: tudo que o onboarding criou → o Worker e o que é dele → o resto. Ant
 
 Depois de apagar, rode `bun run ops inventory depois-de-apagar` e
 `bun run ops diff antes-de-apagar depois-de-apagar`. Só os itens acima podem ter sumido. As regras e os subdomínios de
-`nfe.freecorps.com.br`, os outros domínios de envio (`brigade`, `validacao.fiscal`, `nfe`) e o MX do apex continuam
-iguais.
+`nfe.freecorps.com.br` e os outros domínios de envio (`brigade`, `validacao.fiscal`, `nfe`) continuam iguais; o MX e o
+SPF do apex mudam só se você os trocou no passo 1.
