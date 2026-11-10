@@ -18,6 +18,10 @@ no repositório.
 | Email Routing | subdomínio de roteamento `atendimento.freecorps.com.br` (MX/SPF só nesse nome; o apex continua no servidor de email próprio) | onboarding com `enableRouting` |
 | Regras de roteamento | `support@atendimento.freecorps.com.br` → Worker `ember-mail-prod`; `privacy@atendimento.freecorps.com.br` → Worker `ember-mail-prod` | onboarding |
 | Assinatura de eventos | `ember-mail-prod-email-events atendimento.freecorps.com.br` (`email.sending` → fila `ember-mail-prod-email-events`) | onboarding |
+| Email Sending (apex) | domínio de envio `freecorps.com.br` (só envio: DKIM `cf-bounce._domainkey`, `cf-bounce` MX/SPF; o MX, o SPF e o DMARC do apex não mudaram e continuam no servidor de email próprio) | `bun run domains add freecorps.com.br` (sem `--enable-routing`), 2026-11-10 |
+| Assinatura de eventos (apex) | `ember-mail-prod-email-events freecorps.com.br` | o mesmo onboarding |
+| Mailbox pessoal | `heitor@freecorps.com.br` (dono: o membro Heitor). Recebe só depois de o MX do apex ir para o Email Routing | `POST /inbox/mailboxes { owner }`, 2026-11-10 |
+| Worker web | `ember-mail-web` (inbox web em workers.dev: assets + proxy de `/api/*` e `/ws`, binding `API` → `ember-mail-prod`) | `wrangler deploy` com uma config temporária fora do repositório (a URL da API não é commitada), 2026-11-10 |
 | Token admin | Keychain do macOS: serviço `ember-mail-prod-admin`, conta `ember` | `ops deploy` (primeiro) |
 
 Medido em 2026-11-05, com envios entre `support@` e `privacy@`:
@@ -86,6 +90,15 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
     `.ember/state` para o commit novo e repita a requisição: `MigrationRefused` é o que o deploy faria. Depois do
     deploy, rode o `ops e2e` logo em seguida, com o commit anterior pronto para redeploy. O ensaio do Ember 0.5.4
     recusou com o 0.5.3 e passou com o 0.5.4.
+- **O CI não publica a API nem a web.** O `ci.yml` só roda `bun run check`; o `mobile.yml` publica o app (EAS Update)
+  depois de um CI verde em `main`. A API sai com `bun run ops deploy`. Depois de um merge que muda a API, publique
+  logo: o app atualizado chama funções novas. Entre 2026-11-09 e 2026-11-10, as #14–#18 ficaram só no app, e o
+  servidor recusava as funções novas.
+- **Deploy de 2026-11-10** (Ember 0.5.6, #14–#18: mailboxes pessoais, responder a todos, encaminhar, Enviadas,
+  pedidos de acesso). O schema ganhou só as tabelas `personal` e `accessRequests`. Do Ember 0.5.4 ao 0.5.6, nem os
+  schemas dos componentes nem o runtime mudaram, por isso não houve ensaio. O shard migrou no deploy. Inventário
+  antes e depois: só adição. `ops e2e` passou: entregas em 2–7 s, SPF, DKIM e DMARC `pass`, e as respostas entraram
+  nas threads certas.
 - Logs: `bunx ember logs --env prod` (em `apps/api`).
 
 ## Domínios
