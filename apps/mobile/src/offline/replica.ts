@@ -36,6 +36,7 @@ export const localQueries = {
       return q.order("desc").paginate(a.paginationOpts ?? { numItems: 30, cursor: null });
     },
   }),
+  // No `delivery` marker here: the component's `emails` table is not replicated. Online the server's answer has it.
   "inbox:thread": query({
     args: { threadId: v.string() },
     handler: (ctx: any, a: { threadId: string }) => {

@@ -162,6 +162,9 @@ export const sent = query({
  */
 export const DELIVERY_MARKED = 50;
 
+/** Delivery events that end in "not delivered": where the shown reason comes from. */
+const FAILURE_EVENTS = new Set(["bounced", "failed", "rejected", "complained"]);
+
 /** Statuses where delivery did not happen: their reason is shown (the bounce's, else the send error's). */
 const UNDELIVERED = new Set(["bounced", "failed", "suppressed", "complained"]);
 
@@ -184,7 +187,8 @@ function withDelivery(ctx: Ctx, t: { thread: unknown; messages: Array<Record<str
     let reason: string | null = null;
     if (UNDELIVERED.has(e.status)) {
       const evs = ctx.runQuery(email.events, { id: e._id }) as Array<{ type: string; reason?: string; at: number }>;
-      const last = evs.filter((x) => x.reason).sort((x, y) => y.at - x.at)[0];
+      // The reason of the failure itself (a bounce, a rejection), never an earlier delay's.
+      const last = evs.filter((x) => x.reason && FAILURE_EVENTS.has(x.type)).sort((x, y) => y.at - x.at)[0];
       reason = (last?.reason ?? e.error?.message ?? null)?.slice(0, 300) ?? null;
     }
     return { ...m, delivery: { status: e.status, reason } };
