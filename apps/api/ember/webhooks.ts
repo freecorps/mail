@@ -279,17 +279,35 @@ export const update = internalMutation({
   },
 });
 
-/** Deletes a webhook and its deliveries (pending attempts are canceled). */
+/** Deletes up to 500 of a webhook's deliveries (their pending attempts canceled); true when some may be left. */
+function dropSome(ctx: MCtx, webhookId: string): boolean {
+  const batch = ctx.db.query("webhookDeliveries").withIndex("by_webhook", (q: any) => q.eq("webhookId", webhookId)).take(500) as Array<{ _id: string; jobId?: string }>;
+  for (const d of batch) {
+    if (d.jobId) ctx.scheduler.cancel(d.jobId);
+    ctx.db.delete(d._id);
+  }
+  return batch.length === 500;
+}
+
+/**
+ * Deletes a webhook and its deliveries (pending attempts are canceled). A busy webhook's deliveries go in batches
+ * after it is gone; an attempt that still runs meanwhile finds no webhook and stops.
+ */
 export const remove = internalMutation({
   args: { id: v.string() },
   handler: (ctx, a) => {
     const w = byId(ctx as any, a.id);
-    for (const d of ctx.db.query("webhookDeliveries").withIndex("by_webhook", (q) => q.eq("webhookId", w._id)).take(1000) as Array<{ _id: string; jobId?: string }>) {
-      if (d.jobId) ctx.scheduler.cancel(d.jobId);
-      ctx.db.delete(d._id as any);
-    }
     ctx.db.delete(w._id as any);
+    if (dropSome(ctx as any, w._id)) ctx.scheduler.runAfter(0, "webhooks:dropDeliveries" as any, { webhookId: w._id });
     return true;
+  },
+});
+
+export const dropDeliveries = internalMutation({
+  args: { webhookId: v.string() },
+  handler: (ctx, a) => {
+    if (dropSome(ctx as any, a.webhookId)) ctx.scheduler.runAfter(0, "webhooks:dropDeliveries" as any, a);
+    return null;
   },
 });
 
@@ -320,6 +338,7 @@ export const test = internalMutation({
   args: { id: v.string() },
   handler: (ctx, a) => {
     const w = byId(ctx as any, a.id);
+    if (!w.enabled) throw new Error("webhook is paused: turn it on to send a test");
     const body = JSON.stringify({ type: "webhook.test", created_at: iso(ctx.now), data: { webhook_id: w._id, message: "A test event from Ember Mail." } });
     return queue(ctx as any, w, "webhook.test", body);
   },
