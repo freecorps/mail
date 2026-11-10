@@ -15,6 +15,7 @@ import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf, displayAddress, formatFull } from "../lib/format";
 import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { useThread, type MessageItem } from "../model/thread";
+import { useMailboxes } from "../model/threads";
 import { usePalette } from "../theme";
 
 export function ThreadScreen() {
@@ -24,6 +25,8 @@ export function ThreadScreen() {
   const vm = useThread(threadId);
   const [loadImages, setLoadImages] = useState(false);
   const thread = vm.thread;
+  // In your own mailbox there is nobody to assign to and nobody to leave a note for.
+  const personal = useMailboxes().mailboxes.find((b) => b.name === thread?.mailbox)?.personal === true;
   const unread = (thread?.unreadCount ?? 0) > 0;
   const closed = thread?.status === "closed";
   const readIcon = useToolbarIcon(unread ? Icons.markRead : Icons.markUnread, p.tint);
@@ -41,13 +44,15 @@ export function ThreadScreen() {
           <Stack.Toolbar.Button icon={readIcon} accessibilityLabel={unread ? t("thread.markRead") : t("thread.markUnread")} onPress={vm.toggleRead}>
             {unread ? t("thread.markRead") : t("thread.markUnread")}
           </Stack.Toolbar.Button>
-          <Stack.Toolbar.Button
-            icon={assignIcon}
-            accessibilityLabel={t("thread.assign")}
-            onPress={() => router.push({ pathname: "/assign", params: { threadId, mailbox: thread.mailbox, current: thread.assignee ?? "" } })}
-          >
-            {t("thread.assign")}
-          </Stack.Toolbar.Button>
+          {personal ? null : (
+            <Stack.Toolbar.Button
+              icon={assignIcon}
+              accessibilityLabel={t("thread.assign")}
+              onPress={() => router.push({ pathname: "/assign", params: { threadId, mailbox: thread.mailbox, current: thread.assignee ?? "" } })}
+            >
+              {t("thread.assign")}
+            </Stack.Toolbar.Button>
+          )}
           <Stack.Toolbar.Button
             icon={archiveIcon}
             accessibilityLabel={closed ? t("thread.unarchive") : t("thread.archive")}
@@ -74,7 +79,7 @@ export function ThreadScreen() {
       </Text>
       <View style={styles.meta}>
         <StatusPill status={thread.status} />
-        <Chip icon={Icons.person} label={thread.assigneeName ? t("thread.assignedTo", { name: thread.assigneeName }) : t("thread.unassigned")} />
+        {personal ? null : <Chip icon={Icons.person} label={thread.assigneeName ? t("thread.assignedTo", { name: thread.assigneeName }) : t("thread.unassigned")} />}
         <Text style={{ color: p.secondary, fontSize: 13 }} numberOfLines={1}>
           {contactOf(thread)}
         </Text>
@@ -102,7 +107,7 @@ export function ThreadScreen() {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {vm.canReply ? <Composer onReply={vm.reply} onNote={vm.note} /> : <Text style={[styles.spam, { color: p.secondary }]}>{t("thread.spamNoReply")}</Text>}
+      {vm.canReply ? <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} /> : <Text style={[styles.spam, { color: p.secondary }]}>{t("thread.spamNoReply")}</Text>}
     </KeyboardAvoidingView>
   );
 }
@@ -144,7 +149,8 @@ const MessageCard = memo(function MessageCard({ item, loadImages, urls, online }
   );
 });
 
-function Composer({ onReply, onNote }: { onReply(text: string, attachments?: AttachmentArg[]): Promise<unknown>; onNote(text: string): Promise<unknown> }) {
+/** `notes: false` (a personal mailbox): replies only, no internal-note mode. */
+function Composer({ onReply, onNote, notes = true }: { onReply(text: string, attachments?: AttachmentArg[]): Promise<unknown>; onNote(text: string): Promise<unknown>; notes?: boolean }) {
   const p = usePalette();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
@@ -178,15 +184,17 @@ function Composer({ onReply, onNote }: { onReply(text: string, attachments?: Att
   };
   return (
     <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 8) }]}>
-      <Segmented<"reply" | "note">
-        label={t("thread.modeLabel")}
-        value={mode}
-        onChange={setMode}
-        options={[
-          { value: "reply", label: t("thread.replyMode") },
-          { value: "note", label: t("thread.noteMode") },
-        ]}
-      />
+      {notes ? (
+        <Segmented<"reply" | "note">
+          label={t("thread.modeLabel")}
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "reply", label: t("thread.replyMode") },
+            { value: "note", label: t("thread.noteMode") },
+          ]}
+        />
+      ) : null}
       {mode === "reply" ? <UploadStrip items={uploads.items} onRemove={uploads.remove} /> : null}
       <View style={styles.inputRow}>
         {mode === "reply" ? <IconButton icon={Icons.attach} label={t("attach.add")} onPress={() => void uploads.add().catch(() => {})} /> : null}

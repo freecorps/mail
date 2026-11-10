@@ -86,7 +86,8 @@ const sourceOf = (s: { source?: "local" | "cache" }): Source => s.source ?? "ser
 
 export function useMailboxes() {
   const s = useQuerySnapshot(api.inbox.mailboxes, {});
-  const mailboxes: Mailbox[] = s.value ?? [];
+  // Your own mailbox first, then the shared ones as the server lists them.
+  const mailboxes: Mailbox[] = [...(s.value ?? [])].sort((a, b) => Number(!!b.personal) - Number(!!a.personal));
   return {
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,

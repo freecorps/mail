@@ -76,6 +76,8 @@ export interface Mailbox {
   name: string;
   address: string;
   displayName: string | null;
+  /** The signed-in person's own mailbox (`heitor@`): no one else sees it, so no assignment or internal notes. */
+  personal?: boolean;
   unread: number;
   threads: number;
 }
