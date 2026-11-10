@@ -1,6 +1,6 @@
 // The admin screen of the web app (apps/web, "Administração"): reactive queries and mutations over the service's
 // setup, for members with `admin` only. They mirror what the HTTP API does with a full_access key (domains, API
-// keys, mailboxes, members, sent emails, suppressions), with one rule the HTTP API also keeps: a personal mailbox
+// keys, mailboxes, members, sent emails, suppressions, webhooks), with one rule the HTTP API also keeps: a personal mailbox
 // (ember/access.ts) stays its owner's business. Admins see that it exists and who owns it, never its counts, its
 // sent emails or its suppressions.
 import {
@@ -13,6 +13,7 @@ import {
 } from "@freecorps/ember-server";
 import { isDomainName } from "@freecorps/ember-email/cloudflare";
 import { newToken, sha256Hex } from "../src/api.ts";
+import { newSecret } from "../src/webhooks.ts";
 import { owners, type Member } from "./access.ts";
 import { PERMISSIONS } from "./keys.ts";
 
@@ -393,5 +394,101 @@ export const unsuppress = mutation({
     adminOf(ctx);
     sharedProject(ctx, a.project);
     return ctx.runMutation(email.unsuppress, a) as boolean;
+  },
+});
+
+// ---------------------------------------------------------------------------------------------- webhooks
+
+const webhookFields = {
+  endpoint: v.string(),
+  events: v.array(v.string()),
+  project: v.optional(v.union(v.string(), v.null())),
+  mailboxes: v.optional(v.union(v.array(v.string()), v.null())),
+  description: v.optional(v.union(v.string(), v.null())),
+};
+
+export const webhooks = query({
+  args: {},
+  handler: (ctx) => {
+    adminOf(ctx);
+    return ctx.runQuery("webhooks:list" as any, {}) as unknown[];
+  },
+});
+
+export const webhookDeliveries = query({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    adminOf(ctx);
+    return ctx.runQuery("webhooks:deliveries" as any, { id: a.id, limit: 50 }) as unknown[];
+  },
+});
+
+/** The signing secret, on demand (the screen hides it until asked). */
+export const webhookSecret = query({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    adminOf(ctx);
+    return (ctx.runQuery("webhooks:get" as any, a) as { signing_secret: string }).signing_secret;
+  },
+});
+
+/** A new webhook: an action, for the secret's random. Returns its id and secret. */
+export const createWebhook = action({
+  args: webhookFields,
+  handler: async (ctx, a) => {
+    await ctx.runQuery("console:isAdmin" as any, {});
+    const secret = newSecret();
+    const id = (await ctx.runMutation("webhooks:create" as any, { ...a, secret })) as string;
+    return { id, secret };
+  },
+});
+
+export const updateWebhook = mutation({
+  args: {
+    id: v.string(),
+    endpoint: v.optional(v.string()),
+    events: v.optional(v.array(v.string())),
+    project: v.optional(v.union(v.string(), v.null())),
+    mailboxes: v.optional(v.union(v.array(v.string()), v.null())),
+    description: v.optional(v.union(v.string(), v.null())),
+    enabled: v.optional(v.boolean()),
+  },
+  handler: (ctx, a) => {
+    adminOf(ctx);
+    return ctx.runMutation("webhooks:update" as any, a);
+  },
+});
+
+export const deleteWebhook = mutation({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    adminOf(ctx);
+    return ctx.runMutation("webhooks:remove" as any, a) as boolean;
+  },
+});
+
+export const rotateWebhookSecret = action({
+  args: { id: v.string() },
+  handler: async (ctx, a) => {
+    await ctx.runQuery("console:isAdmin" as any, {});
+    const secret = newSecret();
+    await ctx.runMutation("webhooks:update" as any, { id: a.id, secret });
+    return { secret };
+  },
+});
+
+export const testWebhook = mutation({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    adminOf(ctx);
+    return ctx.runMutation("webhooks:test" as any, a) as string;
+  },
+});
+
+export const redeliverWebhook = mutation({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    adminOf(ctx);
+    return ctx.runMutation("webhooks:redeliver" as any, a) as boolean;
   },
 });

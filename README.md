@@ -70,7 +70,8 @@ Operação, deploy de produção e remoção: [`docs/operations.md`](docs/operat
 
 `POST /emails` (+ `Idempotency-Key`), `POST /emails/batch`, `GET /emails` (filtros: `status`, `tag`, `to`, `since`, `until`), `GET /emails/:id`, `GET /emails/:id/events`,
 `POST /emails/:id/cancel`, `/domains`, `/api-keys` (`full_access | sending_access | inbox`), `/templates`,
-`/suppressions`, `/inbox/*`. Erros no formato do Resend: `{ statusCode, name, message }`. Os detalhes estão em
+`/suppressions`, `/inbox/*`, `/webhooks` (eventos assinados no padrão Standard Webhooks: `email.received` e os de
+entrega; o SDK tem `verifyWebhook`). Erros no formato do Resend: `{ statusCode, name, message }`. Os detalhes estão em
 `apps/api/ember/http.ts`.
 
 ```ts

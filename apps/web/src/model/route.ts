@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { THREAD_FILTERS, useDebounced, type ThreadFilter } from "./threads";
 
 /** Sections of the admin screen (`?a=`). */
-export const ADMIN_SECTIONS = ["overview", "domains", "mailboxes", "members", "keys", "emails", "suppressions"] as const;
+export const ADMIN_SECTIONS = ["overview", "domains", "mailboxes", "members", "keys", "webhooks", "emails", "suppressions"] as const;
 export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 
 export interface Route {

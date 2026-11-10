@@ -1,7 +1,7 @@
 // The admin screen (`?a=<section>`, admins only): section nav and the section. Server info (an action) is fetched
 // once here and shared by the overview and domains.
 import { useEffect, useState } from "react";
-import { ArrowLeft, Ban, Globe, Inbox as InboxIcon, KeyRound, LayoutDashboard, Send, Users } from "lucide-react";
+import { ArrowLeft, Ban, Globe, Inbox as InboxIcon, KeyRound, LayoutDashboard, Send, Users, Webhook } from "lucide-react";
 import { useAction } from "@freecorps/ember-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/context";
@@ -16,6 +16,7 @@ import { Mailboxes } from "./Mailboxes";
 import { Members } from "./Members";
 import { Overview } from "./Overview";
 import { SectionBoundary } from "./parts";
+import { Webhooks } from "./Webhooks";
 
 const ICONS: Record<AdminSection, typeof Globe> = {
   overview: LayoutDashboard,
@@ -23,6 +24,7 @@ const ICONS: Record<AdminSection, typeof Globe> = {
   mailboxes: InboxIcon,
   members: Users,
   keys: KeyRound,
+  webhooks: Webhook,
   emails: Send,
   suppressions: Ban,
 };
@@ -86,6 +88,7 @@ export function AdminView(p: { section: AdminSection; onSection: (s: AdminSectio
             {p.section === "mailboxes" && <Mailboxes />}
             {p.section === "members" && <Members />}
             {p.section === "keys" && <Keys />}
+            {p.section === "webhooks" && <Webhooks />}
             {p.section === "emails" && <Emails />}
             {p.section === "suppressions" && <Suppressions />}
           </SectionBoundary>

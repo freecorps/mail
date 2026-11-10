@@ -245,6 +245,51 @@ export interface SuppressionRow {
   at: number;
 }
 
+export const WEBHOOK_EVENTS = [
+  "email.received",
+  "email.delivered",
+  "email.delivery_delayed",
+  "email.bounced",
+  "email.complained",
+  "email.failed",
+] as const;
+export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
+
+export interface WebhookRow {
+  id: string;
+  endpoint: string;
+  events: WebhookEventType[];
+  project: string | null;
+  mailboxes: string[];
+  description: string | null;
+  enabled: boolean;
+  created_at: string;
+  failures: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  type: string;
+  status: "pending" | "succeeded" | "failed";
+  attempts: number;
+  created_at: string;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  last_status: number | null;
+  last_error: string | null;
+  duration_ms: number | null;
+}
+
+type WebhookFields = {
+  endpoint: string;
+  events: WebhookEventType[];
+  project?: string | null;
+  mailboxes?: string[] | null;
+  description?: string | null;
+};
+
 type Paged<T> = { page: T[]; isDone: boolean; continueCursor: string };
 type ProjectPage = { project: string; paginationOpts: PageOpts };
 
@@ -326,6 +371,15 @@ export const api = {
     suppressions: q<"query", ProjectPage, Paged<SuppressionRow>>("console:suppressions"),
     suppress: q<"mutation", { project: string; email: string }, string>("console:suppress"),
     unsuppress: q<"mutation", { project: string; email: string }, boolean>("console:unsuppress"),
+    webhooks: q<"query", Record<string, never>, WebhookRow[]>("console:webhooks"),
+    webhookDeliveries: q<"query", { id: string }, WebhookDelivery[]>("console:webhookDeliveries"),
+    webhookSecret: q<"query", { id: string }, string>("console:webhookSecret"),
+    createWebhook: q<"action", WebhookFields, { id: string; secret: string }>("console:createWebhook"),
+    updateWebhook: q<"mutation", { id: string; enabled?: boolean } & Partial<WebhookFields>, WebhookRow>("console:updateWebhook"),
+    deleteWebhook: q<"mutation", { id: string }, boolean>("console:deleteWebhook"),
+    rotateWebhookSecret: q<"action", { id: string }, { secret: string }>("console:rotateWebhookSecret"),
+    testWebhook: q<"mutation", { id: string }, string>("console:testWebhook"),
+    redeliverWebhook: q<"mutation", { id: string }, boolean>("console:redeliverWebhook"),
   },
 };
 

@@ -59,5 +59,42 @@ export default defineSchema({
      * (ember/access.ts). A mailbox without a row here is shared.
      */
     personal: defineTable({ mailbox: v.string(), userId: v.string() }).index("by_mailbox", ["mailbox"]).index("by_user", ["userId"]),
+
+    /** Webhooks (ember/webhooks.ts): HTTPS endpoints for the service's events, signed with `secret` (Standard Webhooks). */
+    webhooks: defineTable({
+      endpoint: v.string(),
+      events: v.array(v.string()),
+      secret: v.string(),
+      /** Only this sending project's `email.*` events. */
+      project: v.optional(v.string()),
+      /** Only these mailboxes' `email.received`. */
+      mailboxes: v.optional(v.array(v.string())),
+      description: v.optional(v.string()),
+      enabled: v.boolean(),
+      createdAt: v.number(),
+      failures: v.optional(v.number()),
+      lastSuccessAt: v.optional(v.number()),
+      lastFailureAt: v.optional(v.number()),
+    }),
+
+    /** One event for one webhook: the body as sent (every attempt sends the same bytes), its attempts and outcome. */
+    webhookDeliveries: defineTable({
+      webhookId: v.id("webhooks"),
+      type: v.string(),
+      body: v.string(),
+      /** pending | succeeded | failed */
+      status: v.string(),
+      attempts: v.number(),
+      at: v.number(),
+      nextAt: v.number(),
+      jobId: v.optional(v.string()),
+      lastAt: v.optional(v.number()),
+      lastStatus: v.optional(v.number()),
+      lastError: v.optional(v.string()),
+      lastMs: v.optional(v.number()),
+      deliveredAt: v.optional(v.number()),
+    })
+      .index("by_webhook", ["webhookId", "at"])
+      .index("by_at", ["at"]),
   },
 });
