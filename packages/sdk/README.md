@@ -64,6 +64,51 @@ const mail = new EmberMail(key, { baseUrl, timeoutMs: 15_000, retries: 3, fetch:
 await mail.emails.send(email, { idempotencyKey: `order/${order.id}`, signal: AbortSignal.timeout(20_000) });
 ```
 
+## Webhooks
+
+A webhook gets the service's events as signed POSTs (Standard Webhooks, the same scheme as Svix and Resend), retried
+for about a day and a half when the endpoint does not answer 2xx. Create one with a `full_access` key (or in the web
+app's admin screen) and keep its `signing_secret`:
+
+```ts
+const { data } = await mail.webhooks.create({
+  endpoint: "https://app.example.com/hooks/mail",
+  events: ["email.received", "email.delivered", "email.bounced"],
+  project: "app",            // optional: only this project's delivery events (then no email.received)
+  mailboxes: ["support"],    // optional: only these mailboxes' email.received
+});
+// data.signing_secret: "whsec_…"
+```
+
+Verify each request with the raw body, before parsing it:
+
+```ts
+import { verifyWebhook, WebhookVerificationError } from "@freecorps/mail-sdk";
+
+export async function POST(req: Request) {
+  try {
+    const event = await verifyWebhook({ secret: process.env.MAIL_WEBHOOK_SECRET!, headers: req.headers, body: await req.text() });
+    if (event.type === "email.received") { /* event.data.thread_id, .mailbox, .from, .subject, .snippet */ }
+    return new Response("ok");
+  } catch (e) {
+    if (e instanceof WebhookVerificationError) return new Response("bad signature", { status: 400 });
+    throw e;
+  }
+}
+```
+
+`webhook-id` is the same on every retry of a delivery: use it to ignore one you already handled.
+
+| Event | `data` |
+| --- | --- |
+| `email.received` | `mailbox`, `thread_id`, `message_id`, `number`, `new_thread`, `status`, `from` (`{ email, name? }`), `subject`, `snippet`, `auto_submitted`. Spam is not sent |
+| `email.delivered`, `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.failed` | `email_id`, `project`, `status`, `recipient`, `from`, `to`, `cc`, `subject`, `created_at`, `tags`, `thread_id` (a reply from the inbox) |
+| `webhook.test` | `webhook_id`, `message` (from `webhooks.test(id)`) |
+
+Personal mailboxes never reach a webhook: neither their mail nor the delivery events of what they send. Also:
+`webhooks.list()`, `get(id)`, `update(id, { enabled: false, … })`, `remove(id)`, `rotateSecret(id)`,
+`deliveries(id)` and `retry(deliveryId)`.
+
 ## The rest of the API
 
 ```ts

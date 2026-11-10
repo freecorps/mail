@@ -1,6 +1,6 @@
 {
   "name": "@freecorps/mail-sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Typed client for Ember Mail (freecorps/mail), a Resend-style email API on Cloudflare: send, batch, status, list, waitFor, domains, API keys, templates, suppressions, inbox. No dependencies; safe retries with idempotency keys.",
   "keywords": [
     "email",

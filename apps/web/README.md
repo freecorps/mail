@@ -45,6 +45,7 @@ the `console:*` functions (`apps/api/ember/console.ts`), which check `admin` on 
 | Caixas           | Personal (owner only) or shared, who has access, retention, auto-reply; create and edit                                                     |
 | Pessoas          | Access requests (grant or decline), shared mailboxes per person, admin, remove                                                              |
 | Chaves de API    | Active keys (prefix only), create (the token shows once), revoke                                                                            |
+| Webhooks         | Endpoints, events and filters, the signing secret on demand, test, rotate, pause, delete; recent deliveries (send again)                    |
 | E-mails enviados | A project's send log with each email's delivery events                                                                                      |
 | Supressões       | A project's blocked addresses; block and unblock                                                                                            |
 
