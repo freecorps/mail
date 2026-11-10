@@ -1,5 +1,5 @@
 // Pure helpers: HTML safety, formatting, i18n, the push seam, optimistic updates.
-import { composerMode, ownFirst } from "../src/model/threads";
+import { composerMode, isPersonal, ownFirst } from "../src/model/threads";
 import { describe, expect, it } from "vitest";
 import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import type { PendingMutationRecord } from "@freecorps/ember-client";
@@ -234,6 +234,14 @@ describe("personal mailboxes", () => {
     const list = [{ name: "support" }, { name: "heitor", personal: true }, { name: "privacy", personal: false }];
     expect(ownFirst(list).map((b) => b.name)).toEqual(["heitor", "support", "privacy"]);
     expect(list.map((b) => b.name)).toEqual(["support", "heitor", "privacy"]);
+  });
+
+  it("know a thread's mailbox as personal only when the list says so", () => {
+    const list = [{ name: "support" }, { name: "heitor", personal: true }];
+    expect(isPersonal(list, "heitor")).toBe(true);
+    expect(isPersonal(list, "support")).toBe(false);
+    expect(isPersonal(list, undefined)).toBe(false);
+    expect(isPersonal([], "heitor")).toBe(false);
   });
 
   it("never send a note where there are none: a note picked before the mailbox was known is a reply", () => {

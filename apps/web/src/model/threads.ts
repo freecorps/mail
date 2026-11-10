@@ -146,3 +146,8 @@ export function ownFirst<T extends { personal?: boolean }>(list: readonly T[]): 
 export function composerMode(picked: "reply" | "note", notes: boolean | undefined): "reply" | "note" {
   return notes === false ? "reply" : picked;
 }
+
+/** Whether `mailbox` is the signed-in person's own (personal) mailbox; false while unknown or for a shared one. */
+export function isPersonal(list: readonly { name: string; personal?: boolean }[], mailbox: string | null | undefined): boolean {
+  return mailbox != null && list.some((b) => b.name === mailbox && b.personal === true);
+}

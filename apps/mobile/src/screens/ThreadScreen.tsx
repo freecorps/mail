@@ -15,7 +15,7 @@ import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf, displayAddress, formatFull } from "../lib/format";
 import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { useThread, type MessageItem } from "../model/thread";
-import { composerMode, useMailboxes } from "../model/threads";
+import { composerMode, isPersonal, useMailboxes } from "../model/threads";
 import { usePalette } from "../theme";
 
 export function ThreadScreen() {
@@ -26,7 +26,7 @@ export function ThreadScreen() {
   const [loadImages, setLoadImages] = useState(false);
   const thread = vm.thread;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
-  const personal = useMailboxes().mailboxes.find((b) => b.name === thread?.mailbox)?.personal === true;
+  const personal = isPersonal(useMailboxes().mailboxes, thread?.mailbox);
   const unread = (thread?.unreadCount ?? 0) > 0;
   const closed = thread?.status === "closed";
   const readIcon = useToolbarIcon(unread ? Icons.markRead : Icons.markUnread, p.tint);

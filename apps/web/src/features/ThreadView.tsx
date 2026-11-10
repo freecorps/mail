@@ -21,7 +21,7 @@ import { linkifyText } from "@/lib/emailHtml";
 import { contactOf, displayAddress, fileSize, formatFull } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMembers, useThread, type MessageItem } from "@/model/thread";
-import { useMailboxes } from "@/model/threads";
+import { isPersonal, useMailboxes } from "@/model/threads";
 import { Composer, type ComposerHandle } from "./Composer";
 import { EmailFrame } from "./EmailFrame";
 
@@ -30,7 +30,7 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
   const vm = useThread(threadId);
   const members = useMembers(vm.thread?.mailbox ?? null);
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
-  const personal = useMailboxes().mailboxes.find((b) => b.name === vm.thread?.mailbox)?.personal === true;
+  const personal = isPersonal(useMailboxes().mailboxes, vm.thread?.mailbox);
   const scroller = useRef<HTMLOListElement>(null);
   const count = vm.items.length;
   // Open on the newest message (the view is keyed by thread, so `stick` starts true per thread) and follow new ones
