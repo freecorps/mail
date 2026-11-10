@@ -15,6 +15,7 @@ import { Keys } from "./Keys";
 import { Mailboxes } from "./Mailboxes";
 import { Members } from "./Members";
 import { Overview } from "./Overview";
+import { SectionBoundary } from "./parts";
 
 const ICONS: Record<AdminSection, typeof Globe> = {
   overview: LayoutDashboard,
@@ -79,13 +80,15 @@ export function AdminView(p: { section: AdminSection; onSection: (s: AdminSectio
       </nav>
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-4 py-6 md:px-8 md:py-8">
-          {p.section === "overview" && <Overview server={server} serverError={serverError} onOpen={p.onSection} />}
-          {p.section === "domains" && <Domains server={server} />}
-          {p.section === "mailboxes" && <Mailboxes />}
-          {p.section === "members" && <Members />}
-          {p.section === "keys" && <Keys />}
-          {p.section === "emails" && <Emails />}
-          {p.section === "suppressions" && <Suppressions />}
+          <SectionBoundary key={p.section}>
+            {p.section === "overview" && <Overview server={server} serverError={serverError} onOpen={p.onSection} />}
+            {p.section === "domains" && <Domains server={server} />}
+            {p.section === "mailboxes" && <Mailboxes />}
+            {p.section === "members" && <Members />}
+            {p.section === "keys" && <Keys />}
+            {p.section === "emails" && <Emails />}
+            {p.section === "suppressions" && <Suppressions />}
+          </SectionBoundary>
         </div>
       </div>
     </div>

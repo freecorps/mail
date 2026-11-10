@@ -1,6 +1,6 @@
 // The signed-in inbox: mailboxes | thread list | conversation, with the location in the URL and keyboard shortcuts.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, PenSquare, WifiOff } from "lucide-react";
+import { ChevronDown, PenSquare, Settings, WifiOff } from "lucide-react";
 import { useConnectionState, useMutation } from "@freecorps/ember-react";
 import { toast } from "sonner";
 import { Logo } from "@/components/Logo";
@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useI18n } from "@/i18n/context";
@@ -148,6 +150,16 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
+        {/* Phones have no sidebar: the admin screen opens from here. */}
+        {me.admin && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => navigate({ admin: "overview", thread: null }, { push: true })}>
+              <Settings aria-hidden="true" />
+              {t("admin.open")}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

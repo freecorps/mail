@@ -32,7 +32,9 @@ export function Members() {
   const label = (m: { name: string | null; userId: string }) => m.name ?? m.userId;
 
   if (data.state === "error") return <Failure message={data.message} />;
-  if (data.state === "loading") return <Loading />;
+  if (boxes.status === "error") return <Failure message={boxes.error?.message ?? ""} />;
+  // The grant dialog lists the shared mailboxes: both must be loaded before it can open.
+  if (data.state === "loading" || boxes.value === undefined) return <Loading />;
   const { me, members, requests } = data.value;
   return (
     <div className="space-y-10">

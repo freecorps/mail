@@ -129,6 +129,8 @@ function MailboxDialog({ box, onClose }: { box: MailboxRow | null; onClose: () =
     text: useId(),
   };
   const isNew = !box;
+  const autoChanged =
+    auto !== !!box?.autoReply || (auto && (subject !== (box?.autoReply?.subject ?? "") || text !== (box?.autoReply?.text ?? "")));
   const domain = address.includes("@") ? address.slice(address.lastIndexOf("@") + 1) : "";
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -146,7 +148,8 @@ function MailboxDialog({ box, onClose }: { box: MailboxRow | null; onClose: () =
                   address: address.trim(),
                   displayName: displayName.trim() || null,
                   retention: c || s ? { ...(c ? { closedDays: c } : {}), ...(s ? { spamDays: s } : {}) } : null,
-                  autoReply: auto && text.trim() ? { subject: subject.trim(), text } : null,
+                  // Unchanged: not sent, so the stored one (an HTML auto-reply set by the API, too) is kept.
+                  ...(autoChanged ? { autoReply: auto && text.trim() ? { subject: subject.trim(), text } : null } : {}),
                 }),
               isNew ? `${t("admin.mailboxes.saved")}. ${t("admin.mailboxes.routing", { domain })}` : t("admin.mailboxes.saved"),
             ).then((r) => r && onClose());

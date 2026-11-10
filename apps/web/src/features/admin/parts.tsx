@@ -1,6 +1,6 @@
 // Small pieces shared by the admin sections: section header, tone pills, a copy button, a confirm dialog, the
 // project picker, and `useRun` (runs a call, toasts its failure).
-import { useState, type ReactNode } from "react";
+import { Component, useState, type ReactNode } from "react";
 import { Check, Copy } from "lucide-react";
 import { useQuerySnapshot } from "@freecorps/ember-react";
 import {
@@ -161,4 +161,15 @@ export function Field(p: { label: string; htmlFor?: string; hint?: string; child
       {p.hint && <p className="text-xs text-muted-foreground">{p.hint}</p>}
     </div>
   );
+}
+
+/** Keeps a section's failure (a hook that throws, like a paginated query's) inside the section. */
+export class SectionBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  override state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override render() {
+    return this.state.error ? <Failure message={this.state.error.message} /> : this.props.children;
+  }
 }
