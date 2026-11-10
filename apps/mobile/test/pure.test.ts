@@ -1,6 +1,6 @@
 // Pure helpers: HTML safety, formatting, i18n, the push seam, optimistic updates.
 import { composerMode, isPersonal, ownFirst } from "../src/model/threads";
-import { forwardSubject, forwardText, replyAllCc } from "../src/model/forward";
+import { forwardedFiles, forwardSubject, forwardText, MAX_CC, replyAllCc } from "../src/model/forward";
 import { describe, expect, it } from "vitest";
 import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import type { PendingMutationRecord } from "@freecorps/ember-client";
@@ -214,6 +214,9 @@ describe("optimistic updates", () => {
     const first = s.get("inbox:threads", all).page[0] as Thread;
     expect(first).toMatchObject({ contact: "lia@user.test", subject: "Oi", status: "waiting" });
     expect(threadRow(first).pending).toBe(true);
+    // A forward from the loaded thread's mailbox shows the same way.
+    up["inbox:forward"]!(s.store, { threadId: "email$threads_1", to: ["Bia <bia@user.test>"], subject: "Fwd: Oi", text: "Veja." }, rec);
+    expect(s.get("inbox:threads", all).page[0]).toMatchObject({ contact: "bia@user.test", subject: "Fwd: Oi", mailbox: "support" });
   });
 });
 
@@ -261,6 +264,10 @@ describe("reply all and forward", () => {
     const messages = [msg({ to: [{ email: "heitor@freecorps.test" }, { email: "bia@user.test", name: "Bia" }], cc: [{ email: "heitor+t_x@freecorps.test" }, { email: "ana@user.test" }] })];
     expect(replyAllCc(messages, "heitor@freecorps.test", "ana@user.test")).toEqual(["Bia <bia@user.test>"]);
     expect(replyAllCc([], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+    expect(replyAllCc(messages, "", "ana@user.test")).toEqual([]);
+    const crowd = msg({ cc: Array.from({ length: 80 }, (_, i) => ({ email: `p${i}@user.test` })) });
+    expect(replyAllCc([crowd], "heitor@freecorps.test", "ana@user.test")).toHaveLength(MAX_CC);
+    expect(forwardedFiles([{ filename: "a.pdf" }, { filename: "logo.png", inline: true, contentId: "<logo>" }])).toEqual([{ filename: "a.pdf" }]);
   });
 
   it("a forward says Fwd: once, and quotes the original under a header", () => {

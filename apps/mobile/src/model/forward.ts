@@ -13,11 +13,21 @@ function sameMailbox(email: string, own: string): boolean {
 
 const formatted = (a: Address) => (a.name ? `${a.name} <${a.email}>` : a.email);
 
+/** Most people a reply copies (the API refuses more: apps/api `MAX_CC`). */
+export const MAX_CC = 50;
+
+/** A message's files a forward sends on: not the inline images of its HTML (signature logos), which nothing shows. */
+export function forwardedFiles<T extends { inline?: boolean; contentId?: string }>(attachments: readonly T[]): T[] {
+  return attachments.filter((a) => !(a.inline && a.contentId));
+}
+
 /**
  * Who "reply all" copies: everyone else on the latest message received (its To and Cc), never this mailbox (any
- * `+tag` of it) nor the contact, who the reply goes to anyway. Empty when there is nobody else.
+ * `+tag` of it) nor the contact, who the reply goes to anyway. Empty when there is nobody else, or while this
+ * mailbox's address is not known yet (it would copy itself). At most `MAX_CC`.
  */
 export function replyAllCc(messages: readonly Message[], own: string, contact: string): string[] {
+  if (!own.includes("@")) return [];
   const last = [...messages].reverse().find((m) => m.direction === "inbound");
   if (!last) return [];
   const seen = new Set<string>([lower(contact)]);
@@ -27,6 +37,7 @@ export function replyAllCc(messages: readonly Message[], own: string, contact: s
     if (!email || seen.has(email) || sameMailbox(email, own)) continue;
     seen.add(email);
     out.push(formatted(a));
+    if (out.length === MAX_CC) break;
   }
   return out;
 }

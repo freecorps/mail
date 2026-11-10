@@ -2,7 +2,7 @@
 // composer with a native segmented control (reply / internal note) and a native text field.
 import { Host, TextInput, type TextInputRef } from "@expo/ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Keyboard, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AttachmentList } from "../components/Attachments";
@@ -30,6 +30,8 @@ export function ThreadScreen() {
   const boxes = useMailboxes().mailboxes;
   const personal = isPersonal(boxes, thread?.mailbox);
   const own = boxes.find((b) => b.name === thread?.mailbox)?.address ?? "";
+  // Stable, so the memoized message cards do not re-render for it.
+  const forwardMessage = useCallback((messageId: string) => router.push({ pathname: "/compose", params: { forwardThread: threadId, forwardMessage: messageId } }), [threadId]);
   const others = useMemo(() => (thread ? replyAllCc(vm.items.map((i) => i.message), own, thread.contact) : []), [vm.items, thread, own]);
   const unread = (thread?.unreadCount ?? 0) > 0;
   const closed = thread?.status === "closed";
@@ -111,7 +113,7 @@ export function ThreadScreen() {
             loadImages={loadImages}
             urls={vm.attachmentUrls}
             online={vm.online}
-            onForward={item.pending ? undefined : () => router.push({ pathname: "/compose", params: { forwardThread: threadId, forwardMessage: item.message._id } })}
+            onForward={forwardMessage}
           />
         )}
         contentContainerStyle={{ paddingBottom: 16 }}
@@ -135,7 +137,8 @@ const MessageCard = memo(function MessageCard({
   loadImages: boolean;
   urls: Record<string, string | null>;
   online: boolean;
-  onForward?: () => void;
+  /** Forwards this message (not offered for a note or a message still sending). */
+  onForward?: (messageId: string) => void;
 }) {
   const p = usePalette();
   const { t, locale } = useI18n();
@@ -160,7 +163,7 @@ const MessageCard = memo(function MessageCard({
           </Text>
         </View>
         {item.pending ? <Symbol icon={Icons.pending} size={16} color={p.secondary} /> : null}
-        {onForward && !note ? <IconButton icon={Icons.forward} label={t("thread.forward")} onPress={onForward} /> : null}
+        {onForward && !note && !item.pending ? <IconButton icon={Icons.forward} label={t("thread.forward")} onPress={() => onForward(m._id)} /> : null}
       </View>
       {m.html && m.direction === "inbound" ? (
         <EmailHtmlView html={m.html} loadImages={loadImages} cid={item.cid} label={m.text.slice(0, 500)} />

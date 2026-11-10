@@ -168,9 +168,10 @@ export const forward = mutation({
   args: { threadId: v.string(), messageId: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
-    const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string }> }>).find((x) => x._id === a.messageId);
+    const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string; inline?: boolean; contentId?: string }> }>).find((x) => x._id === a.messageId);
     if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
-    const original = msg.attachments.map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
+    // Not the inline images of its HTML (signature logos): the forward is text, and nothing shows them.
+    const original = msg.attachments.filter((f) => !(f.inline && f.contentId)).map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
     const w = withAttachments(ctx, m, a.text, a.attachments, original);
     return ctx.runMutation(email.compose, {
       mailbox: t.thread.mailbox,

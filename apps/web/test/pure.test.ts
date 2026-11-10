@@ -1,7 +1,7 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
 import { composerMode, isPersonal, ownFirst } from "@/model/threads";
-import { forwardSubject, forwardText, replyAllCc } from "@/model/forward";
+import { forwardedFiles, forwardSubject, forwardText, MAX_CC, replyAllCc } from "@/model/forward";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
 import { pickLocale, translate } from "@/i18n/strings";
@@ -308,6 +308,20 @@ describe("optimistic updates", () => {
     expect(all.page[0]).toMatchObject({ contact: "rui@u.test", status: "waiting" });
     expect(closed.page).toHaveLength(0);
   });
+
+  it("forward puts the new conversation on top of the forwarded thread's mailbox lists; unknown thread, nothing", () => {
+    const s = store({ "inbox:threads": [{ args: { mailbox: "support" }, value: page([thread()]) }] });
+    const id = s.dump("inbox:threads")[0].page[0]._id as string;
+    u["inbox:forward"]!(s, { threadId: id, to: ["Bia <bia@u.test>"], subject: "Fwd: Oi", text: "Veja." }, rec);
+    expect(s.dump("inbox:threads")[0].page[0]).toMatchObject({
+      contact: "bia@u.test",
+      subject: "Fwd: Oi",
+      status: "waiting",
+      mailbox: "support",
+    });
+    u["inbox:forward"]!(s, { threadId: "nope", to: ["x@u.test"], subject: "s", text: "t" }, rec);
+    expect(s.dump("inbox:threads")[0].page).toHaveLength(2);
+  });
 });
 
 describe("personal mailboxes", () => {
@@ -359,6 +373,16 @@ describe("reply all and forward", () => {
     expect(replyAllCc(messages, "heitor@freecorps.test", "ana@user.test")).toEqual(["Bia <bia@user.test>", "caio@user.test"]);
     expect(replyAllCc([msg({ to: [{ email: "heitor@freecorps.test" }] })], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
     expect(replyAllCc([], "heitor@freecorps.test", "ana@user.test")).toEqual([]);
+    // The mailbox's address not known yet: no reply all (it would copy itself).
+    expect(replyAllCc(messages, "", "ana@user.test")).toEqual([]);
+    // At most what the API takes.
+    const crowd = msg({ cc: Array.from({ length: 80 }, (_, i) => ({ email: `p${i}@user.test` })) });
+    expect(replyAllCc([crowd], "heitor@freecorps.test", "ana@user.test")).toHaveLength(MAX_CC);
+  });
+
+  it("a forward sends the files, not the inline images of the HTML", () => {
+    const files = [{ filename: "a.pdf" }, { filename: "logo.png", inline: true, contentId: "<logo>" }, { filename: "b.png", inline: true }];
+    expect(forwardedFiles(files).map((f) => f.filename)).toEqual(["a.pdf", "b.png"]);
   });
 
   it("a forward says Fwd: once, and quotes the original under a header", () => {

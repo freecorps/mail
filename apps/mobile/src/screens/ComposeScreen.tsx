@@ -6,7 +6,7 @@ import { useMutation, useQuery } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Loading } from "../components/ui";
-import { forwardSubject, forwardText } from "../model/forward";
+import { forwardedFiles, forwardSubject, forwardText } from "../model/forward";
 import { api } from "../api";
 import { Icons, useMaterialSource } from "../components/icons";
 import { UploadSection } from "../components/Uploads";
@@ -35,7 +35,7 @@ function ForwardCompose({ threadId, messageId }: { threadId: string; messageId: 
     mailbox: m.mailbox,
     subject: forwardSubject(m.subject || detail.thread.subject),
     text: forwardText(m, { header: t("forward.header"), from: t("forward.from"), date: t("forward.date"), subject: t("forward.subject"), to: t("forward.to") }, formatFull(m.at, locale)),
-    files: m.attachments.map((a) => a.filename),
+    files: forwardedFiles(m.attachments).map((a) => a.filename),
   };
   return <ComposeForm forward={forward} />;
 }

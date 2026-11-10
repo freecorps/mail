@@ -75,8 +75,19 @@ function append(store: Store, args: { threadId: string; text: string }, directio
 }
 
 /** `now` is injectable for tests. */
+/** The mailbox of a thread as the client has it loaded (its open thread, or any list it is in). */
+function mailboxOf(store: OptimisticLocalStore, threadId: string): string | null {
+  const open = store.getQuery<any>("inbox:thread", { threadId }) as ThreadDetail | undefined;
+  if (open?.thread) return open.thread.mailbox;
+  for (const { value } of store.getAllQueries<any>("inbox:threads") as Array<{ value: Page<Thread> | undefined }>) {
+    const t = value?.page.find((x) => x._id === threadId);
+    if (t) return t.mailbox;
+  }
+  return null;
+}
+
 export function inboxOptimisticUpdates(now: () => number = Date.now): Record<string, OptimisticUpdate> {
-  return {
+  const updates: Record<string, OptimisticUpdate> = {
     "inbox:reply": (store, args: { threadId: string; text: string }) => append(store, args, "outbound", now()),
     "inbox:note": (store, args: { threadId: string; text: string }) => append(store, args, "note", now()),
     "inbox:markRead": (store, { threadId }: { threadId: string }) => {
@@ -126,4 +137,10 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
       }
     },
   };
+  // A forward is a new conversation from the forwarded thread's mailbox: it shows at the top as a compose does.
+  updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string }, rec) => {
+    const mailbox = mailboxOf(store, args.threadId);
+    if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text }, rec);
+  };
+  return updates;
 }

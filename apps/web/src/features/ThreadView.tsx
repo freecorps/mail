@@ -34,7 +34,7 @@ import { contactOf, displayAddress, fileSize, formatFull } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMembers, useThread, type MessageItem } from "@/model/thread";
 import { isPersonal, useMailboxes } from "@/model/threads";
-import { forwardSubject, forwardText, replyAllCc } from "@/model/forward";
+import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "@/model/forward";
 import { ComposeDialog, type ForwardSource } from "./ComposeDialog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { EmailFrame } from "./EmailFrame";
@@ -90,7 +90,7 @@ export function ThreadView({
         },
         formatFull(m.at, locale),
       ),
-      files: m.attachments.map((a) => a.filename),
+      files: forwardedFiles(m.attachments).map((a) => a.filename),
     });
   };
   const scroller = useRef<HTMLOListElement>(null);
@@ -208,7 +208,11 @@ export function ThreadView({
       >
         {vm.items.map((item) => (
           <li key={item.message._id}>
-            <MessageCard item={item} urls={vm.attachmentUrls} onForward={item.pending ? undefined : () => forward(item.message)} />
+            <MessageCard
+              item={item}
+              urls={vm.attachmentUrls}
+              onForward={item.pending || item.message.direction === "note" ? undefined : () => forward(item.message)}
+            />
           </li>
         ))}
       </ol>
