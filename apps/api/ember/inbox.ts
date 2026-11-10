@@ -156,6 +156,12 @@ export const sent = query({
   },
 });
 
+/**
+ * Sent messages per thread that get a delivery marker (the latest ones). Each is one read of its email row in this
+ * shard's transaction (no network), and that read is what makes the marker live; the cap bounds a long thread.
+ */
+export const DELIVERY_MARKED = 50;
+
 /** Statuses where delivery did not happen: their reason is shown (the bounce's, else the send error's). */
 const UNDELIVERED = new Set(["bounced", "failed", "suppressed", "complained"]);
 
@@ -164,8 +170,15 @@ const UNDELIVERED = new Set(["bounced", "failed", "suppressed", "complained"]);
  * marker updates live as delivery events arrive. Notes and inbound messages have none.
  */
 function withDelivery(ctx: Ctx, t: { thread: unknown; messages: Array<Record<string, any>> }) {
+  // Only the latest DELIVERY_MARKED sends get a marker: what is still in flight; older ones settled long ago.
+  const marked = new Set(
+    t.messages
+      .filter((m) => m.direction === "outbound" && m.emailId)
+      .slice(-DELIVERY_MARKED)
+      .map((m) => m._id),
+  );
   const messages = t.messages.map((m) => {
-    if (m.direction !== "outbound" || !m.emailId) return m;
+    if (!marked.has(m._id)) return m;
     const e = ctx.runQuery(email.get, { id: m.emailId }) as { _id: string; status: string; error?: { message: string } } | null;
     if (!e) return m;
     let reason: string | null = null;
