@@ -1,5 +1,6 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
+import { composerMode, ownFirst } from "@/model/threads";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
 import { pickLocale, translate } from "@/i18n/strings";
@@ -305,5 +306,20 @@ describe("optimistic updates", () => {
     const [all, closed] = s.dump("inbox:threads");
     expect(all.page[0]).toMatchObject({ contact: "rui@u.test", status: "waiting" });
     expect(closed.page).toHaveLength(0);
+  });
+});
+
+describe("personal mailboxes", () => {
+  it("list your own mailbox first and keep the shared ones in the server's order", () => {
+    const list = [{ name: "support" }, { name: "heitor", personal: true }, { name: "privacy", personal: false }];
+    expect(ownFirst(list).map((b) => b.name)).toEqual(["heitor", "support", "privacy"]);
+    expect(list.map((b) => b.name)).toEqual(["support", "heitor", "privacy"]);
+  });
+
+  it("never send a note where there are none: a note picked before the mailbox was known is a reply", () => {
+    expect(composerMode("note", false)).toBe("reply");
+    expect(composerMode("note", true)).toBe("note");
+    expect(composerMode("note", undefined)).toBe("note");
+    expect(composerMode("reply", false)).toBe("reply");
   });
 });

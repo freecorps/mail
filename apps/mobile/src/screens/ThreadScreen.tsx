@@ -15,7 +15,7 @@ import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf, displayAddress, formatFull } from "../lib/format";
 import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { useThread, type MessageItem } from "../model/thread";
-import { useMailboxes } from "../model/threads";
+import { composerMode, useMailboxes } from "../model/threads";
 import { usePalette } from "../theme";
 
 export function ThreadScreen() {
@@ -155,7 +155,8 @@ function Composer({ onReply, onNote, notes = true }: { onReply(text: string, att
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const input = useRef<TextInputRef>(null);
-  const [mode, setMode] = useState<"reply" | "note">("reply");
+  const [picked, setMode] = useState<"reply" | "note">("reply");
+  const mode = composerMode(picked, notes);
   const [text, setText] = useState("");
   const uploads = useUploads(useUploadOne());
   // The home-indicator inset only matters while the bar sits at the bottom; above the keyboard it is empty space.

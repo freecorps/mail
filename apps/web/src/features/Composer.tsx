@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/context";
 import { cn } from "@/lib/utils";
+import { composerMode } from "@/model/threads";
 
 export type ComposerMode = "reply" | "note";
 export interface ComposerHandle {
@@ -28,14 +29,15 @@ export function Composer({
   notes?: boolean;
 }) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<ComposerMode>("reply");
+  const [picked, setMode] = useState<ComposerMode>("reply");
+  const mode = composerMode(picked, p.notes);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
 
   useImperativeHandle(ref, () => ({
     focus(m) {
-      setMode(p.notes === false ? "reply" : m);
+      setMode(m);
       area.current?.focus();
     },
   }));
