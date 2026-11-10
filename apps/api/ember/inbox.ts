@@ -127,7 +127,7 @@ export const threads = query({
   },
 });
 
-/** Most sent conversations one `sent` read returns (the list grows its `limit` as it scrolls). */
+/** Most sent conversations one `sent` read returns (the list grows its `limit` as it scrolls, up to here). */
 export const SENT_MAX = 300;
 
 /**
@@ -149,7 +149,8 @@ export const sent = query({
       };
       page.push(...r.page);
       if (!r.next) return { page, isDone: true };
-      if (page.length >= want || reads >= 10) return { page, isDone: false };
+      // At the cap the list ends there (older sends: search); otherwise a bigger `limit` reads on.
+      if (page.length >= want || reads >= 10) return { page, isDone: want >= SENT_MAX };
       before = r.next;
     }
   },

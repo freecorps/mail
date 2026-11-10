@@ -414,10 +414,15 @@ describe("mail app", () => {
     expect(sent.error ?? null).toBeNull();
     const subjects = sent.value.page.map((t: any) => t.subject);
     // The forward (a new conversation) went out after the reply to #1, so it comes first; each thread once.
-    expect(subjects.indexOf("Fwd: Invoice wrong")).toBeLessThan(subjects.findIndex((s: string) => /invoice/i.test(s) && !s.startsWith("Fwd")));
+    const fwd = subjects.indexOf("Fwd: Invoice wrong");
+    const replied = subjects.findIndex((s: string) => /invoice/i.test(s) && !s.startsWith("Fwd"));
+    expect(fwd).toBeGreaterThanOrEqual(0);
+    expect(replied).toBeGreaterThan(fwd);
     expect(new Set(sent.value.page.map((t: any) => t._id)).size).toBe(sent.value.page.length);
     expect(sent.value.page[0]).toMatchObject({ mailbox: "support", lastSentAt: expect.any(Number) });
     expect((await call("query", "inbox:sent", { mailbox: "support", limit: 1 }, "user:agent-1")).value).toMatchObject({ page: [{ _id: sent.value.page[0]._id }], isDone: false });
+    // At the cap (300) the list says it is done: no "load more" that never ends.
+    expect((await call("query", "inbox:sent", { mailbox: "support", limit: 10_000 }, "user:agent-1")).value.isDone).toBe(true);
     expect((await call("query", "inbox:sent", { mailbox: "support" }, "user:agent-2")).error.message).toMatch(/no access/);
     // Wolf's own mailbox: his answer is in his Sent; nobody else reads it, by session or by key.
     expect((await call("query", "inbox:sent", { mailbox: "wolf" }, "user:wolf")).value.page).toMatchObject([{ subject: "Lunch?" }]);
