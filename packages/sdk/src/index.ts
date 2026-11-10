@@ -238,6 +238,11 @@ export class EmberMail {
       const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.status ? { status: o.status } : {}), ...(o.cursor ? { cursor: o.cursor } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });
       return this.request<{ page: Thread[]; isDone: boolean; continueCursor: string }>("GET", `/inbox/threads?${q}`);
     },
+    /** The Sent view: conversations the mailbox wrote in, newest send first (`lastSentAt`); pass `next` as `before`. */
+    sent: (o: { mailbox: string; before?: string; limit?: number }) => {
+      const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.before ? { before: o.before } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });
+      return this.request<{ page: Array<Thread & { lastSentAt: number }>; next: string | null }>("GET", `/inbox/sent?${q}`);
+    },
     thread: (id: string) => this.request<{ thread: Thread; messages: Array<Record<string, unknown>> }>("GET", `/inbox/threads/${encodeURIComponent(id)}`),
     reply: (id: string, text: string, author?: string) => this.request<{ emailId: string; messageId: string; status: string }>("POST", `/inbox/threads/${encodeURIComponent(id)}/reply`, { text, ...(author ? { author } : {}) }),
     setStatus: (id: string, status: Thread["status"]) => this.request<{ status: string }>("POST", `/inbox/threads/${encodeURIComponent(id)}/status`, { status }),

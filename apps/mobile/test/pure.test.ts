@@ -11,7 +11,7 @@ import { buildEmailDocument, contentSecurityPolicy, hasRemoteImages, HEIGHT_PROB
 import { fileSize, formatWhen, initials, parseRecipients } from "../src/lib/format";
 import { inboxOptimisticUpdates, isOptimisticId } from "../src/offline/optimistic";
 import { pushTransport, registrationArgs, targetOf } from "../src/push/transport";
-import { searchRows, threadRow } from "../src/model/threads";
+import { searchRows, sentRow, threadRow } from "../src/model/threads";
 import { cidMap } from "../src/model/thread";
 
 describe("email HTML", () => {
@@ -217,6 +217,28 @@ describe("optimistic updates", () => {
     // A forward from the loaded thread's mailbox shows the same way.
     up["inbox:forward"]!(s.store, { threadId: "email$threads_1", to: ["Bia <bia@user.test>"], subject: "Fwd: Oi", text: "Veja." }, rec);
     expect(s.get("inbox:threads", all).page[0]).toMatchObject({ contact: "bia@user.test", subject: "Fwd: Oi", mailbox: "support" });
+  });
+
+  it("Sent: a reply or a new conversation goes on top of its mailbox's Sent lists, once; notes do not; status patches in place", () => {
+    const sent = { mailbox: "support", limit: 30 };
+    const old = { ...thread({ _id: "email$threads_0" }), lastSentAt: 5 };
+    const s = fakeStore([
+      ["inbox:thread", { threadId: "email$threads_1" }, { thread: thread(), messages: [] }],
+      ["inbox:sent", sent, { page: [old, { ...thread(), lastSentAt: 1 }], isDone: true }],
+      ["inbox:sent", { mailbox: "privacy", limit: 30 }, { page: [], isDone: true }],
+    ]);
+    up["inbox:reply"]!(s.store, { threadId: "email$threads_1", text: "Pronto" }, rec);
+    expect(s.get("inbox:sent", sent).page.map((t: Thread) => t._id)).toEqual(["email$threads_1", "email$threads_0"]);
+    expect(s.get("inbox:sent", sent).page[0].lastSentAt).toBe(99);
+    expect(s.get("inbox:sent", { mailbox: "privacy", limit: 30 }).page).toEqual([]);
+    up["inbox:note"]!(s.store, { threadId: "email$threads_0", text: "nota" }, rec);
+    expect(s.get("inbox:sent", sent).page[1]._id).toBe("email$threads_0");
+    up["inbox:setStatus"]!(s.store, { threadId: "email$threads_0", status: "closed" }, rec);
+    expect(s.get("inbox:sent", sent).page[1]).toMatchObject({ status: "closed", lastSentAt: 5 });
+    up["inbox:compose"]!(s.store, { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Oi", text: "Tudo bem?" }, rec);
+    expect(s.get("inbox:sent", sent).page).toHaveLength(3);
+    expect(s.get("inbox:sent", sent).page[0]).toMatchObject({ contact: "lia@user.test", lastSentAt: 99 });
+    expect(sentRow({ ...thread({ lastMessageAt: 120 }), lastSentAt: 42 }).at).toBe(42);
   });
 });
 

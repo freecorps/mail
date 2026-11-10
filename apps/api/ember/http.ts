@@ -13,6 +13,7 @@
 //   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner? }
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
+//   GET    /inbox/sent?mailbox=&before=&limit=
 //
 // Auth: `Authorization: Bearer em_...` (API keys, hashed at rest) or the Worker's EMBER_ADMIN_TOKEN (bootstrap).
 import { anyComponents as components, httpActionGeneric as httpAction, httpRouter, type ActionCtx } from "@freecorps/ember-server";
@@ -402,6 +403,19 @@ http.route({
     const status = url.searchParams.get("status");
     const r = await ctx.runQuery(email.threads, { mailbox, ...(status ? { status } : {}), paginationOpts: { numItems: pageLimit(url, 30), cursor: url.searchParams.get("cursor") } });
     return json(r);
+  }),
+});
+// The mailbox's Sent view: conversations it wrote in, newest send first; `next` goes on as `before`.
+http.route({
+  path: "/inbox/sent",
+  method: "GET",
+  handler: route(async (ctx, _r, p, url) => {
+    need(p, "inbox");
+    const mailbox = url.searchParams.get("mailbox");
+    if (!mailbox) throw new ApiError(422, "missing_required_field", "mailbox is required");
+    notPersonal(await personalMailboxes(ctx), mailbox);
+    const before = url.searchParams.get("before");
+    return json(await ctx.runQuery(email.sent, { mailbox, limit: pageLimit(url, 30), ...(before ? { before } : {}) }));
   }),
 });
 http.route({

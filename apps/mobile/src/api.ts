@@ -113,6 +113,10 @@ export interface Member {
   name: string;
 }
 
+/** A thread of the mailbox's Sent view: `lastSentAt`, when the mailbox last wrote in it. */
+export type SentThread = Thread & { lastSentAt: number };
+export type SentArgs = { mailbox: string; limit?: number };
+
 export type PageOpts = { numItems: number; cursor: string | null };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
@@ -122,6 +126,7 @@ export const api = {
     me: q<"query", Record<string, never>, Me | null>("inbox:me"),
     mailboxes: q<"query", Record<string, never>, Mailbox[]>("inbox:mailboxes"),
     threads: q<"query", ThreadsArgs, Page<Thread>>("inbox:threads"),
+    sent: q<"query", SentArgs, { page: SentThread[]; isDone: boolean }>("inbox:sent"),
     thread: q<"query", { threadId: string }, ThreadDetail>("inbox:thread"),
     search: q<"query", { query: string; mailbox?: string }, SearchHit[]>("inbox:search"),
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),

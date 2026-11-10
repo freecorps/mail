@@ -1,6 +1,6 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
-import { composerMode, isPersonal, ownFirst } from "@/model/threads";
+import { composerMode, isPersonal, ownFirst, sentRow } from "@/model/threads";
 import { forwardedFiles, forwardSubject, forwardText, MAX_CC, replyAllCc } from "@/model/forward";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
@@ -321,6 +321,33 @@ describe("optimistic updates", () => {
     });
     u["inbox:forward"]!(s, { threadId: "nope", to: ["x@u.test"], subject: "s", text: "t" }, rec);
     expect(s.dump("inbox:threads")[0].page).toHaveLength(2);
+  });
+
+  it("a reply or a new conversation goes to the top of its mailbox's Sent lists, once; status changes patch it in place", () => {
+    const old = { ...thread({ _id: "t0" }), lastSentAt: 5 };
+    const s = store({
+      "inbox:thread": [{ args: { threadId: "t1" }, value: { thread: thread(), messages: [] as Message[] } }],
+      "inbox:sent": [
+        { args: { mailbox: "support", limit: 30 }, value: { page: [old, { ...thread(), lastSentAt: 1 }], isDone: true } },
+        { args: { mailbox: "privacy", limit: 30 }, value: { page: [], isDone: true } },
+      ],
+    });
+    u["inbox:reply"]!(s, { threadId: "t1", text: "Corrigido" }, rec);
+    const [support, privacy] = s.dump("inbox:sent");
+    expect(support.page.map((t: Thread) => t._id)).toEqual(["t1", "t0"]);
+    expect(support.page[0].lastSentAt).toBeGreaterThan(5);
+    expect(privacy.page).toEqual([]);
+    u["inbox:note"]!(s, { threadId: "t0", text: "nota" }, rec);
+    expect(s.dump("inbox:sent")[0].page.map((t: Thread) => t._id)).toEqual(["t1", "t0"]);
+    u["inbox:setStatus"]!(s, { threadId: "t0", status: "closed" }, rec);
+    expect(s.dump("inbox:sent")[0].page[1]).toMatchObject({ _id: "t0", status: "closed", lastSentAt: 5 });
+    u["inbox:compose"]!(s, { mailbox: "support", to: ["Rui <rui@u.test>"], subject: "Oi", text: "Olá" }, rec);
+    expect(s.dump("inbox:sent")[0].page[0]).toMatchObject({ contact: "rui@u.test", lastSentAt: expect.any(Number) });
+    expect(s.dump("inbox:sent")[0].page).toHaveLength(3);
+  });
+
+  it("a Sent row is dated by the mailbox's latest send, not the thread's latest message", () => {
+    expect(sentRow({ ...thread({ lastMessageAt: 99 }), lastSentAt: 42 })).toMatchObject({ at: 42, threadId: "t1" });
   });
 });
 

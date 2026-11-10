@@ -110,7 +110,11 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
               <InboxIcon className="size-6 text-muted-foreground" aria-hidden="true" />
             )}
             <p className="text-sm font-medium">{p.searching ? t("threads.emptySearch", { query: p.query.trim() }) : t("threads.empty")}</p>
-            {!p.searching && <p className="max-w-56 text-xs text-muted-foreground">{t("threads.emptyHint")}</p>}
+            {!p.searching && (
+              <p className="max-w-56 text-xs text-muted-foreground">
+                {t(p.filter === "sent" ? "threads.emptyHintSent" : "threads.emptyHint")}
+              </p>
+            )}
           </div>
         ) : (
           <ul ref={listRef} className="p-1.5">
