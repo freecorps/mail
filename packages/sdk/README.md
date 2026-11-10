@@ -80,5 +80,5 @@ await mail.inbox.sent({ mailbox: "support" });                // what it sent, n
 
 A key is scoped to a project (its emails, suppressions and templates) and optionally to one sending domain.
 
-It has no dependencies and runs on Node 18+, Cloudflare Workers, Convex actions, Deno, Bun and browsers (pass
+It has no dependencies and runs on Node 20+, Cloudflare Workers, Convex actions, Deno, Bun and browsers (pass
 `fetch` when your runtime's is not the global one). License: MIT.

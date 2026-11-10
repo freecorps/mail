@@ -186,7 +186,7 @@ export type Result<T> = { data: T; error: null } | { data: null; error: ErrorRes
 export interface EmberMailOptions {
   /** The mail Worker's URL (e.g. https://ember-mail-prod.<you>.workers.dev or your custom domain). */
   baseUrl: string;
-  /** Your runtime's fetch (Workers, Convex actions, Node 18+, Bun, Deno and browsers all have one). */
+  /** Your runtime's fetch (Workers, Convex actions, Node 20+, Bun, Deno and browsers all have one). */
   fetch?: typeof fetch;
   /** Extra headers on every request. */
   headers?: Record<string, string>;
@@ -204,16 +204,19 @@ const RETRYABLE = (status: number) => status === 0 || status === 429 || status >
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     if (signal?.aborted) return reject(signal.reason);
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => (clearTimeout(t), reject(signal.reason)), { once: true });
+    const onAbort = () => (clearTimeout(t), reject(signal!.reason));
+    const t = setTimeout(() => (signal?.removeEventListener("abort", onAbort), resolve()), ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 /** A fresh idempotency key: random, from the runtime's Web Crypto. */
 function newKey(): string {
-  const c = (globalThis as unknown as { crypto: { randomUUID?: () => string; getRandomValues(b: Uint8Array): Uint8Array } }).crypto;
-  if (c.randomUUID) return c.randomUUID();
+  const c = (globalThis as unknown as { crypto?: { randomUUID?: () => string; getRandomValues?(b: Uint8Array): Uint8Array } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
   const b = new Uint8Array(16);
-  c.getRandomValues(b);
+  // Without Web Crypto (an old runtime), Math.random still gives a key unique enough for idempotency (not a secret).
+  if (c?.getRandomValues) c.getRandomValues(b);
+  else for (let i = 0; i < b.length; i++) b[i] = Math.floor(Math.random() * 256);
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
