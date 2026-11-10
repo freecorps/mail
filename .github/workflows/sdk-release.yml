@@ -1,0 +1,66 @@
+# Publishes @freecorps/mail-sdk to npm with provenance. Push a tag `sdk-v<version>` matching packages/sdk/package.json
+# (or run it by hand: a dry run unless `publish` is checked). Needs the NPM_TOKEN secret (an npm granular token with
+# read and write on the @freecorps scope) until npm trusted publishing is set up for this workflow.
+name: sdk-release
+
+on:
+  push:
+    tags: ["sdk-v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish (otherwise a dry run)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: bun install --frozen-lockfile
+      - name: Test and build
+        working-directory: packages/sdk
+        run: |
+          bun run test
+          rm -rf dist
+          bun run build
+      - name: Tag matches the package version
+        if: github.event_name == 'push'
+        working-directory: packages/sdk
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          [ "sdk-v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME != sdk-v$v"; exit 1; }
+      - name: Stage the package
+        working-directory: packages/sdk
+        # The repo-only `@freecorps/ember-source` condition points at src/, which is not shipped.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            for (const e of Object.values(p.exports)) delete e["@freecorps/ember-source"];
+            delete p.devDependencies;
+            fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
+          '
+          cp ../../LICENSE .
+          npm pack --dry-run
+      - name: Publish
+        working-directory: packages/sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.publish }}" = "true" ]; then
+            npm publish --provenance --access public
+          else
+            npm publish --provenance --access public --dry-run
+          fi

@@ -1,7 +1,7 @@
 {
   "name": "@freecorps/mail-sdk",
-  "version": "0.0.0",
-  "description": "Typed client for the freecorps/mail service (Resend-style API): emails, batch, domains, API keys, templates, suppressions, inbox.",
+  "version": "0.1.0",
+  "description": "Typed client for Ember Mail (freecorps/mail), a Resend-style email API on Cloudflare: send, batch, status, list, waitFor, domains, API keys, templates, suppressions, inbox. No dependencies; safe retries with idempotency keys.",
   "keywords": [
     "email",
     "resend",
@@ -35,11 +35,15 @@
     "dist"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "vitest run"
   },
   "dependencies": {},
-  "private": true
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
 }

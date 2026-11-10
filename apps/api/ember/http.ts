@@ -7,6 +7,7 @@
 //   GET    /domains                POST /domains { name, receiving?, sending? }
 //   GET    /domains/:id            POST /domains/:id/verify { enable_routing? }   DELETE /domains/:id
 //   POST   /domains/import         POST /domains/:id/forget (record only; for scripts/domains.ts)
+//   GET    /emails?status=&tag=name:value&to=&since=&until=&limit=&cursor=&project=
 //   GET    /api-keys               POST /api-keys { name, permission?, project?, domain? }   DELETE /api-keys/:id
 //   GET    /templates              POST /templates { name, subject, html, text?, layout? }   DELETE /templates/:name
 //   POST   /suppressions { email } DELETE /suppressions/:email
@@ -161,6 +162,58 @@ const emailView = (e: any) => ({
   scheduled_at: e.status === "scheduled" ? iso(e.sendAt) : null,
   tags: e.tags ? Object.entries(e.tags).map(([name, value]) => ({ name, value })) : [],
   ...(e.error ? { error: e.error } : {}),
+});
+
+// The project's emails, newest first, filtered (status, tag, recipient, time). Filters apply over pages of the project's
+// emails, so a page can come back with fewer than `limit` items and still a `next_cursor`: keep going until it is null.
+const LIST_SCAN_PAGES = 20;
+http.route({
+  path: "/emails",
+  method: "GET",
+  handler: route(async (ctx, _r, p, url) => {
+    need(p, "sending_access");
+    const q = url.searchParams;
+    const project = q.get("project") && p.permission === "full_access" ? q.get("project")! : p.project;
+    const limit = pageLimit(url, 20);
+    const status = q.get("status");
+    const to = q.get("to")?.trim().toLowerCase() || null;
+    const tag = q.get("tag");
+    const [tagName, tagValue] = tag ? [tag.slice(0, tag.indexOf(":") < 0 ? tag.length : tag.indexOf(":")), tag.includes(":") ? tag.slice(tag.indexOf(":") + 1) : null] : [null, null];
+    const when = (k: string) => {
+      const raw = q.get(k);
+      if (!raw) return null;
+      const t = Date.parse(raw);
+      if (!Number.isFinite(t)) throw new ApiError(422, "validation_error", `${k} must be an ISO 8601 date`);
+      return t;
+    };
+    const since = when("since");
+    const until = when("until");
+    const keep = (e: any) =>
+      (!p.domain || domainOf(e.from.email) === p.domain) &&
+      (!status || e.status === status) &&
+      (!to || [...e.to, ...(e.cc ?? []), ...(e.bcc ?? [])].some((a: any) => a.email.toLowerCase() === to)) &&
+      (!tagName || (e.tags && Object.hasOwn(e.tags, tagName) && (tagValue === null || e.tags[tagName] === tagValue))) &&
+      (since === null || e._creationTime >= since) &&
+      (until === null || e._creationTime < until);
+    const data: unknown[] = [];
+    let cursor: string | null = q.get("cursor");
+    let done = false;
+    // Each read asks for at most the items still missing, so a page is never cut midway (the cursor would skip the rest).
+    for (let i = 0; i < LIST_SCAN_PAGES && data.length < limit && !done; i++) {
+      const page = (await ctx.runQuery(email.list, { project, paginationOpts: { numItems: limit - data.length, cursor } })) as { page: any[]; isDone: boolean; continueCursor: string };
+      for (const e of page.page) {
+        // Newest first: past `since`, nothing older can match.
+        if (since !== null && e._creationTime < since) {
+          done = true;
+          break;
+        }
+        if (keep(e)) data.push(emailView(e));
+      }
+      cursor = page.continueCursor;
+      done ||= page.isDone;
+    }
+    return json({ object: "list", data, has_more: !done, next_cursor: done ? null : cursor });
+  }),
 });
 
 http.route({
