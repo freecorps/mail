@@ -1,6 +1,7 @@
 // Pure helpers: safe email HTML, formatting, i18n, keyboard shortcuts, compose validation, the URL route, the JWT
 // cache, theme resolution and the optimistic updates.
 import { composerMode, isPersonal, ownFirst, sentRow } from "@/model/threads";
+import { deliveryState } from "@/model/thread";
 import { forwardedFiles, forwardSubject, forwardText, MAX_CC, replyAllCc } from "@/model/forward";
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
@@ -423,5 +424,22 @@ describe("reply all and forward", () => {
     expect(text).toBe(
       "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>\nData: 10 nov 2026\nAssunto: Contrato\nPara: Heitor <heitor@freecorps.test>\n\nSegue.",
     );
+  });
+});
+
+describe("delivery marker", () => {
+  it("maps an outbound message's email status to its marker; none for notes, inbound or without a status", () => {
+    const out = (status: string) => ({ direction: "outbound", delivery: { status, reason: null } });
+    expect(["scheduled", "queued", "sending"].map((s) => deliveryState(out(s)))).toEqual(["pending", "pending", "pending"]);
+    expect(deliveryState(out("sent"))).toBe("sent");
+    expect(deliveryState(out("delivered"))).toBe("delivered");
+    expect(deliveryState(out("delivery_delayed"))).toBe("delayed");
+    expect(["bounced", "failed", "suppressed"].map((s) => deliveryState(out(s)))).toEqual(["failed", "failed", "failed"]);
+    expect(deliveryState(out("complained"))).toBe("spam");
+    expect(deliveryState(out("canceled"))).toBe("canceled");
+    expect(deliveryState(out("something-new"))).toBeNull();
+    expect(deliveryState({ direction: "note", delivery: { status: "sent" } })).toBeNull();
+    expect(deliveryState({ direction: "inbound" })).toBeNull();
+    expect(deliveryState({ direction: "outbound" })).toBeNull();
   });
 });

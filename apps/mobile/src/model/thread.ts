@@ -7,6 +7,41 @@ import { api, type Message, type Thread } from "../api";
 import { isOptimisticId } from "../offline/optimistic";
 import type { LoadStatus, Source } from "./threads";
 
+/** Where an email the thread sent is, for its marker. */
+export type DeliveryState = "pending" | "sent" | "delivered" | "delayed" | "failed" | "spam" | "canceled";
+
+/**
+ * The marker of an outbound message from its email's status (`delivery`): sending, sent (accepted by the provider),
+ * delivered (the recipient's server took it), delayed, not delivered, marked as spam, canceled. Null without one
+ * (notes, inbound, or an email the API no longer has).
+ */
+export function deliveryState(m: { direction: string; delivery?: { status: string } | null }): DeliveryState | null {
+  if (m.direction !== "outbound" || !m.delivery) return null;
+  switch (m.delivery.status) {
+    case "scheduled":
+    case "queued":
+    case "sending":
+      return "pending";
+    case "sent":
+      return "sent";
+    case "delivered":
+      return "delivered";
+    case "delivery_delayed":
+      return "delayed";
+    case "complained":
+      return "spam";
+    case "canceled":
+      return "canceled";
+    case "bounced":
+    case "failed":
+    case "suppressed":
+    case "rejected":
+      return "failed";
+    default:
+      return null;
+  }
+}
+
 export interface MessageItem {
   message: Message;
   /** Optimistic (not confirmed by the server yet). */

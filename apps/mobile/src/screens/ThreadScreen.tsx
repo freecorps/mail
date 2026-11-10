@@ -14,7 +14,7 @@ import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf, displayAddress, formatFull } from "../lib/format";
 import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
-import { useThread, type MessageItem } from "../model/thread";
+import { deliveryState, useThread, type MessageItem } from "../model/thread";
 import { composerMode, isPersonal, useMailboxes } from "../model/threads";
 import { replyAllCc } from "../model/forward";
 import { usePalette } from "../theme";
@@ -147,6 +147,9 @@ const MessageCard = memo(function MessageCard({
   const who = m.direction === "inbound" ? displayAddress(m.from) : (m.author ?? displayAddress(m.from));
   const files = m.attachments.filter((a) => !(a.inline && a.contentId && m.html?.includes(`cid:${a.contentId.replace(/^<|>$/g, "")}`)));
   const when = formatFull(m.at, locale);
+  // Where the email it sent is (not while the reply is still being sent).
+  const delivery = item.pending ? null : deliveryState(m);
+  const badDelivery = delivery === "failed" || delivery === "spam";
   return (
     <View
       style={[styles.card, { backgroundColor: note ? p.noteBg : p.card, borderColor: note ? p.noteBorder : "transparent" }, m.direction === "outbound" && { marginLeft: 32 }]}
@@ -161,6 +164,12 @@ const MessageCard = memo(function MessageCard({
           <Text style={{ color: p.secondary, fontSize: 12 }} numberOfLines={1}>
             {item.pending ? (online ? t("thread.sending") : t("thread.queued")) : m.direction === "inbound" ? `${m.from.email} · ${when}` : `${t("thread.to", { to: m.to.map(displayAddress).join(", ") || "—" })} · ${when}`}
           </Text>
+          {delivery ? (
+            <Text style={{ color: badDelivery ? p.danger : delivery === "delivered" ? p.tint : p.secondary, fontSize: 12 }} accessibilityLabel={t(`delivery.${delivery}`)}>
+              {t(`delivery.${delivery}`)}
+              {badDelivery && m.delivery?.reason ? ` · ${m.delivery.reason}` : ""}
+            </Text>
+          ) : null}
         </View>
         {item.pending ? <Symbol icon={Icons.pending} size={16} color={p.secondary} /> : null}
         {onForward && !note && !item.pending ? <IconButton icon={Icons.forward} label={t("thread.forward")} onPress={() => onForward(m._id)} /> : null}

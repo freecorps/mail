@@ -156,7 +156,47 @@ export const sent = query({
   },
 });
 
-export const thread = query({ args: { threadId: v.string() }, handler: (ctx, a) => threadOf(ctx, a.threadId).t });
+/**
+ * Sent messages per thread that get a delivery marker (the latest ones). Each is one read of its email row in this
+ * shard's transaction (no network), and that read is what makes the marker live; the cap bounds a long thread.
+ */
+export const DELIVERY_MARKED = 50;
+
+/** Delivery events that end in "not delivered": where the shown reason comes from. */
+const FAILURE_EVENTS = new Set(["bounced", "failed", "rejected", "complained"]);
+
+/** Statuses where delivery did not happen: their reason is shown (the bounce's, else the send error's). */
+const UNDELIVERED = new Set(["bounced", "failed", "suppressed", "complained"]);
+
+/**
+ * Where each email the thread sent is (`delivery`: queued, sent, delivered, bounced…), read with the thread so the
+ * marker updates live as delivery events arrive. Notes and inbound messages have none.
+ */
+function withDelivery(ctx: Ctx, t: { thread: unknown; messages: Array<Record<string, any>> }) {
+  // Only the latest DELIVERY_MARKED sends get a marker: what is still in flight; older ones settled long ago.
+  const marked = new Set(
+    t.messages
+      .filter((m) => m.direction === "outbound" && m.emailId)
+      .slice(-DELIVERY_MARKED)
+      .map((m) => m._id),
+  );
+  const messages = t.messages.map((m) => {
+    if (!marked.has(m._id)) return m;
+    const e = ctx.runQuery(email.get, { id: m.emailId }) as { _id: string; status: string; error?: { message: string } } | null;
+    if (!e) return m;
+    let reason: string | null = null;
+    if (UNDELIVERED.has(e.status)) {
+      const evs = ctx.runQuery(email.events, { id: e._id }) as Array<{ type: string; reason?: string; at: number }>;
+      // The reason of the failure itself (a bounce, a rejection), never an earlier delay's.
+      const last = evs.filter((x) => x.reason && FAILURE_EVENTS.has(x.type)).sort((x, y) => y.at - x.at)[0];
+      reason = (last?.reason ?? e.error?.message ?? null)?.slice(0, 300) ?? null;
+    }
+    return { ...m, delivery: { status: e.status, reason } };
+  });
+  return { ...t, messages };
+}
+
+export const thread = query({ args: { threadId: v.string() }, handler: (ctx, a) => withDelivery(ctx, threadOf(ctx, a.threadId).t) });
 
 export const search = query({
   args: { query: v.string(), mailbox: v.optional(v.string()) },
