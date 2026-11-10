@@ -86,7 +86,7 @@ const sourceOf = (s: { source?: "local" | "cache" }): Source => s.source ?? "ser
 
 export function useMailboxes() {
   const s = useQuerySnapshot(api.inbox.mailboxes, {});
-  const mailboxes: Mailbox[] = s.value ?? [];
+  const mailboxes: Mailbox[] = ownFirst(s.value ?? []);
   return {
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,
@@ -132,4 +132,22 @@ export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query:
     canLoadMore: !searching && !!list.value && !list.value.isDone,
     loadMore: () => setLimit({ key, n: n + PAGE }),
   };
+}
+
+/** Your own mailbox first, then the shared ones as the server lists them (stable). */
+export function ownFirst<T extends { personal?: boolean }>(list: readonly T[]): T[] {
+  return [...list].sort((a, b) => Number(!!b.personal) - Number(!!a.personal));
+}
+
+/**
+ * What the composer does: the mode picked, except where notes do not exist (a personal mailbox), where it is always a
+ * reply. Derived, not reset: a note picked before the mailbox was known to be personal never goes out as a note.
+ */
+export function composerMode(picked: "reply" | "note", notes: boolean | undefined): "reply" | "note" {
+  return notes === false ? "reply" : picked;
+}
+
+/** Whether `mailbox` is the signed-in person's own (personal) mailbox; false while unknown or for a shared one. */
+export function isPersonal(list: readonly { name: string; personal?: boolean }[], mailbox: string | null | undefined): boolean {
+  return mailbox != null && list.some((b) => b.name === mailbox && b.personal === true);
 }

@@ -21,6 +21,7 @@ import { linkifyText } from "@/lib/emailHtml";
 import { contactOf, displayAddress, fileSize, formatFull } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMembers, useThread, type MessageItem } from "@/model/thread";
+import { isPersonal, useMailboxes } from "@/model/threads";
 import { Composer, type ComposerHandle } from "./Composer";
 import { EmailFrame } from "./EmailFrame";
 
@@ -28,6 +29,8 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
   const { t } = useI18n();
   const vm = useThread(threadId);
   const members = useMembers(vm.thread?.mailbox ?? null);
+  // In your own mailbox there is nobody to assign to and nobody to leave a note for.
+  const personal = isPersonal(useMailboxes().mailboxes, vm.thread?.mailbox);
   const scroller = useRef<HTMLOListElement>(null);
   const count = vm.items.length;
   // Open on the newest message (the view is keyed by thread, so `stick` starts true per thread) and follow new ones
@@ -82,7 +85,7 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
             {th.number > 0 && <span className="font-mono tabular-nums">#{th.number}</span>}
             <span>{contactOf(th)}</span>
             <StatusBadge status={th.status} />
-            {th.assigneeName && <span>{t("thread.assignedTo", { name: th.assigneeName })}</span>}
+            {th.assigneeName && !personal && <span>{t("thread.assignedTo", { name: th.assigneeName })}</span>}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -99,34 +102,36 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
           <Action label={unread ? t("thread.markRead") : t("thread.markUnread")} kbd="u" onClick={vm.toggleRead}>
             {unread ? <MailOpen /> : <Mail />}
           </Action>
-          <DropdownMenu>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="sm" aria-label={t("thread.assign")} className="gap-1.5">
-                    <UserRound aria-hidden="true" />
-                    <span className="hidden max-w-28 truncate lg:inline">{th.assigneeName ?? t("thread.unassigned")}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent>{t("thread.assign")}</TooltipContent>
-            </Tooltip>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuLabel className="text-xs text-muted-foreground">{t("assign.title")}</DropdownMenuLabel>
-              {members.members.map((m) => (
-                <DropdownMenuItem key={m.userId} onSelect={() => vm.assign(m.userId)}>
-                  <Avatar name={m.name} seed={m.userId} className="size-5 text-[9px]" />
-                  <span className="flex-1 truncate">{m.name}</span>
-                  {th.assignee === m.userId && <Check aria-label="✓" />}
+          {!personal && (
+            <DropdownMenu>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" aria-label={t("thread.assign")} className="gap-1.5">
+                      <UserRound aria-hidden="true" />
+                      <span className="hidden max-w-28 truncate lg:inline">{th.assigneeName ?? t("thread.unassigned")}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{t("thread.assign")}</TooltipContent>
+              </Tooltip>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel className="text-xs text-muted-foreground">{t("assign.title")}</DropdownMenuLabel>
+                {members.members.map((m) => (
+                  <DropdownMenuItem key={m.userId} onSelect={() => vm.assign(m.userId)}>
+                    <Avatar name={m.name} seed={m.userId} className="size-5 text-[9px]" />
+                    <span className="flex-1 truncate">{m.name}</span>
+                    {th.assignee === m.userId && <Check aria-label="✓" />}
+                  </DropdownMenuItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => vm.assign(null)}>
+                  <span className="flex-1">{t("assign.nobody")}</span>
+                  {!th.assignee && <Check aria-label="✓" />}
                 </DropdownMenuItem>
-              ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => vm.assign(null)}>
-                <span className="flex-1">{t("assign.nobody")}</span>
-                {!th.assignee && <Check aria-label="✓" />}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </header>
 
@@ -146,7 +151,14 @@ export function ThreadView({ threadId, onBack, composerRef }: { threadId: string
         ))}
       </ol>
 
-      <Composer ref={composerRef} contactName={contactOf(th)} disabled={!vm.canReply} onReply={vm.reply} onNote={vm.note} />
+      <Composer
+        ref={composerRef}
+        contactName={contactOf(th)}
+        disabled={!vm.canReply}
+        onReply={vm.reply}
+        onNote={vm.note}
+        notes={!personal}
+      />
     </Pane>
   );
 }

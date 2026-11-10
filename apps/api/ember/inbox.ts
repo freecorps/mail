@@ -21,9 +21,11 @@ function member(ctx: Ctx) {
   return m as Member;
 }
 
+/** The mailboxes `m` can see: their own (personal) first, so a client opening "the first one" opens theirs. */
 function memberMailboxes(ctx: Ctx, m: Member): string[] {
   const personal = owners(ctx.db);
-  return (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name).filter((n) => canSeeWith(personal, m, n));
+  const names = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name).filter((n) => canSeeWith(personal, m, n));
+  return [...names.filter((n) => personal.has(n)), ...names.filter((n) => !personal.has(n))];
 }
 
 function allowed(ctx: Ctx, mailbox: string) {

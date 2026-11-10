@@ -1,5 +1,5 @@
-// Reply / internal note under the conversation. Optimistic: the message shows at once with "Sending…"; on failure
-// the text comes back into the box.
+// Reply / internal note under the conversation (notes only in a shared mailbox: in a personal one nobody else reads
+// them). Optimistic: the message shows at once with "Sending…"; on failure the text comes back into the box.
 import { useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Loader2, Send, StickyNote } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/context";
 import { cn } from "@/lib/utils";
+import { composerMode } from "@/model/threads";
 
 export type ComposerMode = "reply" | "note";
 export interface ComposerHandle {
@@ -24,9 +25,12 @@ export function Composer({
   disabled: boolean;
   onReply: (text: string) => Promise<unknown>;
   onNote: (text: string) => Promise<unknown>;
+  /** A personal mailbox: replies only, no internal notes. */
+  notes?: boolean;
 }) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<ComposerMode>("reply");
+  const [picked, setMode] = useState<ComposerMode>("reply");
+  const mode = composerMode(picked, p.notes);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
@@ -88,24 +92,28 @@ export function Composer({
           )}
         />
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
-          <ToggleGroup
-            type="single"
-            size="sm"
-            value={mode}
-            onValueChange={(v) => v && setMode(v as ComposerMode)}
-            aria-label={t("thread.replyMode")}
-          >
-            <ToggleGroupItem value="reply" className="gap-1.5 px-2.5 text-xs">
-              <Send className="size-3.5" aria-hidden="true" />
-              {t("thread.replyMode")}
-              <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">r</Kbd>
-            </ToggleGroupItem>
-            <ToggleGroupItem value="note" className="gap-1.5 px-2.5 text-xs">
-              <StickyNote className="size-3.5" aria-hidden="true" />
-              {t("thread.noteMode")}
-              <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">n</Kbd>
-            </ToggleGroupItem>
-          </ToggleGroup>
+          {p.notes === false ? (
+            <span />
+          ) : (
+            <ToggleGroup
+              type="single"
+              size="sm"
+              value={mode}
+              onValueChange={(v) => v && setMode(v as ComposerMode)}
+              aria-label={t("thread.replyMode")}
+            >
+              <ToggleGroupItem value="reply" className="gap-1.5 px-2.5 text-xs">
+                <Send className="size-3.5" aria-hidden="true" />
+                {t("thread.replyMode")}
+                <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">r</Kbd>
+              </ToggleGroupItem>
+              <ToggleGroupItem value="note" className="gap-1.5 px-2.5 text-xs">
+                <StickyNote className="size-3.5" aria-hidden="true" />
+                {t("thread.noteMode")}
+                <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">n</Kbd>
+              </ToggleGroupItem>
+            </ToggleGroup>
+          )}
           <div className="flex items-center gap-3">
             <span className="hidden text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
             <Button type="submit" size="sm" disabled={!text.trim() || busy}>

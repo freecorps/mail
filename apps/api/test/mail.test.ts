@@ -345,7 +345,9 @@ describe("mail app", () => {
     // Each sees their own mailbox (marked personal); the admin sees every shared one but not Wolf's.
     expect(await names("heitor")).toEqual(["heitor*", "privacy", "support"]);
     expect(await names("wolf")).toEqual(["support", "wolf*"]);
-    expect((await call("query", "inbox:me", {}, "user:heitor")).value.mailboxes.sort()).toEqual(["heitor", "privacy", "support"]);
+    // Your own mailbox first, so a client opening "the first one" before the list loads opens it.
+    expect((await call("query", "inbox:me", {}, "user:heitor")).value.mailboxes).toEqual(["heitor", "support", "privacy"]);
+    expect((await call("query", "inbox:me", {}, "user:wolf")).value.mailboxes).toEqual(["wolf", "support"]);
     expect((await call("query", "inbox:threads", { mailbox: "wolf" }, "user:heitor")).error.message).toMatch(/no access/);
     const t = (await call("query", "inbox:threads", { mailbox: "wolf" }, "user:wolf")).value.page[0];
     expect(t).toMatchObject({ subject: "Lunch?", contact: "ana@user.test" });

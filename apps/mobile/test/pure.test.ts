@@ -1,4 +1,5 @@
 // Pure helpers: HTML safety, formatting, i18n, the push seam, optimistic updates.
+import { composerMode, isPersonal, ownFirst } from "../src/model/threads";
 import { describe, expect, it } from "vitest";
 import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import type { PendingMutationRecord } from "@freecorps/ember-client";
@@ -225,5 +226,28 @@ describe("rows", () => {
     const m = { attachments: [{ filename: "l.png", contentType: "image/png", file: "f1", contentId: "<logo@x>", inline: true }, { filename: "a.pdf", contentType: "application/pdf", file: "f2" }] } as any;
     expect(cidMap(m, { f1: "https://u/1", f2: "https://u/2" })).toEqual({ "logo@x": "https://u/1" });
     expect(cidMap(m, undefined)).toEqual({});
+  });
+});
+
+describe("personal mailboxes", () => {
+  it("list your own mailbox first and keep the shared ones in the server's order", () => {
+    const list = [{ name: "support" }, { name: "heitor", personal: true }, { name: "privacy", personal: false }];
+    expect(ownFirst(list).map((b) => b.name)).toEqual(["heitor", "support", "privacy"]);
+    expect(list.map((b) => b.name)).toEqual(["support", "heitor", "privacy"]);
+  });
+
+  it("know a thread's mailbox as personal only when the list says so", () => {
+    const list = [{ name: "support" }, { name: "heitor", personal: true }];
+    expect(isPersonal(list, "heitor")).toBe(true);
+    expect(isPersonal(list, "support")).toBe(false);
+    expect(isPersonal(list, undefined)).toBe(false);
+    expect(isPersonal([], "heitor")).toBe(false);
+  });
+
+  it("never send a note where there are none: a note picked before the mailbox was known is a reply", () => {
+    expect(composerMode("note", false)).toBe("reply");
+    expect(composerMode("note", true)).toBe("note");
+    expect(composerMode("note", undefined)).toBe("note");
+    expect(composerMode("reply", false)).toBe("reply");
   });
 });
