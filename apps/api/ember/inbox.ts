@@ -282,6 +282,29 @@ export const me = query({
   },
 });
 
+/**
+ * Asks for access: the signed-in user, not a member yet, is listed for admins (GET /inbox/members `requests`) with the
+ * email and name of their sign-in, so an admin grants them (or makes their own mailbox) without asking for an id. A
+ * member's call does nothing; calling again only refreshes the row.
+ */
+export const requestAccess = mutation({
+  args: {},
+  handler: (ctx) => {
+    const who = ctx.auth.getUserIdentity();
+    if (!who) throw new Error("unauthenticated");
+    if (ctx.db.query("members").withIndex("by_user", (q) => q.eq("userId", who.subject)).first()) return null;
+    // Ember auth puts the sign-in's email and name in the token's claims.
+    const claim = (k: string) => (typeof who.claims?.[k] === "string" && who.claims[k] ? (who.claims[k] as string) : null);
+    const email = claim("email");
+    const name = claim("name");
+    const row = { userId: who.subject, at: ctx.now, ...(email ? { email: email.slice(0, 320) } : {}), ...(name ? { name: name.slice(0, 200) } : {}) };
+    const prev = ctx.db.query("accessRequests").withIndex("by_user", (q) => q.eq("userId", who.subject)).first();
+    if (prev) ctx.db.patch(prev._id, row);
+    else ctx.db.insert("accessRequests", row);
+    return null;
+  },
+});
+
 /** Members who can see a mailbox (assignment picker). */
 export const members = query({
   args: { mailbox: v.string() },

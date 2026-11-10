@@ -1,18 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Copy, LogOut, RefreshCw } from "lucide-react";
-import { useEmberClient } from "@freecorps/ember-react";
+import { useEmberClient, useMutation } from "@freecorps/ember-react";
+import { api } from "@/lib/api";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/context";
 import { authClient, emberToken } from "@/lib/auth";
 
-/** Signed in, but no mailbox yet: show the user id an admin grants access to (POST /inbox/members). */
+/** Signed in, but no mailbox yet: asks for access (the admins see the request) and shows the user id. */
 export function NotMember({ userId, error }: { userId: string | null; error: string | null }) {
   const { t } = useI18n();
   const ember = useEmberClient();
   const session = authClient.useSession();
   const id = userId ?? session.data?.user.id ?? "";
   const [copied, setCopied] = useState(false);
+  // Lists this sign-in for the admins (with its email), so access is granted without passing the id around.
+  const requestAccess = useMutation(api.inbox.requestAccess);
+  const signedIn = !!session.data?.user.id;
+  useEffect(() => {
+    if (signedIn) requestAccess({}).catch(() => {});
+  }, [signedIn, requestAccess]);
   return (
     <main className="grid min-h-full place-items-center px-6">
       <div className="w-full max-w-md space-y-6">

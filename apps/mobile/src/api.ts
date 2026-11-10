@@ -124,6 +124,7 @@ const q = makeFunctionReference;
 export const api = {
   inbox: {
     me: q<"query", Record<string, never>, Me | null>("inbox:me"),
+    requestAccess: q<"mutation", Record<string, never>, null>("inbox:requestAccess"),
     mailboxes: q<"query", Record<string, never>, Mailbox[]>("inbox:mailboxes"),
     threads: q<"query", ThreadsArgs, Page<Thread>>("inbox:threads"),
     sent: q<"query", SentArgs, { page: SentThread[]; isDone: boolean }>("inbox:sent"),

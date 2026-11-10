@@ -437,6 +437,30 @@ describe("mail app", () => {
     expect((await admin.inbox.sent({ mailbox: "support" })).data!.page.length).toBe(sent.value.page.length);
   });
 
+  it("access requests: a signed-in non-member is listed with their email; granting or owning a mailbox answers it", async () => {
+    const lia = "user:lia-1|lia@acme.test|Lia";
+    expect((await call("query", "inbox:me", {}, lia)).value).toMatchObject({ member: false, userId: "lia-1" });
+    expect((await call("mutation", "inbox:requestAccess", {}, lia)).error ?? null).toBeNull();
+    expect((await call("mutation", "inbox:requestAccess", {}, "user:rui-1|rui@acme.test|Rui")).error ?? null).toBeNull();
+    expect((await call("mutation", "inbox:requestAccess", {})).error.message).toMatch(/unauthenticated/);
+    let list = (await admin.inbox.members()).data!;
+    expect(list.requests.map((r) => r.user_id).sort()).toEqual(["lia-1", "rui-1"]);
+    expect(list.requests.find((r) => r.user_id === "lia-1")).toMatchObject({ email: "lia@acme.test", name: "Lia", requested_at: expect.any(String) });
+    expect(list.data.find((m) => m.user_id === "wolf")).toMatchObject({ personal_mailbox: "wolf", mailboxes: ["support"] });
+    // A member asking does nothing; only a full-access key or the admin token lists anyone.
+    expect((await call("mutation", "inbox:requestAccess", {}, "user:agent-1|a@acme.test")).error ?? null).toBeNull();
+    expect((await admin.inbox.members()).data!.requests.some((r) => r.user_id === "agent-1")).toBe(false);
+    const key = (await admin.apiKeys.create({ name: "inbox-only", permission: "inbox", project: "acme" })).data!.token;
+    expect((await SELF.fetch(`${BASE}/inbox/members`, { headers: { authorization: `Bearer ${key}` } })).status).toBe(403);
+    // Granted (POST /inbox/members) or given their own mailbox (owner): no longer waiting; the owner keeps their name.
+    expect((await admin.inbox.addMember({ user_id: "rui-1", mailboxes: ["support"] })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "lia", address: "lia@acme.test", owner: "lia-1" })).error).toBeNull();
+    list = (await admin.inbox.members()).data!;
+    expect(list.requests.filter((r) => ["lia-1", "rui-1"].includes(r.user_id))).toEqual([]);
+    expect(list.data.find((m) => m.user_id === "lia-1")).toMatchObject({ name: "Lia", personal_mailbox: "lia", mailboxes: [] });
+    expect((await call("query", "inbox:me", {}, lia)).value).toMatchObject({ member: true, mailboxes: ["lia"] });
+  });
+
   it("members: POST /inbox/members is a patch (absent fields keep their stored value)", async () => {
     const member = async () => (await call("mutation", "testing:member", { userId: "boss-1" })).value;
     const names = async () => (await call("query", "inbox:mailboxes", {}, "user:boss-1")).value.map((b: any) => b.name).sort();
