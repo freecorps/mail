@@ -20,11 +20,13 @@ export async function addDomain(c: CfCreds, url: string, admin: string, name: st
   const domains = (await call("GET", "/domains")).data as any[];
   const prevView = domains.find((d) => d.name === name);
   const prev: DomainState | null = prevView
-    ? { name, status: prevView.status, sending: prevView.capabilities.sending === "enabled", receiving: prevView.capabilities.receiving === "enabled", records: [], ruleIds: prevView.cloudflare.rule_ids, notes: [], ...(prevView.cloudflare.zone_id ? { zoneId: prevView.cloudflare.zone_id } : {}), ...(prevView.cloudflare.sending_tag ? { sendingTag: prevView.cloudflare.sending_tag } : {}), ...(prevView.cloudflare.subscription_id ? { subscriptionId: prevView.cloudflare.subscription_id } : {}), createdSending: prevView.cloudflare.created_sending }
+    ? { name, status: prevView.status, sending: prevView.capabilities.sending === "enabled", receiving: prevView.capabilities.receiving === "enabled", records: [], ruleIds: prevView.cloudflare.rule_ids, notes: [], ...(prevView.cloudflare.zone_id ? { zoneId: prevView.cloudflare.zone_id } : {}), ...(prevView.cloudflare.sending_tag ? { sendingTag: prevView.cloudflare.sending_tag } : {}), ...(prevView.cloudflare.subscription_id ? { subscriptionId: prevView.cloudflare.subscription_id } : {}), createdSending: prevView.cloudflare.created_sending, ...(prevView.cloudflare.catch_all ? { catchAll: prevView.cloudflare.catch_all } : {}) }
     : null;
-  const mailboxes = ((await call("GET", "/inbox/mailboxes")).data as Array<{ address: string }>).map((m) => m.address);
+  const boxes = (await call("GET", "/inbox/mailboxes")).data as Array<{ address: string; catch_all?: boolean }>;
+  const mailboxes = boxes.map((m) => m.address);
   const { worker, eventsQueue } = emailResources(o.project, o.env);
-  const state = await syncDomain(c, { name, ...(o.enableRouting ? { enableRouting: true } : {}) }, { prev, mailboxes, worker, queue: eventsQueue });
+  const catchAll = boxes.some((b) => b.catch_all && b.address.toLowerCase().endsWith(`@${name}`));
+  const state = await syncDomain(c, { name, ...(o.enableRouting ? { enableRouting: true } : {}) }, { prev, mailboxes, worker, queue: eventsQueue, catchAll });
   return call("POST", "/domains/import", state);
 }
 
@@ -37,7 +39,7 @@ export async function removeDomain(c: CfCreds, url: string, admin: string, name:
   const call = api(url, admin, o.fetch);
   const d = ((await call("GET", "/domains")).data as any[]).find((x) => x.name === name);
   if (!d) return [];
-  const errors = await destroyDomain(c, { name, status: d.status, sending: true, receiving: true, records: [], notes: [], ruleIds: d.cloudflare.rule_ids, createdSending: d.cloudflare.created_sending, ...(d.cloudflare.zone_id ? { zoneId: d.cloudflare.zone_id } : {}), ...(d.cloudflare.sending_tag ? { sendingTag: d.cloudflare.sending_tag } : {}), ...(d.cloudflare.subscription_id ? { subscriptionId: d.cloudflare.subscription_id } : {}) });
+  const errors = await destroyDomain(c, { name, status: d.status, sending: true, receiving: true, records: [], notes: [], ruleIds: d.cloudflare.rule_ids, createdSending: d.cloudflare.created_sending, ...(d.cloudflare.zone_id ? { zoneId: d.cloudflare.zone_id } : {}), ...(d.cloudflare.sending_tag ? { sendingTag: d.cloudflare.sending_tag } : {}), ...(d.cloudflare.subscription_id ? { subscriptionId: d.cloudflare.subscription_id } : {}), ...(d.cloudflare.catch_all ? { catchAll: d.cloudflare.catch_all } : {}) });
   if (!errors.length) await call("POST", `/domains/${encodeURIComponent(d.id)}/forget`);
   return errors;
 }

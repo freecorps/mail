@@ -231,9 +231,9 @@ export class EmberMail {
 
   readonly inbox = {
     /** Every mailbox; a personal one (`owner` set) without its counts: only its owner reads it, in their inbox. */
-    mailboxes: () => this.request<{ data: Array<{ name: string; address: string; display_name: string | null; owner: string | null; unread?: number; threads?: number }> }>("GET", "/inbox/mailboxes"),
-    /** `owner`: personal to that user (no admin or key reads it); null: shared again; absent: as it was. */
-    upsertMailbox: (o: { name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null }) => this.request<{ id: string }>("POST", "/inbox/mailboxes", o),
+    mailboxes: () => this.request<{ data: Array<{ name: string; address: string; display_name: string | null; owner: string | null; catch_all: boolean; unread?: number; threads?: number }> }>("GET", "/inbox/mailboxes"),
+    /** `owner`: personal to that user (no admin or key reads it); null: shared again; absent: as it was. `catch_all`: takes every address of its domain no mailbox has. */
+    upsertMailbox: (o: { name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null; catch_all?: boolean | null }) => this.request<{ id: string }>("POST", "/inbox/mailboxes", o),
     threads: (o: { mailbox: string; status?: Thread["status"]; cursor?: string; limit?: number }) => {
       const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.status ? { status: o.status } : {}), ...(o.cursor ? { cursor: o.cursor } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });
       return this.request<{ page: Thread[]; isDone: boolean; continueCursor: string }>("GET", `/inbox/threads?${q}`);

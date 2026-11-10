@@ -334,7 +334,7 @@ describe("mail app", () => {
     expect((await admin.inbox.upsertMailbox({ name: "heitor", address: "heitor@acme.test", display_name: "Heitor", owner: "heitor" })).error).toBeNull();
     expect((await admin.inbox.upsertMailbox({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf" })).error).toBeNull();
     const box = (await admin.inbox.mailboxes()).data!.data;
-    expect(box.find((b) => b.name === "wolf")).toEqual({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf" });
+    expect(box.find((b) => b.name === "wolf")).toEqual({ name: "wolf", address: "wolf@acme.test", display_name: "Wolf", owner: "wolf", catch_all: false });
     expect(box.find((b) => b.name === "support")).toMatchObject({ owner: null, threads: expect.any(Number) });
 
     const m = inbound("ana@user.test", "wolf@acme.test", mime({ from: '"Ana" <ana@user.test>', to: "wolf@acme.test", subject: "Lunch?", text: "Lunch on Friday?", id: "in-wolf@user.test" }));
@@ -470,15 +470,39 @@ describe("mail app", () => {
     expect((await call("query", "inbox:me", {}, lia)).value).toMatchObject({ member: true, mailboxes: ["lia"] });
   });
 
+  it("catch-all: a shared mailbox takes every address of its domain no mailbox has; one per domain", async () => {
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", display_name: "Acme", catch_all: true })).error).toBeNull();
+    const box = (await admin.inbox.mailboxes()).data!.data.find((b) => b.name === "geral");
+    expect(box).toMatchObject({ catch_all: true, owner: null });
+    const m = inbound("bia@user.test", "contato@acme.test", mime({ from: '"Bia" <bia@user.test>', to: "contato@acme.test", subject: "Orçamento", text: "Vocês fazem sites?", id: "in-contato@user.test" }));
+    await worker.email(m.msg as never, env as never, createExecutionContext());
+    expect(m.out.rejected).toBeNull();
+    // Heitor is an admin: he sees every shared mailbox.
+    const t = (await call("query", "inbox:threads", { mailbox: "geral" }, "user:heitor")).value.page;
+    expect(t[0]).toMatchObject({ subject: "Orçamento", contact: "bia@user.test" });
+    // The address it was sent to stays on the message.
+    const full = (await call("query", "inbox:thread", { threadId: t[0]._id }, "user:heitor")).value;
+    expect(full.messages[0].to).toMatchObject([{ email: "contato@acme.test" }]);
+    // An address a mailbox has still goes to it; another domain is still refused; a second catch-all is refused.
+    const other = inbound("bia@user.test", "nobody@else.test", mime({ from: "bia@user.test", to: "nobody@else.test", subject: "x", text: "x", id: "in-else@user.test" }));
+    await worker.email(other.msg as never, env as never, createExecutionContext());
+    expect(other.out.rejected).toMatch(/not found/i);
+    expect((await admin.inbox.upsertMailbox({ name: "support", address: "support@acme.test", catch_all: true })).error?.message).toMatch(/already has a catch-all/);
+    expect((await admin.inbox.upsertMailbox({ name: "geral", address: "geral@acme.test", catch_all: false })).error).toBeNull();
+    const after = inbound("bia@user.test", "contato@acme.test", mime({ from: "bia@user.test", to: "contato@acme.test", subject: "y", text: "y", id: "in-contato2@user.test" }));
+    await worker.email(after.msg as never, env as never, createExecutionContext());
+    expect(after.out.rejected).toMatch(/not found/i);
+  });
+
   it("members: POST /inbox/members is a patch (absent fields keep their stored value)", async () => {
     const member = async () => (await call("mutation", "testing:member", { userId: "boss-1" })).value;
     const names = async () => (await call("query", "inbox:mailboxes", {}, "user:boss-1")).value.map((b: any) => b.name).sort();
     expect((await admin.inbox.addMember({ user_id: "boss-1", mailboxes: ["support"], name: "Boss", admin: true })).error).toBeNull();
-    expect(await names()).toEqual(["privacy", "support"]); // admin: every mailbox
+    expect(await names()).toEqual(["geral", "privacy", "support"]); // admin: every shared mailbox
     // Changing only the mailboxes keeps admin and the name.
     expect((await admin.inbox.addMember({ user_id: "boss-1", mailboxes: ["privacy"] })).error).toBeNull();
     expect(await member()).toMatchObject({ name: "Boss", admin: true, mailboxes: ["privacy"] });
-    expect(await names()).toEqual(["privacy", "support"]);
+    expect(await names()).toEqual(["geral", "privacy", "support"]);
     // admin: false revokes; mailboxes absent are kept; name: null clears.
     expect((await admin.inbox.addMember({ user_id: "boss-1", admin: false, name: null })).error).toBeNull();
     expect(await member()).toMatchObject({ admin: false, mailboxes: ["privacy"] });

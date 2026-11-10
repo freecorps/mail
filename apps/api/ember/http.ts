@@ -10,7 +10,7 @@
 //   GET    /api-keys               POST /api-keys { name, permission?, project?, domain? }   DELETE /api-keys/:id
 //   GET    /templates              POST /templates { name, subject, html, text?, layout? }   DELETE /templates/:name
 //   POST   /suppressions { email } DELETE /suppressions/:email
-//   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner? }
+//   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner?, catch_all? }
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
 //   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
@@ -207,7 +207,7 @@ const domainView = (d: any) => ({
   records: d.records.map((r: any) => ({ record: r.purpose === "receiving" ? "Receiving" : "Sending", type: r.type, name: r.name, value: r.value, ttl: r.ttl === 1 || !r.ttl ? "Auto" : String(r.ttl), ...(r.priority !== undefined ? { priority: r.priority } : {}) })),
   routing_status: d.routingStatus ?? null,
   /** What onboarding created in Cloudflare (ids only): removed with the domain. */
-  cloudflare: { zone_id: d.zoneId ?? null, sending_tag: d.sendingTag ?? null, rule_ids: d.ruleIds, subscription_id: d.subscriptionId ?? null, created_sending: !!d.createdSending },
+  cloudflare: { zone_id: d.zoneId ?? null, sending_tag: d.sendingTag ?? null, rule_ids: d.ruleIds, subscription_id: d.subscriptionId ?? null, created_sending: !!d.createdSending, catch_all: d.catchAll ?? null },
   notes: d.notes,
 });
 
@@ -373,6 +373,7 @@ http.route({
         address: b.address,
         display_name: b.displayName ?? null,
         owner: personal[b.name] ?? null,
+        catch_all: !!b.catchAll,
         ...(Object.hasOwn(personal, b.name) ? {} : (unread as any)[b.name]),
       })),
     });
@@ -383,10 +384,11 @@ http.route({
   method: "POST",
   handler: route(async (ctx, request, p) => {
     need(p);
-    const b = await body<{ name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null }>(request);
+    const b = await body<{ name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null; catch_all?: boolean | null }>(request);
+    if (b.catch_all !== undefined && b.catch_all !== null && typeof b.catch_all !== "boolean") throw new ApiError(422, "validation_error", "catch_all must be a boolean");
     if (b.owner !== undefined && b.owner !== null && (typeof b.owner !== "string" || !b.owner)) throw new ApiError(422, "validation_error", "owner must be a user id, or null to make the mailbox shared");
     // Absent fields keep their stored value; null (or "" for display_name) clears them.
-    const id = await ctx.runMutation(email.upsertMailbox, { name: b.name, address: b.address, ...(b.display_name !== undefined ? { displayName: b.display_name || null } : {}), ...(b.auto_reply !== undefined ? { autoReply: b.auto_reply } : {}) });
+    const id = await ctx.runMutation(email.upsertMailbox, { name: b.name, address: b.address, ...(b.display_name !== undefined ? { displayName: b.display_name || null } : {}), ...(b.auto_reply !== undefined ? { autoReply: b.auto_reply } : {}), ...(b.catch_all !== undefined ? { catchAll: b.catch_all } : {}) });
     // `owner`: personal to that user (only they see it); null: shared again; absent: as it was.
     if (b.owner !== undefined) await ctx.runMutation("access:setOwner" as any, { mailbox: b.name, userId: b.owner });
     return json({ id }, 201);
