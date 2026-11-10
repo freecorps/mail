@@ -313,7 +313,13 @@ export async function verifyWebhook<D = Record<string, unknown>>(o: {
   const t = Number(ts);
   const now = Math.floor((o.now ?? Date.now()) / 1000);
   if (!Number.isInteger(t) || Math.abs(now - t) > (o.toleranceSeconds ?? 300)) throw new WebhookVerificationError("timestamp too old or in the future");
-  const key = await crypto.subtle.importKey("raw", b64bytes(o.secret.startsWith("whsec_") ? o.secret.slice(6) : o.secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  let raw: Uint8Array<ArrayBuffer>;
+  try {
+    raw = b64bytes(o.secret.startsWith("whsec_") ? o.secret.slice(6) : o.secret);
+  } catch {
+    throw new WebhookVerificationError("the secret is not a whsec_ base64 secret");
+  }
+  const key = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
   const data = new TextEncoder().encode(`${id}.${t}.${o.body}`);
   for (const part of sig.split(" ")) {
     const [version, value] = part.split(",");

@@ -664,6 +664,7 @@ describe("mail app", () => {
       }
       expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.opened" as any] })).error).toMatchObject({ statusCode: 422 });
       expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], mailboxes: ["wolf"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/personal/) });
+      expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], project: 7 as any })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/project must be a string/) });
       expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], mailboxes: ["nope"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/mailbox nope not found/) });
 
       const all = await admin.webhooks.create({ endpoint: "https://hooks.test/all", events: ["email.received", "email.delivered"], description: "everything" });
