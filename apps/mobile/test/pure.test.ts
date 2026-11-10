@@ -12,7 +12,7 @@ import { fileSize, formatWhen, initials, parseRecipients } from "../src/lib/form
 import { inboxOptimisticUpdates, isOptimisticId } from "../src/offline/optimistic";
 import { pushTransport, registrationArgs, targetOf } from "../src/push/transport";
 import { searchRows, sentRow, threadRow } from "../src/model/threads";
-import { cidMap } from "../src/model/thread";
+import { cidMap, deliveryState } from "../src/model/thread";
 
 describe("email HTML", () => {
   it("removes scripts, handlers, script URLs, frames, forms, meta refresh and base", () => {
@@ -298,5 +298,22 @@ describe("reply all and forward", () => {
     expect(forwardText(msg({}), { header: "Forwarded message", from: "From", date: "Date", subject: "Subject", to: "To" }, "Nov 10")).toBe(
       "\n\n---------- Forwarded message ----------\nFrom: Ana <ana@user.test>\nDate: Nov 10\nSubject: Contrato\n\nSegue.",
     );
+  });
+});
+
+describe("delivery marker", () => {
+  it("maps an outbound message's email status to its marker; none for notes, inbound or without a status", () => {
+    const out = (status: string) => ({ direction: "outbound", delivery: { status, reason: null } });
+    expect(["scheduled", "queued", "sending"].map((s) => deliveryState(out(s)))).toEqual(["pending", "pending", "pending"]);
+    expect(deliveryState(out("sent"))).toBe("sent");
+    expect(deliveryState(out("delivered"))).toBe("delivered");
+    expect(deliveryState(out("delivery_delayed"))).toBe("delayed");
+    expect(["bounced", "failed", "suppressed"].map((s) => deliveryState(out(s)))).toEqual(["failed", "failed", "failed"]);
+    expect(deliveryState(out("complained"))).toBe("spam");
+    expect(deliveryState(out("canceled"))).toBe("canceled");
+    expect(deliveryState(out("something-new"))).toBeNull();
+    expect(deliveryState({ direction: "note", delivery: { status: "sent" } })).toBeNull();
+    expect(deliveryState({ direction: "inbound" })).toBeNull();
+    expect(deliveryState({ direction: "outbound" })).toBeNull();
   });
 });

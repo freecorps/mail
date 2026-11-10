@@ -389,6 +389,14 @@ describe("mail app", () => {
     const all = await call("mutation", "inbox:reply", { threadId: t._id, text: "Copying finance.", cc: ["Fin <fin@user.test>"] }, "user:agent-1");
     expect(all.error ?? null).toBeNull();
     expect((await call("query", "testing:email", { id: all.value.emailId })).value).toMatchObject({ cc: [{ email: "fin@user.test", name: "Fin" }] });
+    // The thread shows where that email is (its marker) and, when it bounces, why; nothing on inbound messages.
+    const marker = async () => (await call("query", "inbox:thread", { threadId: t._id }, "user:agent-1")).value.messages.find((m: any) => m.emailId === all.value.emailId)?.delivery;
+    expect(await until(marker, (d) => d?.status === "sent")).toEqual({ status: "sent", reason: null });
+    const mid = (await call("query", "testing:email", { id: all.value.emailId })).value.messageId;
+    await env.EMBER_Q_EMAIL_EVENTS.send(event("bounced", mid, "ev-fin", { recipient: "fin@user.test", bounce: { type: "hard", reason: "550 mailbox unavailable" } }));
+    expect(await until(marker, (d) => d?.status === "bounced")).toEqual({ status: "bounced", reason: "550 mailbox unavailable" });
+    const after = (await call("query", "inbox:thread", { threadId: t._id }, "user:agent-1")).value;
+    expect(after.messages.find((m: any) => m.direction === "inbound").delivery).toBeUndefined();
     const many = Array.from({ length: 51 }, (_, i) => `p${i}@user.test`);
     expect((await call("mutation", "inbox:reply", { threadId: t._id, text: "x", cc: many }, "user:agent-1")).error.message).toMatch(/at most 50/);
 

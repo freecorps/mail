@@ -69,6 +69,8 @@ export interface Message {
   emailId?: string;
   author?: string;
   at: number;
+  /** Outbound only: the status of the email it sent (`inbox:thread`), and why it was not delivered. */
+  delivery?: { status: string; reason: string | null };
 }
 
 export interface Mailbox {

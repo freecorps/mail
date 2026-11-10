@@ -156,7 +156,30 @@ export const sent = query({
   },
 });
 
-export const thread = query({ args: { threadId: v.string() }, handler: (ctx, a) => threadOf(ctx, a.threadId).t });
+/** Statuses where delivery did not happen: their reason is shown (the bounce's, else the send error's). */
+const UNDELIVERED = new Set(["bounced", "failed", "suppressed", "complained"]);
+
+/**
+ * Where each email the thread sent is (`delivery`: queued, sent, delivered, bounced…), read with the thread so the
+ * marker updates live as delivery events arrive. Notes and inbound messages have none.
+ */
+function withDelivery(ctx: Ctx, t: { thread: unknown; messages: Array<Record<string, any>> }) {
+  const messages = t.messages.map((m) => {
+    if (m.direction !== "outbound" || !m.emailId) return m;
+    const e = ctx.runQuery(email.get, { id: m.emailId }) as { _id: string; status: string; error?: { message: string } } | null;
+    if (!e) return m;
+    let reason: string | null = null;
+    if (UNDELIVERED.has(e.status)) {
+      const evs = ctx.runQuery(email.events, { id: e._id }) as Array<{ type: string; reason?: string; at: number }>;
+      const last = evs.filter((x) => x.reason).sort((x, y) => y.at - x.at)[0];
+      reason = (last?.reason ?? e.error?.message ?? null)?.slice(0, 300) ?? null;
+    }
+    return { ...m, delivery: { status: e.status, reason } };
+  });
+  return { ...t, messages };
+}
+
+export const thread = query({ args: { threadId: v.string() }, handler: (ctx, a) => withDelivery(ctx, threadOf(ctx, a.threadId).t) });
 
 export const search = query({
   args: { query: v.string(), mailbox: v.optional(v.string()) },

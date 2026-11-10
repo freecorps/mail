@@ -3,7 +3,11 @@ import {
   Archive,
   ArchiveRestore,
   ArrowLeft,
+  Ban,
   Check,
+  CheckCheck,
+  CircleAlert,
+  Clock,
   Download,
   FileText,
   Forward,
@@ -32,7 +36,7 @@ import type { Attachment, Message } from "@/lib/api";
 import { linkifyText } from "@/lib/emailHtml";
 import { contactOf, displayAddress, fileSize, formatFull } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { useMembers, useThread, type MessageItem } from "@/model/thread";
+import { deliveryState, useMembers, useThread, type DeliveryState, type MessageItem } from "@/model/thread";
 import { isPersonal, useMailboxes } from "@/model/threads";
 import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "@/model/forward";
 import { ComposeDialog, type ForwardSource } from "./ComposeDialog";
@@ -310,9 +314,12 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
             <p className="truncate text-xs text-muted-foreground">{t("thread.to", { to: m.to.map(displayAddress).join(", ") })}</p>
           )}
         </div>
-        <time className="shrink-0 text-xs text-muted-foreground" dateTime={new Date(m.at).toISOString()}>
-          {item.pending ? t("thread.sending") : formatFull(m.at, locale)}
-        </time>
+        <div className="flex shrink-0 flex-col items-end gap-0.5">
+          <time className="text-xs text-muted-foreground" dateTime={new Date(m.at).toISOString()}>
+            {item.pending ? t("thread.sending") : formatFull(m.at, locale)}
+          </time>
+          {!item.pending && <DeliveryMarker message={m} />}
+        </div>
         {onForward && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -333,6 +340,54 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
         {files.length > 0 && <Attachments files={files} urls={urls} />}
       </div>
     </article>
+  );
+}
+
+const DELIVERY_ICON: Record<DeliveryState, typeof Check> = {
+  pending: Clock,
+  sent: Check,
+  delivered: CheckCheck,
+  delayed: Clock,
+  failed: CircleAlert,
+  spam: CircleAlert,
+  canceled: Ban,
+};
+
+/** Where the email this message sent is: sending, sent, delivered, delayed, not delivered (with why). */
+function DeliveryMarker({ message }: { message: Message }) {
+  const { t } = useI18n();
+  const state = deliveryState(message);
+  if (!state) return null;
+  const Icon = DELIVERY_ICON[state];
+  const bad = state === "failed" || state === "spam";
+  const hint =
+    bad || state === "canceled"
+      ? (message.delivery?.reason ?? null)
+      : state === "sent" || state === "delivered" || state === "delayed"
+        ? t(`delivery.hint.${state}`)
+        : null;
+  const label = (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-[11px]",
+        bad ? "text-destructive" : state === "delivered" ? "text-primary" : "text-muted-foreground",
+      )}
+      data-delivery={state}
+    >
+      <Icon className="size-3" aria-hidden="true" />
+      {t(`delivery.${state}`)}
+    </span>
+  );
+  if (!hint) return label;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" className="cursor-default rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+          {label}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-72">{hint}</TooltipContent>
+    </Tooltip>
   );
 }
 
