@@ -718,6 +718,19 @@ describe("mail app", () => {
       expect(resent.headers.get("webhook-id")).toBe(failing.id);
       expect((await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures).toBe(0);
 
+      // Pausing holds a pending delivery (no failure counted, no attempt); turning back on sends it.
+      answer = 500;
+      await admin.webhooks.test(sales.data!.id);
+      const held = await until(async () => (await admin.webhooks.deliveries(sales.data!.id)).data!.data[0]!, (d) => d.type === "webhook.test" && d.attempts === 1 && d.status === "pending");
+      const failuresBefore = (await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures;
+      expect((await admin.webhooks.update(sales.data!.id, { enabled: false })).data).toMatchObject({ enabled: false });
+      const paused = (await admin.webhooks.deliveries(sales.data!.id)).data!.data.find((d) => d.id === held.id)!;
+      expect(paused).toMatchObject({ status: "pending", next_attempt_at: null });
+      expect((await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures).toBe(failuresBefore);
+      answer = 200;
+      expect((await admin.webhooks.update(sales.data!.id, { enabled: true })).data).toMatchObject({ enabled: true });
+      await until(async () => (await admin.webhooks.deliveries(sales.data!.id)).data!.data.find((d) => d.id === held.id)!, (d) => d.status === "succeeded");
+
       // Rotate: the old secret no longer verifies; disabled webhooks get nothing; delete removes it and its deliveries.
       const rotated = await admin.webhooks.rotateSecret(sales.data!.id);
       expect(rotated.data!.signing_secret).not.toBe(sales.data!.signing_secret);

@@ -111,8 +111,13 @@ export const deliver = internalAction({
   handler: async (ctx, a) => {
     const r = (await ctx.runQuery("webhooks:load" as any, a)) as { delivery: { id: string; body: string; status: string }; webhook: { endpoint: string; secret: string; enabled: boolean } | null } | null;
     if (!r || r.delivery.status !== "pending") return null;
-    if (!r.webhook || !r.webhook.enabled) {
-      await ctx.runMutation("webhooks:record" as any, { id: a.id, ok: false, error: r.webhook ? "webhook disabled" : "webhook deleted", final: true });
+    if (!r.webhook) {
+      await ctx.runMutation("webhooks:record" as any, { id: a.id, ok: false, error: "webhook deleted", final: true });
+      return null;
+    }
+    // Paused meanwhile: the delivery waits, and goes when the webhook is turned back on.
+    if (!r.webhook.enabled) {
+      await ctx.runMutation("webhooks:record" as any, { id: a.id, ok: false, held: true });
       return null;
     }
     const ts = Math.floor(Date.now() / 1000);
@@ -147,11 +152,16 @@ export const deliver = internalAction({
 });
 
 export const record = internalMutation({
-  args: { id: v.string(), ok: v.boolean(), status: v.optional(v.number()), error: v.optional(v.string()), ms: v.optional(v.number()), final: v.optional(v.boolean()) },
+  args: { id: v.string(), ok: v.boolean(), status: v.optional(v.number()), error: v.optional(v.string()), ms: v.optional(v.number()), final: v.optional(v.boolean()), held: v.optional(v.boolean()) },
   handler: (ctx, a) => {
     const id = ctx.db.normalizeId("webhookDeliveries", a.id);
     const d = id ? (ctx.db.get(id) as any) : null;
     if (!d || d.status !== "pending") return null;
+    // Not an attempt: the webhook is paused. No failure counted; `resume` schedules it again.
+    if (a.held) {
+      ctx.db.patch(d._id, { jobId: undefined });
+      return "held";
+    }
     const attempts = d.attempts + 1;
     const last = { lastAt: ctx.now, ...(a.status !== undefined ? { lastStatus: a.status } : { lastStatus: undefined }), lastError: a.ok ? undefined : a.error, ...(a.ms !== undefined ? { lastMs: a.ms } : {}) };
     const w = ctx.db.get(d.webhookId) as WebhookDoc | null;
@@ -266,6 +276,18 @@ export const update = internalMutation({
   handler: (ctx, a) => {
     const w = byId(ctx as any, a.id);
     checkScope(ctx as any, a);
+    if (a.enabled !== undefined && a.enabled !== w.enabled) {
+      // Pausing holds the pending deliveries (their attempts are canceled); turning back on sends them.
+      for (const d of ctx.db.query("webhookDeliveries").withIndex("by_webhook", (q) => q.eq("webhookId", w._id as any)).order("desc").take(500) as Array<{ _id: string; status: string; jobId?: string }>) {
+        if (d.status !== "pending") continue;
+        if (!a.enabled) {
+          if (d.jobId) ctx.scheduler.cancel(d.jobId);
+          ctx.db.patch(d._id as any, { jobId: undefined });
+        } else if (!d.jobId) {
+          ctx.db.patch(d._id as any, { jobId: ctx.scheduler.runAfter(0, "webhooks:deliver" as any, { id: d._id }), nextAt: ctx.now });
+        }
+      }
+    }
     ctx.db.patch(w._id as any, {
       ...(a.endpoint !== undefined ? { endpoint: checkEndpoint(a.endpoint) } : {}),
       ...(a.events !== undefined ? { events: checkEvents(a.events) } : {}),
@@ -324,7 +346,8 @@ export const deliveries = internalQuery({
       status: d.status as "pending" | "succeeded" | "failed",
       attempts: d.attempts as number,
       created_at: iso(d.at),
-      next_attempt_at: d.status === "pending" ? iso(d.nextAt) : null,
+      // A held delivery (paused webhook) has no attempt scheduled.
+      next_attempt_at: d.status === "pending" && d.jobId ? iso(d.nextAt) : null,
       last_attempt_at: d.lastAt ? iso(d.lastAt) : null,
       last_status: (d.lastStatus ?? null) as number | null,
       last_error: (d.lastError ?? null) as string | null,

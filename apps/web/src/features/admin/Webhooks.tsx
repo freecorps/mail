@@ -197,7 +197,14 @@ function Deliveries({ id }: { id: string }) {
         <ul className="divide-y rounded-md border text-xs">
           {list.value.map((d) => (
             <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
-              <Pill tone={DELIVERY_TONE[d.status] ?? "muted"}>{t(`admin.webhooks.status.${d.status}` as StringKey)}</Pill>
+              <Pill tone={DELIVERY_TONE[d.status] ?? "muted"}>
+                {/* Pending with no attempt scheduled: held while the webhook is paused. */}
+                {t(
+                  d.status === "pending" && !d.next_attempt_at
+                    ? "admin.webhooks.status.held"
+                    : (`admin.webhooks.status.${d.status}` as StringKey),
+                )}
+              </Pill>
               <span className="font-medium">{d.type === "webhook.test" ? t("admin.webhooks.test") : eventLabel(t, d.type)}</span>
               <span className="text-muted-foreground tabular-nums">{formatWhen(Date.parse(d.created_at), now, locale)}</span>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">
