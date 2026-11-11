@@ -2,7 +2,7 @@
 // them). A rich editor (lazy), files by drop, paste or the clip, the signature with a switch per message, saved
 // replies on "/" or the button. The draft lives on the server (autosaved, restored on open). Sending waits out the
 // undo window (Ajustes), then runs optimistically: the message shows with "Enviando…"; on failure it comes back.
-import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { Send, StickyNote } from "lucide-react";
 import { useMutation, useQuerySnapshot } from "@freecorps/ember-react";
 import { toast } from "sonner";
@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/context";
 import { api, type AttachmentArg, type SaveDraftArgs } from "@/lib/api";
-import { keepUndone, restoreSend, takeUndone } from "@/model/undone";
+import { keepUndone, restoreSend, subscribeUndone, takeUndone, type UndoneSend } from "@/model/undone";
 import { htmlIsEmpty, textToHtml } from "@/lib/editorText";
 import { undoSendMs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -117,11 +117,24 @@ export function Composer({
   const restoring = useRef(false);
   const skipOnce = useRef(false);
   // An undone (or failed) send that came back while this conversation's box was gone or off: it wins over the draft
-  // on the server (whose write-back may still be on its way), once the box can show it.
+  // on the server (whose write-back may still be on its way), once the box can show it. Taken when the box opens or
+  // turns back on, and whenever one is kept for this conversation while the box is open (an undo that settled after
+  // the box came back): the order of the two never matters.
+  const takeKept = useRef<() => void>(() => {});
+  useLayoutEffect(() => {
+    takeKept.current = () => {
+      const u = takeUndone(p.threadId);
+      if (u) putBack(u);
+    };
+  });
   useEffect(() => {
     if (p.disabled) return;
-    const u = takeUndone(p.threadId);
-    if (!u) return;
+    takeKept.current();
+    return subscribeUndone((threadId) => {
+      if (threadId === p.threadId) takeKept.current();
+    });
+  }, [p.disabled, p.threadId]);
+  const putBack = (u: UndoneSend) => {
     restored.current = true;
     autosave.cancel();
     kind.current = u.mode;
@@ -133,9 +146,7 @@ export function Composer({
       restoring.current = true;
       editor.current.setContent(u.html);
     } else setBody({ html: u.html, text: u.text, empty: !u.text.trim() });
-    // When the box opens or turns back on.
-    // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.disabled, p.threadId]);
+  };
   useEffect(() => {
     if (restored.current) return;
     // Turned off (spam): the box has no editor to take the draft; it is restored when the box turns back on.
