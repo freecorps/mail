@@ -102,6 +102,12 @@ jobs:
       # runtime versions differ and the build refuses to start; an update saying `development` would also register
       # phones with the APNs sandbox, where no push reaches an App Store build.
       EMBER_APS_ENVIRONMENT: production
+      # The Apple team the App Store Connect API key (on EAS) belongs to. Without it a non-interactive build can't
+      # authenticate with Apple (eas-cli prompts for the team), so it can't sync capabilities or make a provisioning
+      # profile for a new target or entitlement (the widgets' extension, an App Group): it builds with the profiles it
+      # has, and Xcode refuses them. The team ID is not a secret (it is in every signed build and in these logs).
+      EXPO_APPLE_TEAM_ID: A2L3228GZD
+      EXPO_APPLE_TEAM_TYPE: COMPANY_OR_ORGANIZATION
     steps:
       - uses: actions/checkout@v5
         with:
