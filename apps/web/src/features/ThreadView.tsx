@@ -195,10 +195,14 @@ export function ThreadView({
   const folds = foldMessages(count, showAll);
 
   const ownNew = vm.items.at(-1)?.pending === true;
+  // The pending reply that already pulled the pane down: re-runs for other reasons (unfolding the older messages while
+  // it is still sending, or queued offline) leave the reader where they are.
+  const stuckFor = useRef<string | null>(null);
   useEffect(() => {
     const el = scroller.current;
     if (!el || !count) return;
-    if (ownNew) {
+    if (ownNew && stuckFor.current !== lastId) {
+      stuckFor.current = lastId;
       anchored.current = false;
       stick.current = true;
     }
@@ -212,7 +216,7 @@ export function ThreadView({
     const ro = new ResizeObserver(place);
     for (const li of el.children) ro.observe(li);
     return () => ro.disconnect();
-  }, [count, ownNew, showAll]);
+  }, [count, ownNew, showAll, lastId]);
   // Any scrolling by the reader (wheel, touch, the scrollbar, keys) ends the anchoring.
   useEffect(() => {
     const el = scroller.current;
