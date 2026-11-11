@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/context";
 import { api, type AttachmentArg, type SaveDraftArgs } from "@/lib/api";
+import { keepUndone, takeUndone } from "@/model/undone";
 import { htmlIsEmpty, textToHtml } from "@/lib/editorText";
 import { undoSendMs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -91,6 +92,10 @@ export function Composer({
     };
   }, []);
 
+  // Whether the box can take an undone send back in place (mounted, and not turned off for spam).
+  const disabledNow = useRef(p.disabled);
+  disabledNow.current = p.disabled;
+
   useImperativeHandle(ref, () => ({
     focus(m) {
       setMode(m);
@@ -111,6 +116,26 @@ export function Composer({
   const armed = useRef(false);
   const restoring = useRef(false);
   const skipOnce = useRef(false);
+  // An undone (or failed) send that came back while this conversation's box was gone or off: it wins over the draft
+  // on the server (whose write-back may still be on its way), once the box can show it.
+  useEffect(() => {
+    if (p.disabled) return;
+    const u = takeUndone(p.threadId);
+    if (!u) return;
+    restored.current = true;
+    autosave.cancel();
+    kind.current = u.mode;
+    setMode(u.mode);
+    setAll(u.all);
+    setSignature(u.signature);
+    uploads.restore(u.files);
+    if (editor.current) {
+      restoring.current = true;
+      editor.current.setContent(u.html);
+    } else setBody({ html: u.html, text: u.text, empty: !u.text.trim() });
+    // When the box opens or turns back on.
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.disabled, p.threadId]);
   useEffect(() => {
     if (restored.current) return;
     // The drafts cannot be read: nothing to restore, and the box saves as usual.
@@ -258,8 +283,14 @@ export function Composer({
             ...(files.length ? { attachments: files } : {}),
           };
     const restore = () => {
+      const inPlace = mounted.current && !disabledNow.current;
+      if (!inPlace) {
+        // The box is gone or off: what was sent waits in memory for it (read on its next mount or when it turns
+        // back on), and is written back as the draft for a later visit (or another device).
+        keepUndone(p.threadId, { mode: m, html, text, all: !!cc, signature: sig, files });
+      }
       void draft.then((id) => {
-        if (mounted.current) {
+        if (inPlace) {
           if (id) autosave.adopt(id);
           hold.release();
           return;
@@ -269,7 +300,7 @@ export function Composer({
           .catch(() => {})
           .finally(() => hold.release());
       });
-      if (!mounted.current) return;
+      if (!inPlace) return;
       sending.current = false;
       setMode(m);
       setAll(!!cc);
