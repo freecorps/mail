@@ -127,14 +127,16 @@ export function useThreadList(o: { mailbox: string; view?: View | null; filter: 
   const q = o.query.trim();
   const searching = q.length >= MIN_QUERY;
   const sentView = !view && o.filter === "sent";
+  // No mailbox and no view (a member without mailboxes): nothing to read.
+  const none = !view && !o.mailbox;
   const status = o.filter === "all" || o.filter === "sent" ? undefined : (o.filter as ThreadStatus);
   const inbox = useQuerySnapshot(
     api.inbox.threads,
-    searching || sentView || view
+    searching || sentView || view || none
       ? "skip"
       : { mailbox: o.mailbox, ...(status ? { status } : {}), paginationOpts: { numItems: n, cursor: null } },
   );
-  const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox: o.mailbox, limit: n } : "skip");
+  const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView && !none ? { mailbox: o.mailbox, limit: n } : "skip");
   const across = useQuerySnapshot(
     api.inbox.view,
     !searching && view
@@ -142,7 +144,7 @@ export function useThreadList(o: { mailbox: string; view?: View | null; filter: 
       : "skip",
   );
   const list = view ? across : sentView ? sent : inbox;
-  const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, ...(view ? {} : { mailbox: o.mailbox }) } : "skip");
+  const search = useQuerySnapshot(api.inbox.search, searching && !none ? { query: q, ...(view ? {} : { mailbox: o.mailbox }) } : "skip");
   const s = searching ? search : list;
   const fresh = useMemo(
     () =>

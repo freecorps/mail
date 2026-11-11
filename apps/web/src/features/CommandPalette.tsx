@@ -182,6 +182,7 @@ function Body(p: PaletteProps & { close: () => void }) {
               .map((m) => (
                 <Item
                   key={m.userId}
+                  id={`assign:${m.userId}`}
                   icon={UserRound}
                   label={t("palette.assignTo", { name: m.name })}
                   onSelect={run(() => swallow(assign({ threadId: th._id, userId: m.userId })))}
@@ -237,6 +238,7 @@ function Body(p: PaletteProps & { close: () => void }) {
           {p.mailboxes.map((b) => (
             <Item
               key={b.name}
+              id={`mailbox:${b.name}`}
               icon={mailboxIcon(b) ?? Mail}
               label={b.displayName ?? b.name}
               hint={b.address}
@@ -332,6 +334,7 @@ function Body(p: PaletteProps & { close: () => void }) {
 }
 
 function Item({
+  id,
   icon: Icon,
   label,
   hint,
@@ -339,6 +342,8 @@ function Item({
   current = false,
   onSelect,
 }: {
+  /** Makes the cmdk value unique when labels can repeat (two members or mailboxes with the same name). */
+  id?: string;
   icon: LucideIcon;
   label: string;
   hint?: string;
@@ -350,7 +355,7 @@ function Item({
   const { t } = useI18n();
   const currentLabel = t("common.current");
   return (
-    <CommandItem value={label} keywords={hint ? [hint] : undefined} onSelect={onSelect}>
+    <CommandItem value={id ? `${label}\u0000${id}` : label} keywords={hint ? [hint] : undefined} onSelect={onSelect}>
       <Icon aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {hint && <span className="max-w-48 shrink-0 truncate text-xs text-muted-foreground">{hint}</span>}
