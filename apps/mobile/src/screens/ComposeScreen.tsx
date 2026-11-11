@@ -24,6 +24,7 @@ import { formatFull } from "../lib/format";
 import { useUploadOne, useUploads } from "../lib/uploads";
 import { addressOf, contactsFrom, insertText, quoteHeader, quotedMessage, replySubject, replyVars, validToken, type ReplyMode } from "../model/compose";
 import { createDraftSaver, draftHasContent } from "../model/draft-saver";
+import { isPersonal } from "../model/threads";
 import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "../model/forward";
 import { useSendLater } from "../model/send";
 import { RECENT_THREADS } from "../offline/replica";
@@ -66,7 +67,13 @@ export function ComposeScreen() {
     return () => clearTimeout(id);
   }, []);
   const { t, locale, clock24 } = useI18n();
-  if ((threadId && !detail) || (!drafts && !waited)) return <Loading />;
+  const boxes = useQuery(api.inbox.mailboxes, {});
+  // The form adopts a draft when it mounts. A draft picked from "Rascunhos", or one that arrives late (offline), mounts
+  // it again, until the member has typed: then what they typed stays.
+  const edited = useRef(false);
+  const frozen = useRef<string | null>(null);
+  // A note needs to know the thread's mailbox is not personal (no internal notes there).
+  if ((threadId && !detail) || (!drafts && !waited) || (p.mode === "note" && !boxes)) return <Loading />;
   const list = drafts ?? [];
 
   let init: Init;
@@ -90,7 +97,8 @@ export function ComposeScreen() {
       files: forwardedFiles(m.attachments).map((a) => a.filename),
     };
   } else if (p.threadId && detail) {
-    const mode: ReplyMode = p.mode === "note" ? "note" : p.mode === "all" ? "all" : "reply";
+    const personal = isPersonal(boxes ?? [], detail.thread.mailbox);
+    const mode: ReplyMode = p.mode === "note" && !personal ? "note" : p.mode === "all" ? "all" : "reply";
     const kind: DraftKind = mode === "note" ? "note" : "reply";
     const draft = list.find((d) => d.kind === kind) ?? null;
     init = { kind, mode, threadId: detail.thread._id, mailbox: detail.thread.mailbox, to: [], cc: draft?.cc ?? [], subject: replySubject(detail.thread.subject), text: draft?.text ?? "", draft };
@@ -107,10 +115,23 @@ export function ComposeScreen() {
       draft,
     };
   }
-  return <Composer init={init} thread={detail?.thread ?? null} messages={detail?.messages ?? []} composeDrafts={p.threadId || p.forwardThread || p.draftId ? [] : list.filter((d) => d.kind === "compose")} />;
+  const key = `${p.draftId ?? ""}:${init.draft?._id ?? ""}`;
+  if (!edited.current) frozen.current = key;
+  return (
+    <Composer
+      key={frozen.current ?? key}
+      init={init}
+      thread={detail?.thread ?? null}
+      messages={detail?.messages ?? []}
+      composeDrafts={p.threadId || p.forwardThread || p.draftId ? [] : list.filter((d) => d.kind === "compose")}
+      onEdit={() => {
+        edited.current = true;
+      }}
+    />
+  );
 }
 
-function Composer({ init, thread, messages, composeDrafts }: { init: Init; thread: Thread | null; messages: readonly Message[]; composeDrafts: Draft[] }) {
+function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Init; thread: Thread | null; messages: readonly Message[]; composeDrafts: Draft[]; onEdit(): void }) {
   const c = useColors();
   const { t, locale, clock24 } = useI18n();
   const ios = process.env.EXPO_OS === "ios";
@@ -176,7 +197,9 @@ function Composer({ init, thread, messages, composeDrafts }: { init: Init; threa
       first.current = false;
       return;
     }
-    if (!done.current) saver.update(draftArgs());
+    if (done.current) return;
+    onEdit();
+    saver.update(draftArgs());
   }, [to, cc, bcc, subject, body, readyFiles, from]);
   const hasContent = draftHasContent(isReply || note ? { text: body, attachments: uploads.attachments } : fields) && (kind !== "forward" || body !== init.text || to.length > 0);
 

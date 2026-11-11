@@ -125,6 +125,27 @@ describe("draft autosave", () => {
     expect(remove).not.toHaveBeenCalledWith("d3");
   });
 
+  it("text typed while a save is on its way is written after it, also when sending (pause) or closing", async () => {
+    for (const end of ["pause", "close"] as const) {
+      const answers: Array<() => void> = [];
+      const save = vi.fn((a: SaveDraftArgs) => new Promise<{ id: string }>((resolve) => answers.push(() => resolve({ id: a.id ?? "d1" }))));
+      const s = createDraftSaver({ save, remove: async () => true, delay: 0 });
+      s.update(args("Ol"));
+      void s.flush();
+      s.update(args("Olá, Marina"));
+      const closed = end === "pause" ? (s.pause(), Promise.resolve()) : s.close();
+      expect(save).toHaveBeenCalledTimes(1);
+      answers.shift()!();
+      await flush();
+      await flush();
+      expect(save).toHaveBeenCalledTimes(2);
+      expect(save.mock.calls[1]![0]).toEqual({ ...args("Olá, Marina"), id: "d1" });
+      answers.shift()!();
+      await closed;
+      expect(s.id()).toBe("d1");
+    }
+  });
+
   it("what counts as content", () => {
     expect(draftHasContent({ text: "  " })).toBe(false);
     expect(draftHasContent({ text: "", to: ["a@b.co"] })).toBe(true);

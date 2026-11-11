@@ -65,7 +65,9 @@ export function QuickReply({
   const sendLater = useSendLater();
   const uploads = useUploads(useUploadOne());
 
-  const [mode, setModeState] = useState<ReplyMode>("reply");
+  const [picked, setModeState] = useState<ReplyMode>("reply");
+  // No notes where they are not offered (a personal mailbox, or while it is not known yet); no "all" with nobody else.
+  const mode: ReplyMode = picked === "note" && !notes ? "reply" : picked === "all" && !others.length ? "reply" : picked;
   const [text, setText] = useState("");
   // Typed since the draft was last read: a draft saved elsewhere does not overwrite what is being written here.
   const dirty = useRef(false);

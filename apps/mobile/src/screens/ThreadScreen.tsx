@@ -114,20 +114,24 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   // The quick reply bar replaces the toolbar while it is open: from Responder (focused), or when the member has a
   // reply/note draft of this thread (restored, from this device or another).
   const [opened_, setOpenBar] = useState<"focus" | null>(null);
-  const [closedDraft, setClosedDraft] = useState<string | null>(null);
+  // The bar just closed over its own draft (sent and waiting out the undo delay, or emptied): that draft does not
+  // reopen it. Once the thread has no draft again (the send deleted it), a draft from another device does.
+  const [suppress, setSuppress] = useState(false);
   const draft = threadDraft(useQuery(api.inbox.drafts, preview ? "skip" : { threadId }));
-  const barOpen = !preview && vm.canReply && (opened_ !== null || (!!draft && closedDraft !== `${draft._id}:${draft.updatedAt}`));
+  useEffect(() => {
+    if (!draft) setSuppress(false);
+  }, [draft]);
+  const barOpen = !preview && vm.canReply && (opened_ !== null || (!!draft && !suppress));
   const startReply = useCallback(() => {
     if (!vm.canReply) return;
     setOpenBar("focus");
   }, [vm.canReply]);
   const closeBar = useCallback(() => {
     setOpenBar(null);
-    // A draft left in place keeps the bar; one the bar just closed over (sent, emptied) does not reopen it.
-    setClosedDraft(draft ? `${draft._id}:${draft.updatedAt}` : null);
-  }, [draft]);
+    setSuppress(true);
+  }, []);
   const reopenBar = useCallback(() => {
-    setClosedDraft(null);
+    setSuppress(false);
     setOpenBar("focus");
   }, []);
   const insets = useSafeAreaInsets();
@@ -370,7 +374,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         keyboardShouldPersistTaps="handled"
       />
       {preview ? null : barOpen ? (
-        <QuickReply thread={thread} messages={vm.items.map((i) => i.message)} others={others} notes={!personal} focus={opened_ === "focus"} onClose={closeBar} onUndone={reopenBar} />
+        <QuickReply thread={thread} messages={vm.items.map((i) => i.message)} others={others} notes={!!box && !personal} focus={opened_ === "focus"} onClose={closeBar} onUndone={reopenBar} />
       ) : !vm.canReply ? (
         // Android: above the floating toolbar, which covers the bottom of the screen; iOS: above the home indicator.
         <ThemedText variant="subheadline" tone="secondary" style={[styles.spam, { paddingBottom: !ios && thread && icons ? 96 : insets.bottom + spacing.lg }]}>

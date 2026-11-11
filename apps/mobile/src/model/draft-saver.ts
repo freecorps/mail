@@ -29,7 +29,6 @@ export function createDraftSaver(o: DraftSaverOptions) {
   let timer: Timer | null = null;
   let pending: SaveDraftArgs | null = null;
   let inflight: Promise<void> | null = null;
-  let paused = false;
   let closed = false;
   /** Bumped by `sent` and `discard`: a save that answers afterwards belongs to a draft that is gone. */
   let generation = 0;
@@ -42,7 +41,8 @@ export function createDraftSaver(o: DraftSaverOptions) {
   );
 
   const write = (): Promise<void> => {
-    if (inflight || !pending || closed) return inflight ?? Promise.resolve();
+    // `closed` stops new edits, not the ones already pending: they are the latest text.
+    if (inflight || !pending) return inflight ?? Promise.resolve();
     const args = pending;
     pending = null;
     const gen = generation;
@@ -66,7 +66,8 @@ export function createDraftSaver(o: DraftSaverOptions) {
     }
     return inflight.finally(() => {
       inflight = null;
-      if (pending && !paused) void write();
+      // What was typed while that save was on its way goes next (also after pause or close).
+      if (pending) void write();
     });
   };
   const stopTimer = () => {
@@ -78,7 +79,6 @@ export function createDraftSaver(o: DraftSaverOptions) {
     /** The composer changed: save it after the debounce (the whole draft each time). */
     update(args: SaveDraftArgs) {
       if (closed) return;
-      paused = false;
       pending = args;
       stopTimer();
       timer = set(() => {
@@ -92,13 +92,13 @@ export function createDraftSaver(o: DraftSaverOptions) {
       return write();
     },
     /**
-     * Sending: no more saves (the composer is about to clear) until `update` is called again (an undone send). The
-     * draft stays, so "Desfazer" can give the text back; the send deletes it through `draftId`.
+     * Sending: the latest text is written, then no more saves (the composer is about to clear) until `update` is called
+     * again (an undone send). The draft stays, so "Desfazer" can give the text back; the send deletes it (`draftId`).
      */
     pause() {
-      paused = true;
-      pending = null;
       stopTimer();
+      // Anything still pending is the latest text: write it (now, or after the save on its way).
+      if (pending) void write();
     },
     /** The draft's id, once the server answered (a reply's draft is also found by thread and kind). */
     id: () => id,
@@ -131,9 +131,11 @@ export function createDraftSaver(o: DraftSaverOptions) {
     /** The composer closed: a pending save still goes out (the draft is kept). */
     close(): Promise<void> {
       stopTimer();
-      const p = pending && !paused ? write() : (inflight ?? Promise.resolve());
       closed = true;
-      return p;
+      if (!pending) return inflight ?? Promise.resolve();
+      // Resolves once the last pending text is written (after the save on its way, if any).
+      const last = pending;
+      return (inflight ?? Promise.resolve()).then(() => (pending === last ? write() : inflight ?? undefined));
     },
   };
 }
