@@ -13,8 +13,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, type Draft, type Message, type Thread } from "../api";
 import { useI18n } from "../i18n";
 import { useUploadOne, useUploads } from "../lib/uploads";
-import { quoteHeader, quotedMessage, type ReplyMode } from "../model/compose";
-import { createDraftSaver } from "../model/draft-saver";
+import { draftReplyMode, quoteHeader, quotedMessage, replyState, type ReplyMode } from "../model/compose";
+import { createDraftSaver, replyDraftArgs } from "../model/draft-saver";
 import { useSendLater } from "../model/send";
 import { corner, radius, spacing, type, useColors } from "../theme";
 import { Icons, type IconSpec } from "./icons";
@@ -42,7 +42,7 @@ export function QuickReply({
   messages: readonly Message[];
   /** Who else was on the latest message received ("Responder a todos" copies them). */
   others: string[];
-  /** Internal notes (not in a personal mailbox). */
+  /** Internal notes (not in a personal mailbox, and not before the mailbox is known). */
   notes: boolean;
   /** Focus the field when it opens (Responder), not when it shows a restored draft. */
   focus: boolean;
@@ -66,8 +66,12 @@ export function QuickReply({
   const uploads = useUploads(useUploadOne());
 
   const [picked, setModeState] = useState<ReplyMode>("reply");
-  // No notes where they are not offered (a personal mailbox, or while it is not known yet); no "all" with nobody else.
-  const mode: ReplyMode = picked === "note" && !notes ? "reply" : picked === "all" && !others.length ? "reply" : picked;
+  // What the restored draft had that this bar does not show: its Cc (reply all, until the others are known) and a Bcc
+  // written on the web (kept by the autosave).
+  const restored = useRef<{ cc: string[]; bcc: string[] }>({ cc: [], bcc: [] });
+  // No "all" with nobody to copy. A note stays a note (it is never emailed); it cannot be added where notes are not
+  // offered (a personal mailbox, or while the mailbox is not known yet).
+  const { mode, cc } = replyState(picked, others, restored.current.cc);
   const [text, setText] = useState("");
   // Typed since the draft was last read: a draft saved elsewhere does not overwrite what is being written here.
   const dirty = useRef(false);
@@ -81,7 +85,9 @@ export function QuickReply({
     if (!draft || dirty.current) return;
     saver.adopt(draft._id);
     setText(draft.text);
-    setModeState(draft.kind === "note" && notes ? "note" : draft.cc.length && others.length ? "all" : "reply");
+    restored.current = { cc: draft.cc, bcc: draft.bcc };
+    // From the draft alone: the mailboxes (notes, others) may not be known yet.
+    setModeState(draftReplyMode(draft));
     uploads.restore(draft.attachments);
     // Only when the draft itself changes.
   }, [draft?._id, draft?.updatedAt]);
@@ -120,11 +126,11 @@ export function QuickReply({
       });
   };
 
-  const cc = mode === "all" ? others : [];
   const save = (next: { text?: string; mode?: ReplyMode }) => {
     dirty.current = true;
-    const m = next.mode ?? mode;
-    saver.update({ kind: m === "note" ? "note" : "reply", threadId, text: next.text ?? text, cc: m === "all" ? others : [], attachments: m === "note" ? [] : uploads.attachments });
+    const s = next.mode ? replyState(next.mode, others, restored.current.cc) : { mode, cc };
+    // Reply all's Cc is filled in, not written: emptied, the draft goes.
+    saver.update(replyDraftArgs({ kind: s.mode === "note" ? "note" : "reply", threadId, text: next.text ?? text, cc: s.cc, autoCc: s.cc, bcc: restored.current.bcc, attachments: uploads.attachments }));
   };
   const setMode = (m: ReplyMode) => {
     // A note and a reply are different drafts: the one being left goes (its text moves to the new one).
@@ -148,10 +154,10 @@ export function QuickReply({
   }, [ready]);
 
   const busy = mode !== "note" && (uploads.busy || uploads.failed);
-  const canSend = !!text.trim() && !busy;
+  const canSend = !!text.trim() && !busy && (mode !== "note" || notes);
   const send = () => {
     const body = text.trim();
-    if (!body || busy) return;
+    if (!canSend) return;
     // The pending save goes first (an undone send reads the text back from the draft); then no more saves.
     void saver.flush();
     saver.pause();
@@ -176,6 +182,7 @@ export function QuickReply({
       );
     }
     dirty.current = false;
+    restored.current = { cc: [], bcc: [] };
     setText("");
     uploads.clear();
     input.current?.blur();
@@ -192,7 +199,8 @@ export function QuickReply({
   const modes: Array<{ m: ReplyMode; label: string }> = [
     { m: "reply", label: t("compose.reply") },
     ...(others.length ? [{ m: "all" as const, label: t("compose.replyAll") }] : []),
-    ...(notes ? [{ m: "note" as const, label: t("compose.note") }] : []),
+    // A restored note shows its mode even where a new one cannot be added (switching to Responder is explicit).
+    ...(notes || mode === "note" ? [{ m: "note" as const, label: t("compose.note") }] : []),
   ];
   const placeholder = mode === "note" ? t("thread.notePlaceholder") : t("thread.replyPlaceholder");
   const modeLabel = modes.find((x) => x.m === mode)?.label ?? t("compose.reply");

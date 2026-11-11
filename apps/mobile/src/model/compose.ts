@@ -60,6 +60,32 @@ export function addTokens(current: readonly string[], more: readonly string[]): 
   return out;
 }
 
+/** A token field's tokens with the text still being typed in it taken as one more (sending, saving the draft). */
+export function withTyped(tokens: readonly string[], typed: string): string[] {
+  return typed.trim() ? addTokens(tokens, splitTyped(`${typed},`).tokens) : [...tokens];
+}
+
+/** Backspace in a token field's empty text: the selected token goes; with none selected, the last one is selected. */
+export function backspaceToken(count: number, selected: number | null): { remove: number } | { select: number } | null {
+  if (!count) return null;
+  return selected !== null && selected < count ? { remove: selected } : { select: count - 1 };
+}
+
+/** The mode a reply or note draft opens in, from the draft itself: a note stays a note, a draft with Cc is reply all. */
+export function draftReplyMode(d: { kind: string; cc: readonly string[] }): ReplyMode {
+  return d.kind === "note" ? "note" : d.cc.length ? "all" : "reply";
+}
+
+/**
+ * The quick reply bar's mode and Cc. Reply all copies the others on the thread (until they are known, the Cc its
+ * restored draft had); with nobody to copy it is a plain reply. A note is never turned into a reply.
+ */
+export function replyState(picked: ReplyMode, others: readonly string[], draftCc: readonly string[]): { mode: ReplyMode; cc: string[] } {
+  if (picked !== "all") return { mode: picked, cc: [] };
+  const cc = others.length ? [...others] : [...draftCc];
+  return cc.length ? { mode: "all", cc } : { mode: "reply", cc: [] };
+}
+
 export interface Contact {
   email: string;
   name?: string;

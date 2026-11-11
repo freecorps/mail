@@ -1,12 +1,14 @@
 // A recipients row of the composer ("Para:", "Cc:"), as Mail draws it: the label, the chosen addresses as tokens, and
 // a text field that turns what is typed into a token on a comma, a semicolon, a space after an address, or return.
-// Backspace in the empty field selects the last token, a second one removes it. While typing, people from the mail
+// Backspace in the empty field removes the selected token (tap one to select it); with none selected it selects the
+// last one, and a second Backspace removes it. What is still being typed can be held by the composer (`text`), which
+// takes it as a token when sending or saving the draft. While typing, people from the mail
 // on the device are suggested under the row. Neither platform has a token field control (UISearchToken is for search
 // bars only), so the tokens are drawn here; the field itself is the system text field.
 import { useRef, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View, type TextInputInstance } from "react-native";
 import { useI18n } from "../i18n";
-import { addressOf, addTokens, splitTyped, suggest, tokenOf, validToken, type Contact } from "../model/compose";
+import { addressOf, addTokens, backspaceToken, splitTyped, suggest, tokenOf, validToken, type Contact } from "../model/compose";
 import { corner, minTouch, radius, screenEdge, spacing, type, useColors } from "../theme";
 import { Avatar, Separator } from "./ui";
 import { ThemedText } from "./themed-text";
@@ -22,6 +24,9 @@ export function TokenField({
   autoFocus,
   readOnly,
   onFocus,
+  text: typedText,
+  onTextChange,
+  error,
 }: {
   label: string;
   tokens: string[];
@@ -31,10 +36,17 @@ export function TokenField({
   /** A reply's "Para": the contact, shown but not editable. */
   readOnly?: boolean;
   onFocus?(): void;
+  /** What is being typed, held by the composer (otherwise by the field). */
+  text?: string;
+  onTextChange?(text: string): void;
+  /** Shown under the row (an address that is not valid). */
+  error?: string | null;
 }) {
   const c = useColors();
   const { t } = useI18n();
-  const [text, setText] = useState("");
+  const [ownText, setOwnText] = useState("");
+  const text = typedText ?? ownText;
+  const setText = onTextChange ?? setOwnText;
   const [selected, setSelected] = useState<number | null>(null);
   const input = useRef<TextInputInstance>(null);
   const hits = readOnly ? [] : suggest(contacts, text, tokens);
@@ -83,10 +95,11 @@ export function TokenField({
                 commit(v);
               }}
               onKeyPress={(e) => {
-                if (e.nativeEvent.key !== "Backspace" || text || !tokens.length) return;
-                // First backspace selects the last token; the second removes it.
-                if (selected === tokens.length - 1) remove(tokens.length - 1);
-                else setSelected(tokens.length - 1);
+                if (e.nativeEvent.key !== "Backspace" || text) return;
+                const next = backspaceToken(tokens.length, selected);
+                if (!next) return;
+                if ("remove" in next) remove(next.remove);
+                else setSelected(next.select);
               }}
               onSubmitEditing={() => commit(`${text},`)}
               onBlur={() => text.trim() && commit(`${text},`)}
@@ -134,6 +147,11 @@ export function TokenField({
           ))}
         </View>
       ) : null}
+      {error ? (
+        <ThemedText variant="footnote" tone="danger" style={styles.error} accessibilityLiveRegion="polite">
+          {error}
+        </ThemedText>
+      ) : null}
       <Separator inset={screenEdge} />
     </View>
   );
@@ -146,5 +164,6 @@ const styles = StyleSheet.create({
   tokens: { flex: 1, flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: spacing.xs, minHeight: minTouch - spacing.sm },
   token: { ...corner(radius.full), borderWidth: 1, paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs, maxWidth: "100%" },
   input: { flexGrow: 1, minWidth: 120, fontSize: type.body.fontSize, paddingVertical: spacing.xs },
+  error: { paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   hit: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
 });

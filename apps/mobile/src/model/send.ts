@@ -5,7 +5,7 @@ import { useCallback } from "react";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
 import { useUndoSendDelay } from "../prefs";
-import { outbox, type OutboxEntry } from "./outbox";
+import { outbox, scheduleWithUndo, type OutboxEntry } from "./outbox";
 import { undoStore } from "./undo";
 
 export function useSendLater() {
@@ -14,9 +14,7 @@ export function useSendLater() {
   return useCallback(
     (entry: Omit<OutboxEntry, "id" | "at" | "sendsAt">, run: () => void, restore?: () => void) => {
       haptics.success();
-      const id = outbox.schedule(entry, delay * 1000, run, restore);
-      if (id) undoStore.show(t("compose.sendingIn"), () => outbox.cancel(id), delay * 1000);
-      return id;
+      return scheduleWithUndo({ outbox, undo: undoStore, message: t("compose.sendingIn"), entry, delayMs: delay * 1000, run, restore });
     },
     [delay, t],
   );

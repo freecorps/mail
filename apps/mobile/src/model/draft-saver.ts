@@ -4,6 +4,7 @@
 // or a slow first save would create two drafts). Emptying the composer deletes the draft. Drafts live on the server
 // (they follow the member across devices); mutations queue offline like every other one.
 import type { SaveDraftArgs } from "../api";
+import { addressOf } from "./compose";
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -19,6 +20,28 @@ export interface DraftSaverOptions {
 /** Whether a draft has anything worth keeping (text, recipients, a subject or a file). */
 export function draftHasContent(d: Omit<SaveDraftArgs, "kind">): boolean {
   return !!(d.text.trim() || d.to?.length || d.cc?.length || d.bcc?.length || d.subject?.trim() || d.attachments?.length);
+}
+
+const sameAddresses = (a: readonly string[], b: readonly string[]) => {
+  const key = (x: readonly string[]) => x.map((t) => addressOf(t).toLowerCase()).sort().join(",");
+  return key(a) === key(b);
+};
+
+/**
+ * A reply or note draft. The Cc that reply all fills in (`autoCc`) is not content of its own, nor a Bcc kept from
+ * another device: emptied of what the member wrote, the draft carries neither, so it is deleted.
+ */
+export function replyDraftArgs(a: { kind: "reply" | "note"; threadId: string; text: string; cc: readonly string[]; autoCc: readonly string[]; bcc?: readonly string[]; attachments: NonNullable<SaveDraftArgs["attachments"]> }): SaveDraftArgs {
+  if (a.kind === "note") return { kind: "note", threadId: a.threadId, text: a.text, cc: [], attachments: [] };
+  const written = !!a.text.trim() || a.attachments.length > 0 || (a.cc.length > 0 && !sameAddresses(a.cc, a.autoCc));
+  return {
+    kind: "reply",
+    threadId: a.threadId,
+    text: a.text,
+    cc: written ? [...a.cc] : [],
+    ...(written && a.bcc?.length ? { bcc: [...a.bcc] } : {}),
+    attachments: a.attachments,
+  };
 }
 
 export function createDraftSaver(o: DraftSaverOptions) {

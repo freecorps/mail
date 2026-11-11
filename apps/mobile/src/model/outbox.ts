@@ -3,6 +3,7 @@
 // gets the text back (the draft was kept for that). Leaving the app sends what is waiting at once, so a message is
 // never lost to a suspended timer. A plain store (useSyncExternalStore), no React Native: tested in vitest.
 import { useMemo, useSyncExternalStore } from "react";
+import type { UndoStore } from "./undo";
 
 export type OutboxKind = "reply" | "compose" | "forward";
 
@@ -80,6 +81,29 @@ export function createOutbox(opts: { now?: () => number; setTimeout?: (fn: () =>
 }
 
 export type Outbox = ReturnType<typeof createOutbox>;
+
+/**
+ * Schedules a send and offers "Desfazer" for it on the undo banner. Once the send goes out (its delay ran out, or the
+ * app went to the background and `flushAll` sent it), the banner goes too: there is nothing left to undo.
+ */
+export function scheduleWithUndo(o: {
+  outbox: Outbox;
+  undo: UndoStore;
+  message: string;
+  entry: Omit<OutboxEntry, "id" | "at" | "sendsAt">;
+  delayMs: number;
+  run(): void;
+  restore?: (() => void) | undefined;
+}): string | null {
+  let banner: number | null = null;
+  const run = () => {
+    if (banner !== null) o.undo.dismiss(banner);
+    o.run();
+  };
+  const id = o.outbox.schedule(o.entry, o.delayMs, run, o.restore);
+  if (id) banner = o.undo.show(o.message, () => o.outbox.cancel(id), o.delayMs);
+  return id;
+}
 
 /** The app's outbox. */
 export const outbox = createOutbox();

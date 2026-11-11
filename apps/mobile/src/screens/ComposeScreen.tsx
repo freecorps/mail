@@ -14,7 +14,7 @@ import { router, Stack, useLocalSearchParams, usePreventRemove } from "expo-rout
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Alert, StyleSheet, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import { api, type Draft, type DraftKind, type Mailbox, type Message, type Thread } from "../api";
+import { api, type Draft, type DraftKind, type Mailbox, type Message, type SaveDraftArgs, type Thread } from "../api";
 import { Icons, useMaterialSource } from "../components/icons";
 import { TokenField } from "../components/token-field";
 import { UploadStrip } from "../components/Uploads";
@@ -22,8 +22,8 @@ import { IconButton, Loading, MenuButton, Separator, ThemedText } from "../compo
 import { useI18n } from "../i18n";
 import { formatFull } from "../lib/format";
 import { useUploadOne, useUploads } from "../lib/uploads";
-import { addressOf, contactsFrom, insertText, quoteHeader, quotedMessage, replySubject, replyVars, validToken, type ReplyMode } from "../model/compose";
-import { createDraftSaver, draftHasContent } from "../model/draft-saver";
+import { addressOf, contactsFrom, insertText, quoteHeader, quotedMessage, replySubject, replyVars, validToken, withTyped, type ReplyMode } from "../model/compose";
+import { createDraftSaver, draftHasContent, replyDraftArgs } from "../model/draft-saver";
 import { isPersonal } from "../model/threads";
 import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "../model/forward";
 import { useSendLater } from "../model/send";
@@ -31,8 +31,9 @@ import { RECENT_THREADS } from "../offline/replica";
 import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 /**
- * Bcc: drafts already keep it, but Ember's sends take no bcc yet (it is being added to `@freecorps/ember-email`).
- * When they do, set this to true: the "Cco" row shows and `bcc` goes into reply/compose/forward.
+ * Bcc: drafts already keep it (a Bcc written on the web survives the autosave here), but Ember's sends take no bcc yet
+ * (it is being added to `@freecorps/ember-email`). When they do, set this to true: the "Cco" row shows and `bcc` goes
+ * into reply/compose/forward.
  */
 const BCC_SUPPORTED = false;
 
@@ -158,10 +159,29 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   const [to, setTo] = useState<string[]>(init.to);
   const [cc, setCc] = useState<string[]>(init.draft ? init.cc : mode === "all" ? others : init.cc);
   const [bcc, setBcc] = useState<string[]>(init.draft?.bcc ?? []);
+  // What is still being typed in each recipients row: it counts as a token when sending and in the draft.
+  const [typed, setTyped] = useState({ to: "", cc: "", bcc: "" });
+  const toNow = withTyped(to, typed.to);
+  const ccNow = withTyped(cc, typed.cc);
+  const bccNow = withTyped(bcc, typed.bcc);
+  // Only what the member does is an edit (it saves the draft, and keeps this form over a draft that arrives later):
+  // the mailboxes loading, a restored file finishing or reply all's Cc filling in are not.
+  const touched = useRef(false);
+  const ccTouched = useRef(false);
+  const touch = () => {
+    if (touched.current) return;
+    touched.current = true;
+    onEdit();
+  };
+  // Reply all opened before the mailboxes loaded: the others are known only now (the Cc stays the member's once touched).
+  useEffect(() => {
+    if (!init.draft && mode === "all" && !ccTouched.current && others.length) setCc((prev) => (prev.length ? prev : others));
+  }, [init.draft, mode, others]);
   const [subject, setSubject] = useState(init.subject);
   const [body, setBody] = useState(init.text);
   const [withSignature, setWithSignature] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // A recipients row with an address that is not valid (shown under that row).
+  const [invalid, setInvalid] = useState<{ field: "to" | "cc"; message: string } | null>(null);
   const done = useRef(false);
   // Sent: the guard below comes off first (a render), then the sheet closes.
   const [leaving, setLeaving] = useState(false);
@@ -181,27 +201,24 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   useEffect(() => {
     if (init.draft) saver.adopt(init.draft._id);
   }, [init.draft, saver]);
-  const fields = { to, cc, ...(BCC_SUPPORTED ? { bcc } : {}), subject, text: body, attachments: uploads.attachments };
-  const draftArgs = () => ({
-    kind,
-    ...(init.threadId ? { threadId: init.threadId } : {}),
-    ...(init.messageId ? { messageId: init.messageId } : {}),
-    ...(kind === "compose" && from ? { mailbox: from } : {}),
-    ...(isReply || note ? { cc: note ? [] : cc, text: body, attachments: note ? [] : uploads.attachments } : { ...fields, cc }),
-  });
-  const first = useRef(true);
+  const fields = { to: toNow, cc: ccNow, bcc: bccNow, subject, text: body, attachments: uploads.attachments };
+  const draftArgs = (): SaveDraftArgs =>
+    (isReply || note) && init.threadId
+      ? replyDraftArgs({ kind: note ? "note" : "reply", threadId: init.threadId, text: body, cc: ccNow, autoCc: others, bcc: bccNow, attachments: uploads.attachments })
+      : {
+          kind,
+          ...(init.threadId ? { threadId: init.threadId } : {}),
+          ...(init.messageId ? { messageId: init.messageId } : {}),
+          ...(kind === "compose" && from ? { mailbox: from } : {}),
+          ...fields,
+        };
   const readyFiles = uploads.attachments.map((a) => a.file).join(",");
   useEffect(() => {
-    // Not the first render (that is what was loaded), and never after the send.
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    if (done.current) return;
-    onEdit();
+    // Only after the member changed something (not what was loaded), and never after the send.
+    if (!touched.current || done.current) return;
     saver.update(draftArgs());
-  }, [to, cc, bcc, subject, body, readyFiles, from]);
-  const hasContent = draftHasContent(isReply || note ? { text: body, attachments: uploads.attachments } : fields) && (kind !== "forward" || body !== init.text || to.length > 0);
+  }, [to, cc, bcc, typed, subject, body, readyFiles, from]);
+  const hasContent = draftHasContent(isReply || note ? { text: body, attachments: uploads.attachments } : fields) && (kind !== "forward" || body !== init.text || toNow.length > 0);
 
   // "Descartar rascunho?" when closing a composer with something in it (a swipe down, Cancelar, Back).
   usePreventRemove(hasContent && !leaving, () => {
@@ -234,13 +251,27 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
 
   // ---- Send --------------------------------------------------------------------------------------------------------
   const busy = !note && (uploads.busy || uploads.failed);
-  const recipientsOk = isReply || note || (to.length > 0 && to.every(validToken));
-  const ready = !!body.trim() && !busy && recipientsOk && cc.every(validToken) && (kind !== "compose" || !!from);
+  // Send is offered once there is something to send; an address that is not valid stops it with an error on its row.
+  const ready = !!body.trim() && !busy && (isReply || note || toNow.length > 0) && (kind !== "compose" || !!from);
   const send = () => {
-    if (!ready) {
-      if (!recipientsOk || !cc.every(validToken)) setError(t("compose.invalidTo"));
-      return;
+    if (!ready) return;
+    // What is still being typed becomes a token (so a bad address shows as one, in red).
+    if (typed.to.trim() || typed.cc.trim() || typed.bcc.trim()) {
+      setTo(toNow);
+      setCc(ccNow);
+      setBcc(bccNow);
+      setTyped({ to: "", cc: "", bcc: "" });
     }
+    if (!note) {
+      const badTo = isReply ? undefined : toNow.find((x) => !validToken(x));
+      const badCc = ccNow.find((x) => !validToken(x));
+      if (badTo !== undefined || badCc !== undefined) {
+        setInvalid({ field: badTo !== undefined ? "to" : "cc", message: t("compose.invalidAddress", { address: (badTo ?? badCc)! }) });
+        return;
+      }
+    }
+    const to = toNow;
+    const cc = ccNow;
     // The pending save goes first (an undone send gets the text back from the draft); then no more saves.
     void saver.flush();
     saver.pause();
@@ -300,7 +331,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   const contact = thread ? { email: thread.contact, ...(thread.contactName ? { name: thread.contactName } : {}) } : to[0] ? { email: addressOf(to[0]), name: /^(.*?)\s*</.exec(to[0])?.[1] ?? "" } : null;
   const vars = replyVars({ contact, mailbox: box ?? null, agent: me?.member ? me.name : null, number: thread?.number ?? null });
   const savedItems = saved.length
-    ? saved.map((r) => ({ key: r._id, label: r.title, onPress: () => setBody((b) => insertText(b, fillSavedReply(r.text, vars))) }))
+    ? saved.map((r) => ({ key: r._id, label: r.title, onPress: () => (setBody((b) => insertText(b, fillSavedReply(r.text, vars))), touch()) }))
     : [{ key: "none", label: t("compose.noSavedReplies"), disabled: true, onPress: () => {} }];
 
   // ---- Chrome -------------------------------------------------------------------------------------------------------
@@ -341,17 +372,36 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
             {isReply && thread ? (
               <TokenField label={`${t("compose.to")}:`} tokens={[thread.contactName ? `${thread.contactName} <${thread.contact}>` : thread.contact]} onChange={() => {}} contacts={[]} readOnly />
             ) : (
-              <TokenField label={`${t("compose.to")}:`} tokens={to} onChange={(v) => (setTo(v), setError(null))} contacts={contacts} autoFocus={!to.length && kind === "compose"} />
+              <TokenField
+                label={`${t("compose.to")}:`}
+                tokens={to}
+                onChange={(v) => (setTo(v), setInvalid(null), touch())}
+                text={typed.to}
+                onTextChange={(v) => (setTyped((x) => ({ ...x, to: v })), setInvalid(null), touch())}
+                error={invalid?.field === "to" ? invalid.message : null}
+                contacts={contacts}
+                autoFocus={!to.length && kind === "compose"}
+              />
             )}
-            <TokenField label={`${t("compose.cc")}:`} tokens={cc} onChange={(v) => (setCc(v), setError(null))} contacts={contacts} />
+            <TokenField
+              label={`${t("compose.cc")}:`}
+              tokens={cc}
+              onChange={(v) => ((ccTouched.current = true), setCc(v), setInvalid(null), touch())}
+              text={typed.cc}
+              onTextChange={(v) => ((ccTouched.current = true), setTyped((x) => ({ ...x, cc: v })), setInvalid(null), touch())}
+              error={invalid?.field === "cc" ? invalid.message : null}
+              contacts={contacts}
+            />
             {/* TODO(bcc): when Ember's sends take bcc, flip BCC_SUPPORTED and send `bcc` with reply/compose/forward. */}
-            {BCC_SUPPORTED ? <TokenField label={`${t("compose.bcc")}:`} tokens={bcc} onChange={setBcc} contacts={contacts} /> : null}
+            {BCC_SUPPORTED ? (
+              <TokenField label={`${t("compose.bcc")}:`} tokens={bcc} onChange={(v) => (setBcc(v), touch())} text={typed.bcc} onTextChange={(v) => (setTyped((x) => ({ ...x, bcc: v })), touch())} contacts={contacts} />
+            ) : null}
             {kind === "compose" && mailboxes.length > 1 ? (
               <View style={styles.fromRow}>
                 <ThemedText variant="body" tone="secondary">{`${t("compose.from")}:`}</ThemedText>
                 <MenuButton
                   label={box?.address ?? from ?? ""}
-                  items={mailboxes.map((b) => ({ key: b.name, label: b.address, checked: b.name === from, onPress: () => setMailbox(b.name) }))}
+                  items={mailboxes.map((b) => ({ key: b.name, label: b.address, checked: b.name === from, onPress: () => (setMailbox(b.name), touch()) }))}
                   accessibilityLabel={`${t("compose.from")}: ${box?.address ?? ""}`}
                 />
               </View>
@@ -368,20 +418,15 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                   {subject}
                 </ThemedText>
               ) : (
-                <TextInput value={subject} onChangeText={setSubject} accessibilityLabel={t("compose.subject")} style={[styles.subject, { color: c.labelText }]} />
+                <TextInput value={subject} onChangeText={(v) => (setSubject(v), touch())} accessibilityLabel={t("compose.subject")} style={[styles.subject, { color: c.labelText }]} />
               )}
             </View>
             <Separator inset={screenEdge} />
           </>
         )}
-        {error ? (
-          <ThemedText variant="footnote" tone="danger" style={styles.error}>
-            {error}
-          </ThemedText>
-        ) : null}
         <TextInput
           value={body}
-          onChangeText={setBody}
+          onChangeText={(v) => (setBody(v), touch())}
           multiline
           scrollEnabled={false}
           autoFocus={isReply || note}
@@ -401,9 +446,9 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
             {t("forward.files", { list: init.files.join(", ") })}
           </ThemedText>
         ) : null}
-        {note ? null : <UploadStrip items={uploads.items} onRemove={uploads.remove} />}
+        {note ? null : <UploadStrip items={uploads.items} onRemove={(id) => (uploads.remove(id), touch())} />}
         <View style={styles.actions}>
-          {note ? null : <IconButton variant="plain" icon={Icons.attach} label={t("attach.add")} onPress={() => void uploads.add().catch(() => {})} />}
+          {note ? null : <IconButton variant="plain" icon={Icons.attach} label={t("attach.add")} onPress={() => (touch(), void uploads.add().catch(() => {}))} />}
           <MenuButton label={t("compose.savedReplies")} icon={Icons.note} items={savedItems} />
         </View>
         {note ? null : (
@@ -439,7 +484,6 @@ const styles = StyleSheet.create({
   fromRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, minHeight: 44 },
   subjectRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, minHeight: 44 },
   subject: { flex: 1, fontSize: type.body.fontSize, paddingVertical: spacing.sm },
-  error: { paddingHorizontal: screenEdge, paddingTop: spacing.sm },
   body: { minHeight: 180, fontSize: type.body.fontSize, lineHeight: type.body.lineHeight, paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.md, ...corner(radius.xs) },
   quoted: { paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   actions: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },

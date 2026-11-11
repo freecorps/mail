@@ -5,9 +5,11 @@ import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import { fillSavedReply } from "@freecorps/mail-email-html/compose";
 import { describe, expect, it, vi } from "vitest";
 import type { Draft, SaveDraftArgs } from "../src/api";
-import { addTokens, contactsFrom, insertText, quoteHeader, quotedMessage, replySubject, replyVars, splitTyped, suggest, suggestedSignature, validToken } from "../src/model/compose";
-import { createDraftSaver, draftHasContent } from "../src/model/draft-saver";
-import { createOutbox, parseUndoDelay } from "../src/model/outbox";
+import { addTokens, backspaceToken, contactsFrom, draftReplyMode, insertText, quoteHeader, quotedMessage, replyState, replySubject, replyVars, splitTyped, suggest, suggestedSignature, validToken, withTyped } from "../src/model/compose";
+import { createDraftSaver, draftHasContent, replyDraftArgs } from "../src/model/draft-saver";
+import { createOutbox, parseUndoDelay, scheduleWithUndo } from "../src/model/outbox";
+import { createSignatureSaver } from "../src/model/signature-saver";
+import { createUndoStore } from "../src/model/undo";
 import { inboxOptimisticUpdates } from "../src/offline/optimistic";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -42,6 +44,43 @@ describe("undo send (outbox)", () => {
     box.flushAll();
     expect(later).toHaveBeenCalledOnce();
     expect(box.get()).toEqual([]);
+    vi.useRealTimers();
+  });
+
+  it("the undo banner goes once the send went out (also when leaving the app sent it early)", () => {
+    vi.useFakeTimers();
+    const box = createOutbox();
+    const undo = createUndoStore();
+    const run = vi.fn();
+    const back = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "reply", threadId: "t1", text: "oi" }, delayMs: 5000, run, restore: back });
+    expect(undo.get()?.message).toBe("Enviando");
+    box.flushAll();
+    expect(run).toHaveBeenCalledOnce();
+    expect(undo.get()).toBeNull();
+    undo.undo();
+    expect(back).not.toHaveBeenCalled();
+
+    // Desfazer before it went: cancelled, the text comes back, nothing sent.
+    const run2 = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "reply", threadId: "t1", text: "de novo" }, delayMs: 5000, run: run2, restore: back });
+    undo.undo();
+    expect(back).toHaveBeenCalledOnce();
+    vi.advanceTimersByTime(10_000);
+    expect(run2).not.toHaveBeenCalled();
+
+    // A newer notice in the slot is not dismissed by an earlier send going out.
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "compose", text: "x" }, delayMs: 5000, run: vi.fn() });
+    undo.show("Arquivada", vi.fn());
+    box.flushAll();
+    expect(undo.get()?.message).toBe("Arquivada");
+
+    // Undo send off: sent at once, no banner.
+    undo.dismiss();
+    const now = vi.fn();
+    expect(scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "compose", text: "y" }, delayMs: 0, run: now })).toBeNull();
+    expect(now).toHaveBeenCalledOnce();
+    expect(undo.get()).toBeNull();
     vi.useRealTimers();
   });
 
@@ -146,6 +185,26 @@ describe("draft autosave", () => {
     }
   });
 
+  it("a reply draft: reply all's Cc and a kept Bcc are not content of their own; a Cc the member changed is", () => {
+    const base = { kind: "reply" as const, threadId: "t1", autoCc: ["bia@y.com"], attachments: [] };
+    expect(replyDraftArgs({ ...base, text: "Oi", cc: ["bia@y.com"], bcc: ["chefe@x.com"] })).toEqual({ kind: "reply", threadId: "t1", text: "Oi", cc: ["bia@y.com"], bcc: ["chefe@x.com"], attachments: [] });
+    // Emptied: nothing left, so the saver deletes it.
+    const empty = replyDraftArgs({ ...base, text: "  ", cc: ["Bia <BIA@y.com>"], bcc: ["chefe@x.com"] });
+    expect(empty).toEqual({ kind: "reply", threadId: "t1", text: "  ", cc: [], attachments: [] });
+    expect(draftHasContent(empty)).toBe(false);
+    expect(draftHasContent(replyDraftArgs({ ...base, text: "", cc: ["bia@y.com", "caio@z.com"] }))).toBe(true);
+    expect(replyDraftArgs({ ...base, kind: "note", text: "interno", cc: ["bia@y.com"], attachments: [{ file: "f", filename: "a.pdf", contentType: "application/pdf" }] })).toEqual({ kind: "note", threadId: "t1", text: "interno", cc: [], attachments: [] });
+  });
+
+  it("emptying a reply all draft deletes it", async () => {
+    const remove = vi.fn(async () => true);
+    const s = createDraftSaver({ save: async () => ({ id: "d1" }), remove, delay: 0 });
+    s.adopt("d1");
+    s.update(replyDraftArgs({ kind: "reply", threadId: "t1", text: "", cc: ["bia@y.com"], autoCc: ["bia@y.com"], attachments: [] }));
+    await s.flush();
+    expect(remove).toHaveBeenCalledWith("d1");
+  });
+
   it("what counts as content", () => {
     expect(draftHasContent({ text: "  " })).toBe(false);
     expect(draftHasContent({ text: "", to: ["a@b.co"] })).toBe(true);
@@ -163,6 +222,18 @@ describe("recipients", () => {
     expect(addTokens(["Ana <ana@x.com>"], ["ANA@x.com", "bia@y.com", " "])).toEqual(["Ana <ana@x.com>", "bia@y.com"]);
     expect(validToken("Ana <ana@x.com>")).toBe(true);
     expect(validToken("ana@")).toBe(false);
+  });
+
+  it("what is still typed counts as a token (sending, saving); Backspace removes the selected token", () => {
+    expect(withTyped(["ana@x.com"], " bia@y.com")).toEqual(["ana@x.com", "bia@y.com"]);
+    expect(withTyped(["ana@x.com"], "bia@y.com, caio@z.com")).toEqual(["ana@x.com", "bia@y.com", "caio@z.com"]);
+    expect(withTyped([], "bia@")).toEqual(["bia@"]);
+    expect(withTyped(["ana@x.com"], "ANA@x.com")).toEqual(["ana@x.com"]);
+    expect(withTyped(["ana@x.com"], "  ")).toEqual(["ana@x.com"]);
+    expect(backspaceToken(3, 0)).toEqual({ remove: 0 });
+    expect(backspaceToken(3, 2)).toEqual({ remove: 2 });
+    expect(backspaceToken(3, null)).toEqual({ select: 2 });
+    expect(backspaceToken(0, null)).toBeNull();
   });
 
   it("contacts from the mail on the device, newest first, never the member's own mailboxes; suggestions fold accents", () => {
@@ -202,6 +273,19 @@ describe("reply", () => {
     expect(replySubject("RE: Fatura")).toBe("RE: Fatura");
   });
 
+  it("a restored draft keeps its mode while the mailboxes load: a note stays a note, reply all keeps its Cc", () => {
+    expect(draftReplyMode({ kind: "note", cc: [] })).toBe("note");
+    expect(draftReplyMode({ kind: "reply", cc: ["bia@y.com"] })).toBe("all");
+    expect(draftReplyMode({ kind: "reply", cc: [] })).toBe("reply");
+    // Notes unknown or not offered: still a note (never emailed).
+    expect(replyState("note", [], [])).toEqual({ mode: "note", cc: [] });
+    // Reply all before the others are known: the draft's Cc; once known, the others.
+    expect(replyState("all", [], ["bia@y.com"])).toEqual({ mode: "all", cc: ["bia@y.com"] });
+    expect(replyState("all", ["bia@y.com", "caio@z.com"], ["bia@y.com"])).toEqual({ mode: "all", cc: ["bia@y.com", "caio@z.com"] });
+    expect(replyState("all", [], [])).toEqual({ mode: "reply", cc: [] });
+    expect(replyState("reply", ["bia@y.com"], [])).toEqual({ mode: "reply", cc: [] });
+  });
+
   it("saved reply variables and insertion", () => {
     const vars = replyVars({ contact: { email: "marina@cliente.test", name: "Marina Costa" }, mailbox: { name: "support", displayName: "Atendimento" }, agent: "Bia Santos", number: 9 });
     expect(fillSavedReply("Olá, {primeiro_nome}! Aqui é {agente}, da {caixa} (#{numero}). {pedido}", vars)).toBe("Olá, Marina! Aqui é Bia Santos, da Atendimento (#9). {pedido}");
@@ -213,6 +297,42 @@ describe("reply", () => {
     expect(suggestedSignature("Bia Santos")).toBe("Bia Santos");
     expect(suggestedSignature("Bia Santos", { name: "support", displayName: "Atendimento" })).toBe("Bia Santos\nAtendimento");
     expect(suggestedSignature(null, { name: "support", displayName: null })).toBe("support");
+  });
+});
+
+describe("signature autosave", () => {
+  it("saves after the pause; leaving or the background save what waits; blank waits, and left blank deletes", () => {
+    vi.useFakeTimers();
+    const save = vi.fn(async () => {});
+    const remove = vi.fn(async () => {});
+    const s = createSignatureSaver({ save, remove, delay: 700 });
+    s.edit("Bia");
+    vi.advanceTimersByTime(699);
+    expect(save).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(save).toHaveBeenLastCalledWith("Bia");
+
+    // Left before the pause ran out: saved then.
+    s.edit("Bia Santos");
+    s.leave();
+    expect(save).toHaveBeenLastCalledWith("Bia Santos");
+    vi.advanceTimersByTime(1000);
+    expect(save).toHaveBeenCalledTimes(2);
+
+    // Blank: the background does not delete it (being retyped), leaving does.
+    s.edit("");
+    s.flush();
+    expect(remove).not.toHaveBeenCalled();
+    s.leave();
+    expect(remove).toHaveBeenCalledOnce();
+
+    // Turned off: nothing typed before is saved afterwards.
+    s.edit("Bia S.");
+    s.cancel();
+    vi.advanceTimersByTime(1000);
+    s.leave();
+    expect(save).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 });
 

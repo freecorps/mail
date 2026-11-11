@@ -353,7 +353,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     );
   };
 
-  const items = preview ? vm.items.filter((i) => i.message._id === latest) : waiting.length ? [...vm.items, ...waiting.map((e) => outboxItem(e, thread, me?.name ?? null))] : vm.items;
+  const items = preview ? vm.items.filter((i) => i.message._id === latest) : waiting.length ? [...vm.items, ...waiting.map((e) => outboxItem(e, thread, me?.name ?? null, own))] : vm.items;
   return (
     <View style={[styles.grow, { backgroundColor: c.background }]}>
       {preview ? null : chrome}
@@ -387,8 +387,11 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   );
 }
 
-/** A reply waiting out its undo-send delay, shown as the conversation's next message (pending). */
-function outboxItem(e: OutboxEntry, t: Thread, author: string | null): MessageItem {
+/**
+ * A reply waiting out its undo-send delay, shown as the conversation's next message (pending). It comes from the
+ * mailbox's address (`t.mailbox` is the mailbox's name); while the mailboxes are not known, from no address at all.
+ */
+function outboxItem(e: OutboxEntry, t: Thread, author: string | null, address: string): MessageItem {
   const message: Message = {
     _id: e.id,
     _creationTime: e.at,
@@ -396,8 +399,8 @@ function outboxItem(e: OutboxEntry, t: Thread, author: string | null): MessageIt
     mailbox: t.mailbox,
     direction: "outbound",
     references: [],
-    from: { email: t.mailbox },
-    fromEmail: t.mailbox,
+    from: { email: address },
+    fromEmail: address,
     to: [{ email: t.contact, ...(t.contactName ? { name: t.contactName } : {}) }],
     cc: (e.cc ?? []).map((x) => ({ email: x })),
     subject: t.subject,
