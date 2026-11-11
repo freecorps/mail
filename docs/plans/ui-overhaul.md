@@ -206,7 +206,7 @@ Depende de E1 (corpo HTML, assinatura).
 | C-web composer + compose ancorado | todo |
 | C-mobile composer + compose | todo |
 | M4 conversa mobile | todo |
-| W5 conversa web | doing |
+| W5 conversa web | review (#41) |
 
 ### Onda 4 (paralelo): Lista web + Ajustes/login mobile + Ember E2
 
