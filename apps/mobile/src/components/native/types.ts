@@ -39,6 +39,8 @@ export interface IconButtonProps {
   label: string;
   onPress(): void;
   disabled?: boolean;
+  /** `filled` (default): the primary action (send). `plain`: a secondary glyph (attach, expand). */
+  variant?: "filled" | "plain";
 }
 
 export interface ListFilterProps<T extends string> {

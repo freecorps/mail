@@ -205,7 +205,7 @@ Depende de E1 (corpo HTML, assinatura).
 |---|---|
 | C-api assinaturas, rascunhos, respostas salvas (+ bump Ember 0.6.0) | review (#38) |
 | C-web composer + compose ancorado | review (#42) |
-| C-mobile composer + compose | todo |
+| C-mobile composer + compose | review (#43) |
 | M4 conversa mobile | review (#40) |
 | W5 conversa web | review (#41) |
 

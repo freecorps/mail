@@ -1,19 +1,21 @@
-// Android: a Material 3 filled icon button (Jetpack Compose).
+// Android: a Material 3 filled icon button (the primary action) or a standard icon button (secondary).
 import { BrandHost as Host } from "./brand-host";
-import { FilledIconButton, Icon } from "@expo/ui/jetpack-compose";
+import { FilledIconButton, Icon, IconButton as StandardIconButton } from "@expo/ui/jetpack-compose";
 import { semantics } from "@expo/ui/jetpack-compose/modifiers";
 import { useColors } from "../../theme";
 import { useMaterialSource } from "../icons";
 import type { IconButtonProps } from "./types";
 
-export function IconButton({ icon, label, onPress, disabled }: IconButtonProps) {
-  // Compose tints the glyph with the button's content color (onPrimary); the raster color is only a placeholder.
-  const source = useMaterialSource(icon, 24, useColors().onTint);
+export function IconButton({ icon, label, onPress, disabled, variant = "filled" }: IconButtonProps) {
+  const c = useColors();
+  // Compose tints the glyph with the button's content color; the raster color is only a placeholder.
+  const source = useMaterialSource(icon, 24, variant === "plain" ? c.secondaryText : c.onTint);
+  const Button = variant === "plain" ? StandardIconButton : FilledIconButton;
   return (
     <Host matchContents>
-      <FilledIconButton onClick={onPress} enabled={!disabled} modifiers={[semantics({ contentDescription: label })]}>
+      <Button onClick={onPress} enabled={!disabled} modifiers={[semantics({ contentDescription: label })]}>
         {source ? <Icon source={source} size={24} contentDescription={label} /> : null}
-      </FilledIconButton>
+      </Button>
     </Host>
   );
 }

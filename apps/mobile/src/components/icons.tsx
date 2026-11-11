@@ -86,6 +86,8 @@ export const Icons = {
   trash: icon("trash", "delete"),
   link: icon("link", "link"),
   copy: icon("doc.on.doc", "content_copy"),
+  signature: icon("signature", "draw"),
+  chevron: icon("chevron.right", "chevron_right"),
   sent: icon("arrow.up.right", "north_east"),
   expand: icon("arrow.up.and.down", "unfold_more"),
   status: icon("circle.dashed", "radio_button_unchecked"),

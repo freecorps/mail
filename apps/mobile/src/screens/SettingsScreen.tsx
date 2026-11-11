@@ -3,13 +3,15 @@
 // destructive native button behind the system confirmation alert.
 import { Button, FieldGroup, Host, ListItem, Picker, Switch, Text } from "@expo/ui";
 import { useConnectionState } from "@freecorps/ember-react-native";
+import { router } from "expo-router";
 import { Alert } from "react-native";
 import { Icons } from "../components/icons";
 import { LabeledPicker, NativeIcon } from "../components/ui";
 import { EMBER_URL, PUSH_TRANSPORT } from "../config";
 import { useI18n } from "../i18n";
 import type { SwipeKind } from "../model/list-actions";
-import { setListPrefs, useListPrefs, type LanguagePref } from "../prefs";
+import { UNDO_SEND_DELAYS, type UndoSendDelay } from "../model/outbox";
+import { setListPrefs, setUndoSendDelay, useListPrefs, useUndoSendDelay, type LanguagePref } from "../prefs";
 import { useSession } from "../session";
 import { useColors } from "../theme";
 
@@ -35,6 +37,18 @@ export function SettingsScreen() {
   ];
 
   const list = useListPrefs();
+  const undoDelay = useUndoSendDelay();
+  const undoPicker = {
+    label: t("settings.undoSend"),
+    value: undoDelay as number,
+    options: UNDO_SEND_DELAYS.map((n) => ({ value: n as number, label: n === 0 ? t("settings.undoSend.off") : t("settings.undoSend.n", { count: n }) })),
+    onChange: (v: number) => setUndoSendDelay(v as UndoSendDelay),
+  };
+  const undoFooter = (
+    <FieldGroup.SectionFooter>
+      <Text textStyle={{ color: colors.secondaryText }}>{t("settings.undoSendFooter")}</Text>
+    </FieldGroup.SectionFooter>
+  );
   const ios = process.env.EXPO_OS === "ios";
   const lineOptions = ([1, 2, 3] as const).map((n) => ({ value: n, label: t("settings.previewLines.n", { count: n }) }));
   const swipeOptions = (["read", "archive", "assign", "none"] as SwipeKind[]).map((k) => ({ value: k, label: t(`settings.swipe.${k}`) }));
@@ -66,6 +80,29 @@ export function SettingsScreen() {
             <Text>{t("settings.server")}</Text>
           </ListItem>
         </FieldGroup.Section>
+
+        {/* Sending: the signature screen, and how long "Desfazer" stays offered after Enviar. */}
+        <FieldGroup.Section title={t("settings.sending")}>
+          <ListItem
+            leading={<NativeIcon icon={Icons.signature} color={colors.tint} />}
+            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            onPress={() => router.push("/signature")}
+          >
+            <Text>{t("settings.signature")}</Text>
+          </ListItem>
+          {ios ? (
+            <>
+              <LabeledPicker<number> {...undoPicker} />
+              {undoFooter}
+            </>
+          ) : null}
+        </FieldGroup.Section>
+        {ios ? null : (
+          <FieldGroup.Section title={undoPicker.label}>
+            <LabeledPicker<number> {...undoPicker} />
+            {undoFooter}
+          </FieldGroup.Section>
+        )}
 
         <FieldGroup.Section title={t("settings.language")}>
           <Picker<LanguagePref> selectedValue={session.lang.pref} onValueChange={session.lang.setPref}>

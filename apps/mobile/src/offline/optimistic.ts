@@ -2,7 +2,7 @@
 // restored after a restart is still shown: the reply appears in the thread with a "sending" mark, the thread moves to
 // "waiting", unread counters drop, and the server's answer replaces all of it when the queue drains.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-react-native";
-import { INBOX_VIEWS, type Mailbox, type Message, type Page, type SentArgs, type SentThread, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCounts, type ViewPage } from "../api";
+import { INBOX_VIEWS, type Draft, type SaveDraftArgs, type Mailbox, type Message, type Page, type SentArgs, type SentThread, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCounts, type ViewPage } from "../api";
 import { viewKeeps } from "./replica";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
@@ -193,6 +193,65 @@ function mailboxOf(store: OptimisticLocalStore, threadId: string): string | null
   return null;
 }
 
+type DraftLists = Array<{ args: { threadId?: string }; value: Draft[] | undefined }>;
+type DraftRef = { id?: string | undefined; kind: Draft["kind"]; threadId?: string | undefined; mailbox?: string | undefined };
+
+/**
+ * Which cached rows are this draft (the server's upsert rules): its id; for a reply, note or forward also its thread and
+ * kind (one per thread and kind). A first save shows under a temporary id until the server's answer comes in, and the
+ * next save (or the send) already carries the real one: a reply/note/forward finds that row by thread and kind; a new
+ * message whose id the cache does not know yet is the newest temporary new-message row of its mailbox.
+ */
+function draftMatcher(cached: DraftLists, a: DraftRef): (d: Draft) => boolean {
+  const all = cached.flatMap((q) => q.value ?? []);
+  const byKey = (d: Draft) => a.kind !== "compose" && d.kind === a.kind && d.threadId === a.threadId;
+  let temp: string | null = null;
+  if (a.kind === "compose" && a.id && !all.some((d) => d._id === a.id)) {
+    const first = all.filter((d) => d.kind === "compose" && isOptimisticId(d._id) && (!a.mailbox || d.mailbox === a.mailbox)).sort((x, y) => y.updatedAt - x.updatedAt)[0];
+    temp = first?._id ?? null;
+  }
+  return (d) => (a.id !== undefined && d._id === a.id) || d._id === temp || byKey(d);
+}
+
+/** Removes a draft from every cached `inbox:drafts` answer (also the row of its first save, under a temporary id). */
+function dropDraft(store: Store, ref: DraftRef) {
+  const cached = store.getAllQueries<any>("inbox:drafts") as DraftLists;
+  const same = draftMatcher(cached, ref);
+  for (const { args, value } of cached) {
+    if (value?.some(same)) store.setQuery<any>("inbox:drafts", args, value.filter((d) => !same(d)));
+  }
+}
+
+/** Puts a saved draft into the cached `inbox:drafts` answers it belongs to (the server's upsert rules), newest first. */
+function saveDraftLocally(store: Store, a: SaveDraftArgs, at: number) {
+  const cached = store.getAllQueries<any>("inbox:drafts") as DraftLists;
+  const same = draftMatcher(cached, a);
+  // One id for the draft in every list it shows in.
+  const id = a.id ?? cached.flatMap((q) => q.value ?? []).find(same)?._id ?? tempId(at);
+  for (const { args, value } of cached) {
+    if (!value || (args.threadId !== undefined && args.threadId !== a.threadId)) continue;
+    const prev = value.find(same);
+    const draft: Draft = {
+      _id: id,
+      _creationTime: prev?._creationTime ?? at,
+      userId: prev?.userId ?? "",
+      kind: a.kind,
+      ...(a.threadId ? { threadId: a.threadId } : {}),
+      ...(a.messageId ? { messageId: a.messageId } : {}),
+      mailbox: a.mailbox ?? prev?.mailbox ?? "",
+      to: a.to ?? [],
+      cc: a.cc ?? [],
+      bcc: a.bcc ?? [],
+      subject: a.subject ?? "",
+      text: a.text,
+      ...(a.bodyHtml ? { bodyHtml: a.bodyHtml } : {}),
+      attachments: a.attachments ?? [],
+      updatedAt: at,
+    };
+    store.setQuery<any>("inbox:drafts", args, [draft, ...value.filter((d) => !same(d))]);
+  }
+}
+
 export function inboxOptimisticUpdates(now: () => number = Date.now): Record<string, OptimisticUpdate> {
   const updates: Record<string, OptimisticUpdate> = {
     "inbox:reply": (store, args: { threadId: string; text: string }) => append(store, args, "outbound", now()),
@@ -256,6 +315,15 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
       sentNow(store, thread, at);
     },
   };
+  // Drafts: the cached `inbox:drafts` answers follow saves, deletes and sends, so a draft written offline is there when
+  // the conversation or the composer opens again (the queued mutations reach the server later, in order).
+  updates["inbox:saveDraft"] = (store, args: SaveDraftArgs) => saveDraftLocally(store, args, now());
+  // A delete names the draft by id only (the server deletes that document).
+  updates["inbox:deleteDraft"] = (store, { id }: { id: string }) => {
+    for (const { args, value } of store.getAllQueries<any>("inbox:drafts") as DraftLists) {
+      if (value?.some((d) => d._id === id)) store.setQuery<any>("inbox:drafts", args, value.filter((d) => d._id !== id));
+    }
+  };
   // A deleted conversation leaves every loaded list at once (the conversation screen has already closed).
   updates["inbox:deleteThread"] = (store, { threadId }: { threadId: string }) => {
     const found = patchLoaded(store, threadId, (t) => t);
@@ -290,5 +358,15 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
     const mailbox = mailboxOf(store, args.threadId);
     if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text }, rec);
   };
+  // A send with `draftId` deletes that draft (on the server in the same transaction; here at once, with the row of its
+  // first save if that still shows under a temporary id).
+  const sentKind = { "inbox:reply": "reply", "inbox:note": "note", "inbox:compose": "compose", "inbox:forward": "forward" } as const;
+  for (const name of Object.keys(sentKind) as Array<keyof typeof sentKind>) {
+    const base = updates[name]!;
+    updates[name] = (store, args: { draftId?: string; threadId?: string; mailbox?: string }, rec) => {
+      base(store, args, rec);
+      if (args.draftId) dropDraft(store, { id: args.draftId, kind: sentKind[name], threadId: args.threadId, mailbox: args.mailbox });
+    };
+  }
   return updates;
 }

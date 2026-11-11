@@ -135,6 +135,73 @@ export type ViewPage = { page: Thread[]; isDone: boolean; partial: boolean };
 export type ViewCount = { threads: number; unread: number; capped: boolean };
 export type ViewCounts = Record<InboxView, ViewCount>;
 
+/** What every send takes from the composer (apps/api `composerArgs`). */
+export type ComposerArgs = {
+  /** Composer HTML; `text` stays the plain part. The app writes plain text, so it sends none (Ember renders it). */
+  bodyHtml?: string;
+  /** false: no signature on this message (default: the member's effective signature for the mailbox). */
+  signature?: boolean;
+  /** The member's draft of this message, deleted with the send. */
+  draftId?: string;
+};
+
+export type DraftKind = "reply" | "note" | "compose" | "forward";
+/** `drafts` document (private to the member; synced across their devices). */
+export interface Draft {
+  _id: string;
+  _creationTime: number;
+  userId: string;
+  kind: DraftKind;
+  threadId?: string;
+  messageId?: string;
+  mailbox: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  text: string;
+  bodyHtml?: string;
+  attachments: AttachmentArg[];
+  updatedAt: number;
+}
+export type SaveDraftArgs = {
+  id?: string;
+  kind: DraftKind;
+  threadId?: string;
+  messageId?: string;
+  mailbox?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  text: string;
+  bodyHtml?: string;
+  attachments?: AttachmentArg[];
+};
+
+/** `signatures` document: the member's default (no `mailbox`) or one mailbox's. */
+export interface Signature {
+  _id: string;
+  _creationTime: number;
+  userId: string;
+  mailbox?: string;
+  text: string;
+  html?: string;
+  updatedAt: number;
+}
+
+/** `savedReplies` document (per mailbox; `{nome}`-style variables filled by the client). */
+export interface SavedReply {
+  _id: string;
+  _creationTime: number;
+  mailbox: string;
+  title: string;
+  text: string;
+  bodyHtml?: string;
+  createdBy: string;
+  updatedAt: number;
+}
+
 export type PageOpts = { numItems: number; cursor: string | null };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
@@ -153,13 +220,17 @@ export const api = {
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),
     members: q<"query", { mailbox: string }, Member[]>("inbox:members"),
     attachments: q<"query", { threadId: string }, Record<string, string | null>>("inbox:attachments"),
-    reply: q<"mutation", { threadId: string; text: string; cc?: string[]; attachments?: AttachmentArg[] }, { emailId: string; messageId: string; status: string }>("inbox:reply"),
+    reply: q<
+      "mutation",
+      { threadId: string; text: string; cc?: string[]; attachments?: AttachmentArg[]; quoteHeader?: string } & ComposerArgs,
+      { emailId: string; messageId: string; status: string }
+    >("inbox:reply"),
     forward: q<
       "mutation",
-      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] },
+      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] } & ComposerArgs,
       { threadId: string; emailId: string; messageId: string; status: string; number: number }
     >("inbox:forward"),
-    note: q<"mutation", { threadId: string; text: string }, string>("inbox:note"),
+    note: q<"mutation", { threadId: string; text: string; draftId?: string }, string>("inbox:note"),
     markRead: q<"mutation", { threadId: string }, boolean>("inbox:markRead"),
     markUnread: q<"mutation", { threadId: string }, boolean>("inbox:markUnread"),
     setStatus: q<"mutation", { threadId: string; status: ThreadStatus }, ThreadStatus>("inbox:setStatus"),
@@ -168,9 +239,17 @@ export const api = {
     deleteThread: q<"mutation", { threadId: string }, { deleted: boolean; canceled?: number }>("inbox:deleteThread"),
     compose: q<
       "mutation",
-      { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] },
+      { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] } & ComposerArgs,
       { threadId: string; emailId: string; messageId: string; status: string; number: number }
     >("inbox:compose"),
+    signatures: q<"query", Record<string, never>, Signature[]>("inbox:signatures"),
+    signature: q<"query", { mailbox: string }, { text: string; html: string | null; from: string | null } | null>("inbox:signature"),
+    setSignature: q<"mutation", { mailbox?: string | null; text: string; html?: string }, string>("inbox:setSignature"),
+    deleteSignature: q<"mutation", { mailbox?: string | null }, boolean>("inbox:deleteSignature"),
+    drafts: q<"query", { threadId?: string }, Draft[]>("inbox:drafts"),
+    saveDraft: q<"mutation", SaveDraftArgs, { id: string; updatedAt: number }>("inbox:saveDraft"),
+    deleteDraft: q<"mutation", { id: string }, boolean>("inbox:deleteDraft"),
+    savedReplies: q<"query", { mailbox: string }, SavedReply[]>("inbox:savedReplies"),
     registerDevice: q<
       "mutation",
       { token: string; provider?: string; platform?: string; deviceName?: string; environment?: string; publicKey?: string },

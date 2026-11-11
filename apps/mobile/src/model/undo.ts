@@ -1,5 +1,9 @@
 // "Desfazer" after an archive: one pending undo at a time (a newer action replaces it, like Mail and Gmail), shown by
-// the undo banner for a few seconds. A plain store (useSyncExternalStore), no React Native: tested in vitest.
+// the undo banner for a few seconds. An entry can say what happens when a newer one takes its place (`onReplaced`):
+// a send waiting out its undo delay goes out then, since its "Desfazer" is no longer offered. Only another action with
+// its own undo (an archive, another send) takes that place: a plain notice ("Link copiado") waits until the send's
+// banner ends and shows then, or is dropped if its moment has passed. A plain store (useSyncExternalStore), no React
+// Native: tested in vitest.
 import { useSyncExternalStore } from "react";
 import type { ThreadStatus } from "../api";
 import type { ArchiveRecord } from "./list-actions";
@@ -13,11 +17,16 @@ export interface UndoEntry {
 
 type Timer = ReturnType<typeof setTimeout>;
 
-export function createUndoStore(opts: { ms?: number; setTimeout?: (fn: () => void, ms: number) => Timer; clearTimeout?: (t: Timer) => void } = {}) {
+export function createUndoStore(opts: { ms?: number; now?: () => number; setTimeout?: (fn: () => void, ms: number) => Timer; clearTimeout?: (t: Timer) => void } = {}) {
   const set = opts.setTimeout ?? setTimeout;
   const clear = opts.clearTimeout ?? clearTimeout;
+  const now = opts.now ?? Date.now;
   let defaultMs = opts.ms ?? 6000;
   let current: UndoEntry | null = null;
+  /** What the shown entry does when a newer one replaces it (not when it times out, is undone or dismissed). */
+  let replaced: (() => void) | null = null;
+  /** A plain notice that came while a send's undo was shown: it shows once that ends (the latest one only). */
+  let waiting: { id: number; message: string; ms: number; at: number } | null = null;
   let timer: Timer | null = null;
   let seq = 0;
   const listeners = new Set<() => void>();
@@ -26,20 +35,43 @@ export function createUndoStore(opts: { ms?: number; setTimeout?: (fn: () => voi
     if (timer !== null) clear(timer);
     timer = null;
   };
+  const put = (id: number, message: string, undo: (() => void) | undefined, ms: number, onReplaced: (() => void) | undefined) => {
+    current = { id, message, undo };
+    replaced = onReplaced ?? null;
+    timer = set(() => dismiss(id), ms);
+  };
   const dismiss = (id?: number) => {
+    if (waiting && id !== undefined && waiting.id === id) {
+      waiting = null;
+      return;
+    }
     if (!current || (id !== undefined && current.id !== id)) return;
     stop();
     current = null;
+    replaced = null;
+    // The notice that waited shows now, unless its moment has passed.
+    const next = waiting;
+    waiting = null;
+    if (next && now() - next.at < next.ms) put(next.id, next.message, undefined, next.ms, undefined);
     emit();
   };
   return {
-    /** Offers an undo for `ms` (longer for screen reader users, who need time to reach the button). */
-    show(message: string, undo: (() => void) | undefined, ms = defaultMs): number {
-      stop();
+    /**
+     * Offers an undo for `ms` (longer for screen reader users, who need time to reach the button). `onReplaced` runs if
+     * a newer entry takes the slot while this one is still shown.
+     */
+    show(message: string, undo: (() => void) | undefined, ms = defaultMs, onReplaced?: () => void): number {
       const id = ++seq;
-      current = { id, message, undo };
-      timer = set(() => dismiss(id), ms);
+      // A plain notice never takes a waiting send's place (that would send it early): it waits for the slot.
+      if (!undo && replaced) {
+        waiting = { id, message, ms, at: now() };
+        return id;
+      }
+      stop();
+      const before = replaced;
+      put(id, message, undo, ms, onReplaced);
       emit();
+      before?.();
       return id;
     },
     /** Runs the undo of the shown entry (once) and hides it. */
