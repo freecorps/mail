@@ -1,7 +1,7 @@
 import { Stack } from "expo-router";
 import { Platform } from "react-native";
 import { useI18n } from "../../../i18n";
-import { usePalette } from "../../../theme";
+import { useHeaderColors } from "../../../theme";
 
 export const unstable_settings = { anchor: "index" };
 
@@ -10,12 +10,12 @@ export const unstable_settings = { anchor: "index" };
 const legacyBlur = Platform.OS === "ios" && parseInt(String(Platform.Version), 10) < 26;
 
 export default function InboxStack() {
-  const p = usePalette();
+  const header = useHeaderColors();
   const { t } = useI18n();
   return (
     <Stack
       screenOptions={{
-        headerTintColor: p.tint,
+        ...header,
         headerLargeTitleEnabled: true,
         headerTransparent: process.env.EXPO_OS === "ios",
         ...(legacyBlur ? { headerBlurEffect: "systemMaterial" as const } : {}),

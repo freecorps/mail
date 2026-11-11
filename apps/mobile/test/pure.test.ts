@@ -91,6 +91,11 @@ describe("format and i18n", () => {
     expect(formatWhen(new Date(2026, 10, 4, 9, 7).getTime(), now, "pt-BR")).toBe("Ontem");
     expect(formatWhen(new Date(2026, 10, 4, 9, 7).getTime(), now, "en")).toBe("Yesterday");
     expect(formatWhen(new Date(2025, 0, 2).getTime(), now, "pt-BR")).toBe("02/01/2025");
+    // The clock is explicit (Hermes on iOS would take the device's): 24 h in Portuguese, the device's in English.
+    expect(formatWhen(new Date(2026, 10, 5, 12, 49).getTime(), now, "pt-BR")).toBe("12:49");
+    expect(formatWhen(new Date(2026, 10, 5, 15, 7).getTime(), now, "pt-BR")).toBe("15:07");
+    expect(formatWhen(new Date(2026, 10, 5, 15, 7).getTime(), now, "en")).toMatch(/^03:07\sPM$/);
+    expect(formatWhen(new Date(2026, 10, 5, 15, 7).getTime(), now, "en", true)).toBe("15:07");
   });
   it("initials, sizes, recipients", () => {
     expect(initials("Ana Souza")).toBe("AS");

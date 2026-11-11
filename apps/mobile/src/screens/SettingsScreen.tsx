@@ -9,10 +9,10 @@ import { EMBER_URL, PUSH_TRANSPORT } from "../config";
 import { useI18n } from "../i18n";
 import type { LanguagePref } from "../prefs";
 import { useSession } from "../session";
-import { usePalette } from "../theme";
+import { useColors } from "../theme";
 
 export function SettingsScreen() {
-  const p = usePalette();
+  const colors = useColors();
   const { t } = useI18n();
   const c = useConnectionState();
   const session = useSession();
@@ -39,13 +39,13 @@ export function SettingsScreen() {
     ]);
 
   return (
-    <Host style={{ flex: 1 }} seedColor={p.tint}>
+    <Host style={{ flex: 1 }} seedColor={colors.tint}>
       <FieldGroup>
         <FieldGroup.Section title={t("settings.account")}>
-          <ListItem leading={<NativeIcon icon={Icons.account} color={p.tint} />} supportingText={user?.name ? user.email : undefined}>
+          <ListItem leading={<NativeIcon icon={Icons.account} color={colors.tint} />} supportingText={user?.name ? user.email : undefined}>
             <Text>{user?.name ?? user?.email ?? "—"}</Text>
           </ListItem>
-          <ListItem leading={<NativeIcon icon={Icons.server} color={p.tint} />} supportingText={EMBER_URL.replace(/^https?:\/\//, "")}>
+          <ListItem leading={<NativeIcon icon={Icons.server} color={colors.tint} />} supportingText={EMBER_URL.replace(/^https?:\/\//, "")}>
             <Text>{t("settings.server")}</Text>
           </ListItem>
         </FieldGroup.Section>
@@ -59,14 +59,14 @@ export function SettingsScreen() {
         </FieldGroup.Section>
 
         <FieldGroup.Section title={t("settings.notifications")}>
-          <ListItem leading={<NativeIcon icon={Icons.bell} color={p.tint} />}>
+          <ListItem leading={<NativeIcon icon={Icons.bell} color={colors.tint} />}>
             <Text>{pushText}</Text>
           </ListItem>
         </FieldGroup.Section>
 
         <FieldGroup.Section title={t("settings.sync")}>
           <ListItem
-            leading={<NativeIcon icon={c.online ? Icons.online : Icons.offline} color={c.online ? p.success : p.secondary} />}
+            leading={<NativeIcon icon={c.online ? Icons.online : Icons.offline} color={c.online ? colors.success : colors.secondaryText} />}
             supportingText={c.pendingMutations ? t("settings.pending", { count: c.pendingMutations }) : undefined}
           >
             <Text>{c.online ? t("settings.online") : t("common.offline")}</Text>
@@ -75,7 +75,7 @@ export function SettingsScreen() {
 
         <FieldGroup.Section>
           <Button variant="text" onPress={confirmSignOut} testID="sign-out">
-            <Text textStyle={{ color: p.danger }}>{t("settings.signOut")}</Text>
+            <Text textStyle={{ color: colors.dangerText }}>{t("settings.signOut")}</Text>
           </Button>
         </FieldGroup.Section>
       </FieldGroup>

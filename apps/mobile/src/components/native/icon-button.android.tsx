@@ -2,11 +2,13 @@
 import { Host } from "@expo/ui";
 import { FilledIconButton, Icon } from "@expo/ui/jetpack-compose";
 import { semantics } from "@expo/ui/jetpack-compose/modifiers";
+import { useColors } from "../../theme";
 import { useMaterialSource } from "../icons";
 import type { IconButtonProps } from "./types";
 
 export function IconButton({ icon, label, onPress, disabled }: IconButtonProps) {
-  const source = useMaterialSource(icon, 24, "#FFFFFF");
+  // Compose tints the glyph with the button's content color (onPrimary); the raster color is only a placeholder.
+  const source = useMaterialSource(icon, 24, useColors().onTint);
   return (
     <Host matchContents>
       <FilledIconButton onClick={onPress} enabled={!disabled} modifiers={[semantics({ contentDescription: label })]}>

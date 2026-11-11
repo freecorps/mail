@@ -3,20 +3,20 @@
 import { useMutation } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, View } from "react-native";
 import { api } from "../api";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
-import { Avatar, Chip, ConnectionBanner, EmptyState, Loading, NativeButton, RowMenu, Segmented, Separator, StatusPill, UnreadDot } from "../components/ui";
+import { Avatar, Chip, ConnectionBanner, EmptyState, Loading, NativeButton, RowMenu, Segmented, Separator, StatusPill, ThemedText, UnreadDot } from "../components/ui";
 import type { RowMenuAction } from "../components/native";
 import { useI18n } from "../i18n";
 import { formatWhen } from "../lib/format";
 import { THREAD_FILTERS, useDebounced, useThreadList, type ThreadFilter, type ThreadRow } from "../model/threads";
-import { usePalette } from "../theme";
+import { screenEdge, spacing, tabular, useColors } from "../theme";
 
 export function ThreadsScreen() {
   const { mailbox, title } = useLocalSearchParams<{ mailbox: string; title?: string }>();
-  const p = usePalette();
-  const { t, locale } = useI18n();
+  const c = useColors();
+  const { t, locale, clock24 } = useI18n();
   const [filter, setFilter] = useState<ThreadFilter>("all");
   const [query, setQuery] = useState("");
   const debounced = useDebounced(query, 250);
@@ -24,7 +24,7 @@ export function ThreadsScreen() {
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
   const setStatus = useMutation(api.inbox.setStatus);
-  const composeIcon = useToolbarIcon(Icons.compose, p.tint);
+  const composeIcon = useToolbarIcon(Icons.compose, c.tint);
 
   const actionsFor = useCallback(
     (row: ThreadRow): RowMenuAction[] => {
@@ -51,8 +51,10 @@ export function ThreadsScreen() {
       )}
       {vm.searching && vm.source !== "server" && (
         <View style={styles.offlineNote}>
-          <Symbol icon={Icons.device} size={14} color={p.secondary} />
-          <Text style={{ color: p.secondary, fontSize: 13 }}>{t("threads.offlineResults")}</Text>
+          <Symbol icon={Icons.device} size={14} color={c.secondaryLabel} />
+          <ThemedText variant="footnote" tone="secondary">
+            {t("threads.offlineResults")}
+          </ThemedText>
         </View>
       )}
     </View>
@@ -70,18 +72,18 @@ export function ThreadsScreen() {
         </Stack.Toolbar>
       ) : null}
       <FlatList
-        style={{ backgroundColor: p.background }}
+        style={{ backgroundColor: c.background }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         data={vm.rows}
         keyExtractor={(r) => r.key}
         ListHeaderComponent={header}
-        ItemSeparatorComponent={() => <Separator inset={76} />}
-        renderItem={({ item }) => <ThreadItem row={item} when={formatWhen(item.at, now, locale)} actions={actionsFor(item)} />}
+        ItemSeparatorComponent={RowSeparator}
+        renderItem={({ item }) => <ThreadItem row={item} when={formatWhen(item.at, now, locale, clock24)} actions={actionsFor(item)} />}
         ListEmptyComponent={
           vm.status === "loading" ? (
-            <View style={{ height: 240 }}>
+            <View style={styles.loading}>
               <Loading />
             </View>
           ) : vm.status === "error" ? (
@@ -92,7 +94,7 @@ export function ThreadsScreen() {
         }
         ListFooterComponent={
           vm.canLoadMore ? (
-            <View style={{ alignItems: "center", paddingVertical: 12 }}>
+            <View style={styles.more}>
               <NativeButton label={t("threads.loadMore")} onPress={vm.loadMore} />
             </View>
           ) : undefined
@@ -104,8 +106,12 @@ export function ThreadsScreen() {
   );
 }
 
+/** Row separators start at the text column, past the unread dot and the avatar (Mail.app). */
+const TEXT_INSET = spacing.sm + 10 + spacing.xs + 40 + spacing.md;
+const RowSeparator = () => <Separator inset={TEXT_INSET} />;
+
 const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: ThreadRow; when: string; actions: RowMenuAction[] }) {
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const label = t("threads.a11y", { from: row.title, subject: row.subject, when, unread: row.unread ? t("threads.a11yUnread") : "" });
   const href = `/thread/${encodeURIComponent(row.threadId)}?mailbox=${encodeURIComponent(row.mailbox)}`;
@@ -121,10 +127,10 @@ const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: Threa
         // VoiceOver / TalkBack reach the context-menu actions through the rotor / actions menu.
         accessibilityActions={actions.map((a) => ({ name: a.label, label: a.label }))}
         onAccessibilityAction={(e) => actions.find((a) => a.label === e.nativeEvent.actionName)?.onPress()}
-        android_ripple={{ color: p.chip }}
+        android_ripple={{ color: c.fill }}
         onPressIn={() => setPressed(true)}
         onPressOut={() => setPressed(false)}
-        style={StyleSheet.flatten([styles.row, { backgroundColor: pressed && process.env.EXPO_OS === "ios" ? p.chip : p.background }])}
+        style={StyleSheet.flatten([styles.row, { backgroundColor: pressed && process.env.EXPO_OS === "ios" ? c.fill : c.background }])}
       >
         <View style={styles.lead}>
           <UnreadDot visible={row.unread} />
@@ -132,19 +138,21 @@ const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: Threa
         </View>
         <View style={styles.body}>
           <View style={styles.line}>
-            <Text style={[styles.from, { color: p.text, fontWeight: row.unread ? "700" : "600" }]} numberOfLines={1}>
+            <ThemedText variant="headline" emphasized={row.unread} style={styles.from} numberOfLines={1}>
               {row.title}
-            </Text>
-            {row.pending ? <Symbol icon={Icons.pending} size={14} color={p.secondary} /> : null}
-            <Text style={[styles.when, { color: row.unread ? p.tint : p.secondary }]}>{when}</Text>
+            </ThemedText>
+            {row.pending ? <Symbol icon={Icons.pending} size={14} color={c.secondaryLabel} /> : null}
+            <ThemedText variant="subheadline" tone={row.unread ? "tint" : "secondary"} style={tabular}>
+              {when}
+            </ThemedText>
           </View>
-          <Text style={[styles.subject, { color: p.text, fontWeight: row.unread ? "600" : "400" }]} numberOfLines={1}>
-            {row.number ? <Text style={{ color: p.secondary }}>#{row.number} </Text> : null}
+          <ThemedText variant="subheadline" emphasized={row.unread} numberOfLines={1}>
+            {row.number ? <ThemedText variant="subheadline" tone="secondary">#{row.number} </ThemedText> : null}
             {row.subject}
-          </Text>
-          <Text style={[styles.snippet, { color: p.secondary }]} numberOfLines={2}>
+          </ThemedText>
+          <ThemedText variant="subheadline" tone="secondary" numberOfLines={2}>
             {row.snippet}
-          </Text>
+          </ThemedText>
           {(row.status && row.status !== "open") || row.assigneeName ? (
             <View style={styles.chips}>
               {row.status && row.status !== "open" ? <StatusPill status={row.status} /> : null}
@@ -158,14 +166,13 @@ const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: Threa
 });
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", paddingVertical: 10, paddingRight: 16 },
-  lead: { flexDirection: "row", alignItems: "center", gap: 6, paddingLeft: 8, paddingRight: 12, alignSelf: "flex-start", paddingTop: 2 },
-  body: { flex: 1, gap: 2 },
-  line: { flexDirection: "row", alignItems: "center", gap: 6 },
-  from: { flex: 1, fontSize: 16 },
-  when: { fontSize: 14, fontVariant: ["tabular-nums"] },
-  subject: { fontSize: 15 },
-  snippet: { fontSize: 14, lineHeight: 19 },
-  chips: { flexDirection: "row", gap: 6, marginTop: 4 },
-  offlineNote: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 16, paddingVertical: 8 },
+  row: { flexDirection: "row", paddingVertical: spacing.md, paddingRight: screenEdge },
+  lead: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingLeft: spacing.sm, paddingRight: spacing.md, alignSelf: "flex-start", paddingTop: spacing.xxs },
+  body: { flex: 1, gap: spacing.xxs },
+  line: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  from: { flex: 1 },
+  chips: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  offlineNote: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
+  loading: { height: 240 },
+  more: { alignItems: "center", paddingVertical: spacing.md },
 });

@@ -9,10 +9,19 @@ const startOfDay = (t: number) => {
   return d.getTime();
 };
 
+/**
+ * The clock, set explicitly: Hermes on iOS takes the hour cycle from the device's region whatever locale is asked, so
+ * a Portuguese UI on an English device showed "12:49 PM". Portuguese uses 24 hours; English follows the device setting.
+ */
+export function clockOf(locale: Locale, device24h = false): { hourCycle: "h23" | "h12"; hour12: boolean } {
+  const h24 = locale === "pt-BR" || device24h;
+  return { hourCycle: h24 ? "h23" : "h12", hour12: !h24 };
+}
+
 /** List timestamps: time today, "Yesterday", weekday within a week, else a short date (year when not this year). */
-export function formatWhen(at: number, now: number, locale: Locale): string {
+export function formatWhen(at: number, now: number, locale: Locale, device24h = false): string {
   const today = startOfDay(now);
-  if (at >= today) return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(at);
+  if (at >= today) return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", ...clockOf(locale, device24h) }).format(at);
   if (at >= today - DAY) return translate(locale, "when.yesterday");
   if (at >= today - 6 * DAY) return new Intl.DateTimeFormat(locale, { weekday: "short" }).format(at).replace(/\.$/, "");
   const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
@@ -20,8 +29,8 @@ export function formatWhen(at: number, now: number, locale: Locale): string {
 }
 
 /** Message header timestamps: full date and time. */
-export function formatFull(at: number, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(at);
+export function formatFull(at: number, locale: Locale, device24h = false): string {
+  return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", ...clockOf(locale, device24h) }).format(at);
 }
 
 export function displayAddress(a: Address): string {

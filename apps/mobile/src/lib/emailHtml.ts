@@ -8,6 +8,7 @@
 // The height probe the app injects runs as a native user script (WKUserScript / evaluateJavascript), which page CSP
 // does not apply to; it only posts `document.documentElement.scrollHeight` back.
 import { emailBody, emailHeadMeta, type EmailDocumentOptions } from "@freecorps/mail-email-html";
+import { paper } from "../theme/paper";
 
 export {
   contentSecurityPolicy,
@@ -27,13 +28,13 @@ export function buildEmailDocument(html: string, o: EmailDocumentOptions = {}): 
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
 <meta name="color-scheme" content="light">
 <style>
-html,body{margin:0;padding:0;background:#fff;color:#1c1c1e;-webkit-text-size-adjust:100%;word-wrap:break-word;overflow-wrap:anywhere}
+html,body{margin:0;padding:0;background:${paper.background};color:${paper.text};-webkit-text-size-adjust:100%;word-wrap:break-word;overflow-wrap:anywhere}
 body{font:-apple-system-body;font-family:-apple-system,system-ui,Roboto,"Helvetica Neue",sans-serif;font-size:${size}px;line-height:1.45;padding:12px 14px}
 img{max-width:100%!important;height:auto!important}
 table{max-width:100%!important}
 pre,code{white-space:pre-wrap}
-blockquote{margin:8px 0;padding-left:10px;border-left:3px solid #d1d1d6;color:#636366}
-a{color:#0a66d8}
+blockquote{margin:8px 0;padding-left:10px;border-left:3px solid ${paper.quoteRule};color:${paper.quoteText}}
+a{color:${paper.link}}
 </style></head><body>${body}</body></html>`;
 }
 
