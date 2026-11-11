@@ -28,12 +28,14 @@ const sameAddresses = (a: readonly string[], b: readonly string[]) => {
 };
 
 /**
- * A reply or note draft. The Cc that reply all fills in (`autoCc`) is not content of its own, nor a Bcc kept from
- * another device: emptied of what the member wrote, the draft carries neither, so it is deleted.
+ * A reply or note draft. The Cc that reply all fills in (`autoCc`) is not content of its own, nor a Bcc the surface
+ * only keeps (the quick reply carries a draft's Bcc without showing it): emptied of what the member wrote, the draft
+ * carries neither, so it is deleted. `bccShown`: the Bcc is on screen and editable (the full composer), so it is the
+ * member's own and counts.
  */
-export function replyDraftArgs(a: { kind: "reply" | "note"; threadId: string; text: string; cc: readonly string[]; autoCc: readonly string[]; bcc?: readonly string[]; attachments: NonNullable<SaveDraftArgs["attachments"]> }): SaveDraftArgs {
+export function replyDraftArgs(a: { kind: "reply" | "note"; threadId: string; text: string; cc: readonly string[]; autoCc: readonly string[]; bcc?: readonly string[]; bccShown?: boolean; attachments: NonNullable<SaveDraftArgs["attachments"]> }): SaveDraftArgs {
   if (a.kind === "note") return { kind: "note", threadId: a.threadId, text: a.text, cc: [], attachments: [] };
-  const written = !!a.text.trim() || a.attachments.length > 0 || (a.cc.length > 0 && !sameAddresses(a.cc, a.autoCc));
+  const written = !!a.text.trim() || a.attachments.length > 0 || (a.cc.length > 0 && !sameAddresses(a.cc, a.autoCc)) || (!!a.bccShown && (a.bcc?.length ?? 0) > 0);
   return {
     kind: "reply",
     threadId: a.threadId,

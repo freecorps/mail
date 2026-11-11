@@ -245,7 +245,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   const fields = { to: toNow, cc: ccNow, bcc: bccNow, subject, text: body, attachments: uploads.attachments };
   const draftArgs = (): SaveDraftArgs =>
     (isReply || note) && init.threadId
-      ? replyDraftArgs({ kind: note ? "note" : "reply", threadId: init.threadId, text: body, cc: ccNow, autoCc: others, bcc: bccNow, attachments: uploads.attachments })
+      ? replyDraftArgs({ kind: note ? "note" : "reply", threadId: init.threadId, text: body, cc: ccNow, autoCc: others, bcc: bccNow, bccShown: true, attachments: uploads.attachments })
       : {
           kind,
           ...(init.threadId ? { threadId: init.threadId } : {}),
@@ -262,7 +262,10 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   // A forward starts with the quoted original and its subject: it counts as written once anything the member controls
   // changed (text, any recipient row, subject, files).
   const forwardEdited = body !== init.text || toNow.length > 0 || ccNow.length > 0 || bccNow.length > 0 || subject !== init.subject || uploads.items.length > 0;
-  const hasContent = draftHasContent(isReply || note ? { text: body, attachments: uploads.attachments } : fields) && (kind !== "forward" || forwardEdited);
+  // A reply counts what its draft would carry (a Cc or Bcc the member added, not reply all's Cc).
+  const hasContent =
+    draftHasContent(isReply && init.threadId ? draftArgs() : isReply || note ? { text: body, attachments: uploads.attachments } : fields) &&
+    (kind !== "forward" || forwardEdited);
 
   // "Descartar rascunho?" when closing a composer with something in it (a swipe down, Cancelar, Back).
   usePreventRemove(hasContent && !leaving, () => {

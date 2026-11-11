@@ -11,12 +11,20 @@ export interface WhenRequest {
 }
 
 let current: WhenRequest | null = null;
+const listeners = new Set<() => void>();
 
 export function setWhenRequest(r: WhenRequest | null) {
   current = r;
+  for (const l of listeners) l();
 }
 
 /** The request for the sheet that is opening (it stays until replaced, so a re-render of the sheet still has it). */
 export function whenRequest(): WhenRequest | null {
   return current;
+}
+
+/** A sheet still mounted when another request replaces its own follows it (`useSyncExternalStore`). */
+export function subscribeWhenRequest(l: () => void): () => void {
+  listeners.add(l);
+  return () => void listeners.delete(l);
 }

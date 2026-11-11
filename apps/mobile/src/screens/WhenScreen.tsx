@@ -4,13 +4,13 @@
 // (`model/when-request.ts`); with nothing to do, it closes.
 import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
 import { router, Stack } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Icons } from "../components/icons";
 import { DateTimePicker, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
 import { defaultCustom, formatLater, laterChoices, MAX_AHEAD_MS, validLater } from "../lib/when";
-import { whenRequest } from "../model/when-request";
+import { subscribeWhenRequest, whenRequest } from "../model/when-request";
 import { deviceTimeZone } from "../prefs";
 import { useColors } from "../theme";
 
@@ -18,7 +18,8 @@ export function WhenScreen() {
   const c = useColors();
   const { t, locale, clock24 } = useI18n();
   const ios = process.env.EXPO_OS === "ios";
-  const [req] = useState(whenRequest);
+  // The current request, not the one at mount: a later snooze or send later that reuses this sheet runs its own pick.
+  const req = useSyncExternalStore(subscribeWhenRequest, whenRequest);
   const [now] = useState(Date.now);
   const zone = deviceTimeZone();
   const [picked, setPicked] = useState(() => defaultCustom(now));

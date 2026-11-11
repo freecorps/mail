@@ -421,3 +421,19 @@ describe("undone new message", () => {
     expect(takeUndoneCompose(undefined)).toBeNull();
   });
 });
+
+describe("when request", () => {
+  it("a sheet still mounted follows a request that replaces its own", async () => {
+    const { setWhenRequest, subscribeWhenRequest, whenRequest } = await import("../src/model/when-request");
+    const first = { purpose: "snooze" as const, onPick: () => {} };
+    const second = { purpose: "send" as const, onPick: () => {} };
+    setWhenRequest(first);
+    let seen = whenRequest();
+    const off = subscribeWhenRequest(() => (seen = whenRequest()));
+    setWhenRequest(second);
+    expect(seen).toBe(second);
+    off();
+    setWhenRequest(null);
+    expect(seen).toBe(second);
+  });
+});

@@ -267,6 +267,10 @@ describe("draft autosave", () => {
     expect(empty).toEqual({ kind: "reply", threadId: "t1", text: "  ", cc: [], attachments: [] });
     expect(draftHasContent(empty)).toBe(false);
     expect(draftHasContent(replyDraftArgs({ ...base, text: "", cc: ["bia@y.com", "caio@z.com"] }))).toBe(true);
+    // A Bcc the member wrote in the full composer is content of its own (kept, not deleted).
+    const bccOnly = replyDraftArgs({ ...base, text: "", cc: ["bia@y.com"], bcc: ["chefe@x.com"], bccShown: true });
+    expect(bccOnly).toEqual({ kind: "reply", threadId: "t1", text: "", cc: ["bia@y.com"], bcc: ["chefe@x.com"], attachments: [] });
+    expect(draftHasContent(bccOnly)).toBe(true);
     expect(replyDraftArgs({ ...base, kind: "note", text: "interno", cc: ["bia@y.com"], attachments: [{ file: "f", filename: "a.pdf", contentType: "application/pdf" }] })).toEqual({ kind: "note", threadId: "t1", text: "interno", cc: [], attachments: [] });
   });
 
