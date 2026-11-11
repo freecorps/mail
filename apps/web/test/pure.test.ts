@@ -343,6 +343,16 @@ describe("rows", () => {
         { ...hit, messageId: "m2" },
       ]).map((r) => r.key),
     ).toEqual(["m1"]);
+    // The thread's state comes with the hit (archived and unread here), so actions toggle the right way.
+    expect(
+      searchRows([{ ...hit, messageId: "m3", status: "closed", unreadCount: 2, assignee: "u1", assigneeName: "Bia" }])[0],
+    ).toMatchObject({
+      status: "closed",
+      unread: true,
+      assignee: "u1",
+      assigneeName: "Bia",
+    });
+    expect(searchRows([{ ...hit, messageId: "m4" }])[0]).toMatchObject({ status: null, unread: false });
   });
 });
 

@@ -76,10 +76,11 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       subject: h.subject,
       snippet: h.snippet,
       at: h.at,
-      unread: false,
-      status: null,
-      assignee: null,
-      assigneeName: null,
+      // The thread's state rides on the hit, so hover and bulk actions toggle the right way (null: an older server).
+      unread: (h.unreadCount ?? 0) > 0,
+      status: h.status ?? null,
+      assignee: h.assignee ?? null,
+      assigneeName: h.assigneeName ?? null,
       pending: false,
     });
   }
