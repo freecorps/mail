@@ -8,31 +8,32 @@ export const STILL_MS = 700;
 export interface KeyMotion {
   /** A key was pressed: still until `STILL_MS` after the last one. */
   mark(now?: number): void;
-  /** Within the still window. */
-  still(now?: number): boolean;
+  /** Within the still window: state the store changes (and announces), never read off the clock, so it is a pure
+   * `useSyncExternalStore` snapshot. */
+  still(): boolean;
   subscribe(listener: () => void): () => void;
 }
 
 export function createKeyMotion(schedule: (fn: () => void, ms: number) => unknown = setTimeout): KeyMotion {
-  let until = 0;
+  let active = false;
   let last = 0;
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach((l) => l());
   return {
-    mark(now = Date.now()) {
-      const was = now < until;
-      until = now + STILL_MS;
+    mark() {
+      const was = active;
+      active = true;
       const mine = ++last;
       if (!was) emit();
       schedule(() => {
         // Only the last key's timer ends the window (and tells the listeners it ended).
         if (mine !== last) return;
-        until = 0;
+        active = false;
         emit();
       }, STILL_MS);
     },
-    still(now = Date.now()) {
-      return now < until;
+    still() {
+      return active;
     },
     subscribe(listener) {
       listeners.add(listener);

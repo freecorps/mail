@@ -175,7 +175,7 @@ const WORST = [
 const WORST_TAGS = [
   ["Urgente", "red"],
   ["Cobrança", "orange"],
-  ["feedback-do-onboarding-de-clientes-corp", "blue"], // 40: the server's limit
+  ["feedback-do-onboarding-de-clientes-corps", "blue"], // 40: the server's limit
   ["Benachrichtigungseinstellungen", "purple"],
   ["🔥 VIP", "yellow"],
   ["q3", "green"],
@@ -280,7 +280,7 @@ async function main() {
   if (m.status >= 300) throw new Error(`member: ${m.status} ${JSON.stringify(m.body)}`);
   await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: "teammate-caio", name: "Caio Rocha", mailboxes: ["support"] } });
   const worstOn = process.env.SEED_WORST === "1";
-  for (const mail of [...MAILS, ...(worstOn ? WORST : []), ...bulk(Number(process.env.SEED_WORST_BULK ?? 0) || 0)].reverse()) {
+  for (const mail of [...MAILS, ...(worstOn ? WORST : []), ...bulk(Math.max(0, Math.floor(Number(process.env.SEED_WORST_BULK ?? 0) || 0)))].reverse()) {
     const raw = mime({ ...mail, date: new Date(Date.now() - mail.agoMin * 60_000) });
     const r = await fetch(`${URL_}/cdn-cgi/local/email?from=${encodeURIComponent(mail.envelope)}&to=${encodeURIComponent(mail.rcpt)}`, { method: "POST", body: raw });
     console.log(`  ${mail.rcpt} ← ${mail.envelope}: ${r.status} ${r.status >= 300 ? await r.text() : ""}`);

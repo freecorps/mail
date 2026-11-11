@@ -44,7 +44,7 @@ export function MailboxThreadsScreen() {
   // A link from a widget or a notification carries only the name: the title is the mailbox's own once it is known.
   const { mailboxes } = useMailboxes();
   const box = mailboxes.find((b) => b.name === mailbox);
-  return <ThreadsScreen source={{ mailbox }} title={title ?? (box ? (box.displayName ?? box.address) : mailbox)} />;
+  return <ThreadsScreen source={{ mailbox }} title={title ?? (box ? box.displayName?.trim() || box.address : mailbox)} />;
 }
 
 /** Route: `/view/[view]` (a view across the member's mailboxes). */
@@ -54,8 +54,9 @@ export function ViewThreadsScreen() {
   const v: InboxView = (INBOX_VIEWS as string[]).includes(view) ? (view as InboxView) : "all";
   // `tag`: one tag's conversations (from the home's Etiquetas), titled with the tag's name (a link without one: the
   // tag's name once the tags are known).
-  const { index } = useTagIndex();
-  const tagName = tag ? (title ?? index.get(tag)?.name) : undefined;
+  // While the tags load, a link without a title says "Etiquetas", not the view's name it would then replace.
+  const { index, loading } = useTagIndex();
+  const tagName = tag ? (title ?? index.get(tag)?.name ?? (loading ? t("tags.title") : undefined)) : undefined;
   return <ThreadsScreen source={{ view: v, ...(tag ? { tag } : {}) }} title={tagName ?? t(`views.${v}`)} />;
 }
 

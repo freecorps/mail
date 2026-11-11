@@ -181,7 +181,7 @@ export function useThreadList(o: ListSource & { filter: ThreadFilter; query: str
 export function useTagIndex() {
   const s = useQuerySnapshot(api.inbox.tags, {});
   const tags = s.value;
-  return useMemo(() => ({ tags: tags ?? [], index: tagIndex(tags) }), [tags]);
+  return useMemo(() => ({ tags: tags ?? [], index: tagIndex(tags), loading: tags === undefined }), [tags]);
 }
 
 /** The home screen's counts per view (`inbox:views`); zeros until they load. */

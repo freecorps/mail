@@ -13,19 +13,19 @@ describe("key motion", () => {
     const timers: Array<() => void> = [];
     const km = createKeyMotion((fn) => timers.push(fn));
     const events: boolean[] = [];
-    km.subscribe(() => events.push(km.still(1000)));
-    expect(km.still(1000)).toBe(false);
-    km.mark(1000);
-    expect(km.still(1000 + STILL_MS - 1)).toBe(true);
+    km.subscribe(() => events.push(km.still()));
+    expect(km.still()).toBe(false);
+    km.mark();
+    expect(km.still()).toBe(true);
     expect(events).toEqual([true]);
     // A second key inside the window extends it without a second "start".
-    km.mark(1200);
+    km.mark();
     expect(events).toEqual([true]);
     timers[0]!(); // the first key's timer: not the last key, the window stays
-    expect(km.still(1200 + STILL_MS - 1)).toBe(true);
+    expect(km.still()).toBe(true);
     expect(events).toEqual([true]);
     timers[1]!(); // the last key's timer ends it
-    expect(km.still(1300)).toBe(false);
+    expect(km.still()).toBe(false);
     expect(events).toEqual([true, false]);
   });
 
@@ -34,7 +34,7 @@ describe("key motion", () => {
     let n = 0;
     const off = km.subscribe(() => n++);
     off();
-    km.mark(0);
+    km.mark();
     expect(n).toBe(0);
   });
 });
