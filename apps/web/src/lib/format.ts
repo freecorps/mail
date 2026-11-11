@@ -24,6 +24,16 @@ export function formatWhen(at: number, now: number, locale: Locale): string {
     .replace(/\.$/, "");
 }
 
+/** How long ago, in the largest whole unit ("há 26 h", "há 3 dias"): how long a conversation has been waiting. */
+export function formatAge(at: number, now: number, locale: Locale): string {
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always", style: "short" });
+  const min = Math.max(0, Math.floor((now - at) / 60_000));
+  if (min < 60) return rtf.format(-min, "minute");
+  const h = Math.floor(min / 60);
+  if (h < 48) return rtf.format(-h, "hour");
+  return rtf.format(-Math.floor(h / 24), "day");
+}
+
 /** Message header timestamps: full date and time. */
 export function formatFull(at: number, locale: Locale): string {
   return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(
@@ -42,10 +52,12 @@ export function contactOf(t: Pick<Thread, "contact" | "contactName">): string {
 /** One or two letters for an avatar. */
 export function initials(name: string): string {
   const clean = name.replace(/<.*?>/g, "").replace(/@.*$/, "").trim();
-  const parts = clean.split(/[\s._-]+/).filter(Boolean);
+  // Words with a letter or digit only ("Fernanda Oliveira 🌻" → FO), by code point (never half an emoji).
+  const parts = clean.split(/[\s._-]+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
   if (!parts.length) return "?";
-  const first = parts[0]![0] ?? "";
-  const last = parts.length > 1 ? (parts[parts.length - 1]![0] ?? "") : "";
+  const lead = (w: string) => Array.from(w).find((c) => /[\p{L}\p{N}]/u.test(c)) ?? "";
+  const first = lead(parts[0]!);
+  const last = parts.length > 1 ? lead(parts[parts.length - 1]!) : "";
   return (first + last).toUpperCase();
 }
 

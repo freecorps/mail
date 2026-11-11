@@ -50,12 +50,15 @@ import { api } from "@/lib/api";
 export function ThreadView({
   threadId,
   onBack,
+  showBack = false,
   composerRef,
   onOpenThread,
   admin = false,
 }: {
   threadId: string;
   onBack: () => void;
+  /** The back button also shows on wide windows (the conversation covers the list: full and focus modes). */
+  showBack?: boolean;
   /** The signed-in member is an admin: they may delete a shared mailbox's conversation. */
   admin?: boolean;
   composerRef: Ref<ComposerHandle>;
@@ -131,7 +134,7 @@ export function ThreadView({
 
   if (vm.status === "error" || (vm.status === "ready" && !vm.thread)) {
     return (
-      <Pane onBack={onBack}>
+      <Pane onBack={onBack} showBack={showBack}>
         <p role="alert" className="p-8 text-sm text-muted-foreground">
           {t("thread.notFound")}
         </p>
@@ -140,7 +143,7 @@ export function ThreadView({
   }
   if (!vm.thread) {
     return (
-      <Pane onBack={onBack}>
+      <Pane onBack={onBack} showBack={showBack}>
         <div className="space-y-4 p-8" aria-busy="true">
           <Skeleton className="h-6 w-2/3" />
           <Skeleton className="h-4 w-1/3" />
@@ -154,7 +157,7 @@ export function ThreadView({
   const archived = th.status === "closed";
   const unread = th.unreadCount > 0;
   return (
-    <Pane onBack={onBack}>
+    <Pane onBack={onBack} showBack={showBack}>
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b px-4 py-3.5 sm:px-6">
         <div className="min-w-0 flex-1">
           <h2 className="text-base font-semibold text-balance sm:text-lg">{th.subject}</h2>
@@ -280,14 +283,16 @@ export function ThreadView({
   );
 }
 
-function Pane({ children, onBack }: { children: React.ReactNode; onBack: () => void }) {
+function Pane({ children, onBack, showBack }: { children: React.ReactNode; onBack: () => void; showBack: boolean }) {
   const { t } = useI18n();
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <div className="border-b px-2 py-1.5 md:hidden">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+      <div className={cn("border-b px-2 py-1.5", !showBack && "md:hidden")}>
+        <Button variant="ghost" size="sm" onClick={onBack} aria-keyshortcuts="Escape">
           <ArrowLeft aria-hidden="true" />
-          {t("thread.back")}
+          <span className="md:hidden">{t("thread.back")}</span>
+          <span className="hidden md:inline">{t("layout.back")}</span>
+          <Kbd className="ml-1 hidden md:inline-flex">Esc</Kbd>
         </Button>
       </div>
       {children}

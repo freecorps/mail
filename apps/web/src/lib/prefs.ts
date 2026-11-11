@@ -5,7 +5,29 @@ import { pickLocale, type Locale } from "@/i18n/strings";
 
 export type ThemePref = "system" | "light" | "dark";
 export type Density = "comfortable" | "compact";
-export type Prefs = { theme: ThemePref; locale: Locale | null; density: Density };
+/**
+ * How the inbox splits the screen on wide windows:
+ *   split  three panes: sidebar | list | conversation (or "Hoje")
+ *   full   sidebar | list | "Hoje"; a conversation opens over the list at full width
+ *   focus  sidebar | a wide list; a conversation opens over it at full width
+ */
+export type ReadingMode = "split" | "full" | "focus";
+export const READING_MODES: ReadingMode[] = ["split", "full", "focus"];
+/** Pane widths in pixels (the panes keep their pixel width when the window resizes). */
+export type PaneWidths = { sidebar: number; list: number };
+export const PANE_LIMITS = { sidebar: { min: 200, max: 360, rail: 52 }, list: { min: 300, max: 640 }, reader: { min: 360 } } as const;
+export const DEFAULT_PANES: PaneWidths = { sidebar: 248, list: 380 };
+export type Prefs = {
+  theme: ThemePref;
+  locale: Locale | null;
+  density: Density;
+  reading: ReadingMode;
+  sidebarCollapsed: boolean;
+  panes: PaneWidths;
+};
+
+const clampWidth = (v: unknown, min: number, max: number, fallback: number) =>
+  typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(max, Math.max(min, v))) : fallback;
 
 const KEY = "ember-mail:prefs";
 const listeners = new Set<() => void>();
@@ -13,10 +35,17 @@ const listeners = new Set<() => void>();
 /** Stored JSON → prefs, every field validated (anything unknown falls back to its default). */
 export function parsePrefs(raw: unknown): Prefs {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const panes = (r.panes && typeof r.panes === "object" ? r.panes : {}) as Record<string, unknown>;
   return {
     theme: r.theme === "light" || r.theme === "dark" ? r.theme : "system",
     locale: r.locale === "en" || r.locale === "pt-BR" ? r.locale : null,
     density: r.density === "compact" ? "compact" : "comfortable",
+    reading: READING_MODES.includes(r.reading as ReadingMode) ? (r.reading as ReadingMode) : "split",
+    sidebarCollapsed: r.sidebarCollapsed === true,
+    panes: {
+      sidebar: clampWidth(panes.sidebar, PANE_LIMITS.sidebar.min, PANE_LIMITS.sidebar.max, DEFAULT_PANES.sidebar),
+      list: clampWidth(panes.list, PANE_LIMITS.list.min, PANE_LIMITS.list.max, DEFAULT_PANES.list),
+    },
   };
 }
 
@@ -80,5 +109,27 @@ export function usePrefs() {
   const setTheme = useCallback((t: ThemePref) => write({ ...current, theme: t }), []);
   const setLocale = useCallback((l: Locale) => write({ ...current, locale: l }), []);
   const setDensity = useCallback((d: Density) => write({ ...current, density: d }), []);
-  return { themePref: prefs.theme, theme, locale, density: prefs.density, setTheme, setLocale, setDensity };
+  const setReading = useCallback((m: ReadingMode) => write({ ...current, reading: m }), []);
+  const setSidebarCollapsed = useCallback((c: boolean) => {
+    if (current.sidebarCollapsed !== c) write({ ...current, sidebarCollapsed: c });
+  }, []);
+  const setPanes = useCallback((p: Partial<PaneWidths>) => {
+    const next = { ...current.panes, ...p };
+    if (next.sidebar !== current.panes.sidebar || next.list !== current.panes.list) write({ ...current, panes: next });
+  }, []);
+  return {
+    themePref: prefs.theme,
+    theme,
+    locale,
+    density: prefs.density,
+    reading: prefs.reading,
+    sidebarCollapsed: prefs.sidebarCollapsed,
+    panes: prefs.panes,
+    setTheme,
+    setLocale,
+    setDensity,
+    setReading,
+    setSidebarCollapsed,
+    setPanes,
+  };
 }

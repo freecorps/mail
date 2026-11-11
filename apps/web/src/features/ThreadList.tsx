@@ -15,6 +15,10 @@ import { rowDomId, THREAD_FILTERS, type ThreadFilter, type ThreadRow } from "@/m
 export interface ThreadListProps {
   title: string;
   mailboxPicker?: React.ReactNode;
+  /** The list fills a wide area (focus mode): keep its rows to a readable measure, centered. */
+  wide?: boolean;
+  /** Buttons at the right of the title (the layout menu). */
+  actions?: React.ReactNode;
   rows: ThreadRow[];
   loading: boolean;
   error: string | null;
@@ -45,6 +49,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
 
   // The filters are tabs over the list: the list is the active tab's panel (Radix links them with aria-controls).
   // While searching there are no filters, and the list is a plain region.
+  const measure = p.wide ? "mx-auto w-full max-w-3xl" : undefined;
   const body = (
     <>
       {p.loading && !p.rows.length ? (
@@ -76,7 +81,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
           )}
         </div>
       ) : (
-        <ul ref={listRef} className="p-1.5">
+        <ul ref={listRef} className={cn("p-1.5", measure)}>
           {p.rows.map((r) => {
             const open = r.threadId === p.openId;
             const cursor = r.threadId === p.cursorId;
@@ -130,7 +135,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
         </ul>
       )}
       {p.canLoadMore && (
-        <div className="p-3 pt-1">
+        <div className={cn("p-3 pt-1", measure)}>
           <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={p.onLoadMore} disabled={p.loading}>
             {p.loading && <Loader2 className="animate-spin" aria-hidden="true" />}
             {t("threads.loadMore")}
@@ -141,15 +146,18 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   );
   return (
     <Tabs asChild value={p.filter} onValueChange={(v) => p.onFilter(v as ThreadFilter)} activationMode="manual">
-      <section aria-label={t("threads.list")} className={cn("flex min-w-0 flex-col border-r bg-background", p.className)}>
+      <section aria-label={t("threads.list")} className={cn("flex min-w-0 flex-col bg-background", p.className)}>
         <header className={cn("space-y-3 border-b px-4 pt-3.5", p.searching ? "pb-3" : "pb-0")}>
-          <div className="flex h-7 items-center justify-between gap-2">
+          <div className={cn("flex h-7 items-center justify-between gap-2", measure)}>
             {p.mailboxPicker ?? <h1 className="truncate text-base font-semibold">{p.title}</h1>}
-            {p.searching && !p.loading && (
-              <span className="text-xs text-muted-foreground tabular-nums">{t("threads.results", { count: p.rows.length })}</span>
-            )}
+            <span className="flex shrink-0 items-center gap-2">
+              {p.searching && !p.loading && (
+                <span className="text-xs text-muted-foreground tabular-nums">{t("threads.results", { count: p.rows.length })}</span>
+              )}
+              {p.actions}
+            </span>
           </div>
-          <div className="relative">
+          <div className={cn("relative", measure)}>
             <Search
               className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
               aria-hidden="true"
@@ -166,7 +174,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
             {!p.query && <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>}
           </div>
           {!p.searching && (
-            <TabsList aria-label={t("threads.filters")} className="-mb-px gap-3.5">
+            <TabsList aria-label={t("threads.filters")} className={cn("-mb-px gap-3.5", measure)}>
               {THREAD_FILTERS.map((f) => (
                 <TabsTrigger key={f} value={f}>
                   {t(`threads.filter.${f}`)}
