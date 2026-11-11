@@ -143,11 +143,22 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   // Infinite scroll: the next page loads when the last rows come into view (once per page of each list).
   const asked = useRef<{ place: string; count: number } | null>(null);
   const lastIndex = virtual.at(-1)?.index ?? -1;
+  // Right after a change of list, `lastIndex` still comes from the old scroll (it was read before the reset above): the
+  // check waits a frame, when the scroll event has moved the virtual window, and reads it fresh.
+  const checkedPlace = useRef(place);
   useEffect(() => {
-    if (!loadMoreDue({ place, count: items.length, lastIndex, canLoadMore, loading, asked: asked.current })) return;
-    asked.current = { place, count: items.length };
-    onLoadMore();
-  }, [place, lastIndex, items.length, canLoadMore, loading, onLoadMore]);
+    const run = (last: number) => {
+      if (!loadMoreDue({ place, count: items.length, lastIndex: last, canLoadMore, loading, asked: asked.current })) return;
+      asked.current = { place, count: items.length };
+      onLoadMore();
+    };
+    if (checkedPlace.current !== place) {
+      checkedPlace.current = place;
+      const id = requestAnimationFrame(() => run(virtualizer.getVirtualItems().at(-1)?.index ?? -1));
+      return () => cancelAnimationFrame(id);
+    }
+    run(lastIndex);
+  }, [place, lastIndex, items.length, canLoadMore, loading, onLoadMore, virtualizer]);
 
   // Pending rows are never part of it (nor of "all"): their checkbox is disabled and nothing may act on them yet.
   const selectedRows = useMemo(() => visibleSelection(p.selected, p.rows), [p.rows, p.selected]);
