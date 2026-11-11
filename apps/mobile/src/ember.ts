@@ -15,9 +15,14 @@ export const emberClient = createMailClient({
   },
 });
 
-/** Sign-out: forget the device replica (mail of this account must not stay on a shared device). */
+/**
+ * Sign-out: forget the device replica (mail of this account must not stay on a shared device) and the writes still
+ * queued offline (`discardPending`: their promises reject), so none of them goes out later. Ember also holds a queued
+ * write to the identity that made it (0.7.2), so another account signing in on this device never sends it.
+ */
 export async function clearReplica(): Promise<void> {
   setReplicaUser(null);
+  await emberClient.discardPending().catch(() => {});
   await emberClient.replica.clear().catch(() => {});
 }
 
