@@ -118,9 +118,22 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   });
   const virtual = virtualizer.getVirtualItems();
 
+  const { place, canLoadMore, loading, onLoadMore } = p;
+  const followed = useRef<string | null>(null);
+  // Another list (view, mailbox, status, search) starts at its top: the list stays mounted (the search box keeps its
+  // focus), so a scroll left from the previous one would land mid-page and make infinite scroll load page two at once.
+  // Declared before the cursor-follow below, so in the same commit that one already sees the cursor as followed.
+  const shownPlace = useRef(place);
+  useLayoutEffect(() => {
+    if (shownPlace.current === place) return;
+    shownPlace.current = place;
+    // A cursor that survives into the new list is not a move: the list stays at its top.
+    followed.current = p.cursorId;
+    if (scroller.current) scroller.current.scrollTop = 0;
+  }, [place]);
+
   // Keep the keyboard cursor in view when it moves (no smooth scroll: j/k is repeated many times a minute). Only then:
   // the list changing under it (pages, new mail, the minute tick) must not pull the scroll back to it.
-  const followed = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!p.cursorId) followed.current = null;
     const i = cursorIndex(items, p.cursorId, followed.current);
@@ -128,17 +141,6 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
     followed.current = p.cursorId;
     virtualizer.scrollToIndex(i, { align: "auto" });
   }, [p.cursorId, items, virtualizer]);
-
-  // Another list (view, mailbox, status, search) starts at its top: the list stays mounted (the search box keeps its
-  // focus), so a scroll left from the previous one would land mid-page and make infinite scroll load page two at once.
-  const { place, canLoadMore, loading, onLoadMore } = p;
-  const shownPlace = useRef(place);
-  useLayoutEffect(() => {
-    if (shownPlace.current === place) return;
-    shownPlace.current = place;
-    followed.current = null;
-    if (scroller.current) scroller.current.scrollTop = 0;
-  }, [place]);
 
   // Infinite scroll: the next page loads when the last rows come into view (once per page of each list).
   const asked = useRef<{ place: string; count: number } | null>(null);
