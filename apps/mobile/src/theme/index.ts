@@ -1,5 +1,5 @@
 // The one theme entry point: import { spacing, type, useColors } from "../theme".
-export { inputAccent, paletteFor, useColors, type Palette, type SemanticColor } from "./colors";
+export { disabledTint, inputAccent, paletteFor, useColors, type Palette, type SemanticColor } from "./colors";
 export { hairline, minTouch, screenEdge, spacing } from "./spacing";
 export { corner, radius } from "./radius";
 export { emphasized, mono, tabular, type, type TextVariant } from "./typography";

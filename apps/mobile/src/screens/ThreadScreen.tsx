@@ -50,7 +50,7 @@ import { keepUndoneCompose } from "../model/undone-compose";
 import { forwardedFiles } from "../model/forward";
 import { formatAgo, formatLater } from "../lib/when";
 import { usePresence } from "../presence";
-import { corner, hairline, radius, screenEdge, spacing, useColors } from "../theme";
+import { corner, disabledTint, hairline, radius, screenEdge, spacing, useColors } from "../theme";
 
 const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
   open: Icons.statusOpen,
@@ -390,10 +390,10 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
       <Stack.Screen options={{ title: thread?.number ? t("thread.title", { number: thread.number }) : "" }} />
       {icons && (around.prev || around.next) ? (
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button icon={prevIcon} accessibilityLabel={t("thread.previous")} disabled={!around.prev} onPress={() => go(around.prev)}>
+          <Stack.Toolbar.Button icon={prevIcon} accessibilityLabel={t("thread.previous")} tintColor={disabledTint(c, !around.prev)} disabled={!around.prev} onPress={() => go(around.prev)}>
             {t("thread.previous")}
           </Stack.Toolbar.Button>
-          <Stack.Toolbar.Button icon={nextIcon} accessibilityLabel={t("thread.next")} disabled={!around.next} onPress={() => go(around.next)}>
+          <Stack.Toolbar.Button icon={nextIcon} accessibilityLabel={t("thread.next")} tintColor={disabledTint(c, !around.next)} disabled={!around.next} onPress={() => go(around.next)}>
             {t("thread.next")}
           </Stack.Toolbar.Button>
         </Stack.Toolbar>

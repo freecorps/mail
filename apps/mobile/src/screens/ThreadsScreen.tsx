@@ -36,7 +36,7 @@ import { deviceTimeZone, useListPrefs } from "../prefs";
 import { useKeyStill, useShortcuts } from "../keys";
 import { afterListChange, leaveFrom, paneLayout, stepFrom } from "../model/split";
 import { ThreadPane, type ThreadHost } from "./ThreadScreen";
-import { EASE_IN_OUT, EASE_OUT, motion, screenEdge, spacing, useColors, type Palette } from "../theme";
+import { disabledTint, EASE_IN_OUT, EASE_OUT, motion, screenEdge, spacing, type Palette, useColors } from "../theme";
 
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
 export function MailboxThreadsScreen() {
@@ -475,13 +475,13 @@ function EditChrome(p: {
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button icon={archive} accessibilityLabel={t("thread.archive")} disabled={none} onPress={p.onArchive}>
+          <Stack.Toolbar.Button icon={archive} accessibilityLabel={t("thread.archive")} tintColor={disabledTint(c, none)} disabled={none} onPress={p.onArchive}>
             {t("thread.archive")}
           </Stack.Toolbar.Button>
-          <Stack.Toolbar.Button icon={read} accessibilityLabel={p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")} disabled={none} onPress={p.onRead}>
+          <Stack.Toolbar.Button icon={read} accessibilityLabel={p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")} tintColor={disabledTint(c, none)} disabled={none} onPress={p.onRead}>
             {p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")}
           </Stack.Toolbar.Button>
-          <Stack.Toolbar.Button icon={assign} accessibilityLabel={t("thread.assign")} disabled={none || !p.canAssign} onPress={p.onAssign}>
+          <Stack.Toolbar.Button icon={assign} accessibilityLabel={t("thread.assign")} tintColor={disabledTint(c, none || !p.canAssign)} disabled={none || !p.canAssign} onPress={p.onAssign}>
             {t("thread.assign")}
           </Stack.Toolbar.Button>
           <Stack.Toolbar.Button icon={all} accessibilityLabel={selectAllLabel} onPress={p.onSelectAll}>

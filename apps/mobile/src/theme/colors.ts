@@ -120,3 +120,12 @@ export function useColors(): Palette {
 export function inputAccent(p: Palette) {
   return { cursorColor: p.tint, selectionHandleColor: p.tint };
 }
+
+/**
+ * A disabled toolbar item's tint on Android: expo-router's Android toolbar draws the icon in its tint whether the item
+ * is enabled or not, so a disabled Enviar or ↑ looked tappable. Material's disabled content (on-surface at ~38%)
+ * instead; undefined otherwise and on iOS (the system dims a disabled item itself).
+ */
+export function disabledTint(p: Palette, disabled: boolean): string | undefined {
+  return disabled && process.env.EXPO_OS === "android" ? p.tertiaryText : undefined;
+}

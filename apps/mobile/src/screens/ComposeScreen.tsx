@@ -40,7 +40,7 @@ import { formatLater, laterChoices } from "../lib/when";
 import { deviceTimeZone } from "../prefs";
 import { usePresence } from "../presence";
 import { RECENT_THREADS } from "../offline/replica";
-import { corner, hairline, inputAccent, radius, screenEdge, spacing, type, useColors } from "../theme";
+import { corner, disabledTint, hairline, inputAccent, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 type Params = { threadId?: string; mode?: string; forwardThread?: string; forwardMessage?: string; mailbox?: string; to?: string; draftId?: string; restore?: string };
 
@@ -510,7 +510,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
           <Stack.Toolbar placement="right">
             {/* "Enviar mais tarde" beside Send (Mail's long-press menu, made visible): presets with their time, "Escolher…". */}
             {note || !laterIcon ? null : (
-              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} disabled={!ready || scheduling}>
+              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} tintColor={disabledTint(c, !ready || scheduling)} disabled={!ready || scheduling}>
                 {/* Direct children only: the native menu does not read through a fragment. */}
                 {schedulable.ok
                   ? [
@@ -530,7 +530,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                     ]}
               </Stack.Toolbar.Menu>
             )}
-            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready || scheduling} onPress={() => send()}>
+            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")} variant="done" tintColor={disabledTint(c, !ready || scheduling) ?? c.tint} disabled={!ready || scheduling} onPress={() => send()}>
               {note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")}
             </Stack.Toolbar.Button>
           </Stack.Toolbar>
