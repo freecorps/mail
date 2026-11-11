@@ -12,12 +12,13 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useReducedMotion } from "react-native-reanimated";
 import { Loading, UndoBanner } from "../components/ui";
 import { emberClient } from "../ember";
-import { I18nProvider } from "../i18n";
+import { I18nProvider, useI18n } from "../i18n";
 import { outbox } from "../model/outbox";
 import { undoStore } from "../model/undo";
 import { useLanguagePref } from "../prefs";
 import { SessionProvider, useSession } from "../session";
 import { useColors, useHeaderColors, useListStackOptions } from "../theme";
+import { clearWidgets } from "../widgets";
 
 export default function RootLayout() {
   const lang = useLanguagePref();
@@ -47,6 +48,11 @@ function RootStack() {
   const header = useHeaderColors();
   const list = useListStackOptions();
   const reduced = useReducedMotion();
+  const { locale } = useI18n();
+  // No member signed in (signed out here, the session expired, or not a member yet): the widgets say "sign in".
+  useEffect(() => {
+    if (phase === "signedOut" || phase === "notMember") clearWidgets(locale);
+  }, [phase, locale]);
   // Screen reader users need longer to reach "Desfazer" (10 s instead of 6).
   useEffect(() => {
     const apply = (on: boolean) => undoStore.setDuration(on ? 10_000 : 6000);

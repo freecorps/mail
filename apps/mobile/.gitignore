@@ -15,3 +15,8 @@ ember/_generated/
 # Local Expo modules keep their native sources (the generated ios/ and android/ projects stay ignored).
 !modules/*/ios/
 !modules/*/android/
+# …but not what their native builds write there (Gradle/Xcode output, with absolute local paths).
+modules/*/android/build/
+modules/*/android/.gradle/
+modules/*/android/.cxx/
+modules/*/ios/build/

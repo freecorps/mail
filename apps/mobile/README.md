@@ -81,7 +81,7 @@ The server needs `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `FCM_SERVICE_ACCOUNT
 id, a plain var), set with `ember env` (`packages/push` README in Ember). Android direct push also needs the Firebase
 app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outside the repo, or an EAS file variable).
 
-## Notifications, badge and quick actions
+## Notifications, badge, quick actions and widgets
 
 - **Actions** (`src/push/actions.ts`, rules in `src/push/mail-push.ts`). The server sends each push under the category
   `mail` (`apps/api/ember/notifications.ts`):
@@ -115,10 +115,28 @@ app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outsi
 - **Quick actions** on the icon (`src/quick-actions.ts`, `expo-quick-actions`): Nova mensagem, Atribuídas a mim,
   Buscar. They are set only for a member and cleared at sign-out. Android icons are vector drawables written by
   `plugins/shortcut-icons.js`.
-- **`modules/mail-system`**: a local Expo module (iOS only), for what Expo has no JS API for.
-  - `beginBackgroundTask` / `endBackgroundTask` (UIApplication) for the notification actions.
-  - The quick action that cold-starts the app. Under the UIScene life cycle Expo forwards it as `performActionFor`
+- **Home-screen widgets** (`src/widgets`): **Não lidas** (unread per mailbox: small shows the total and the mailbox
+  with the most, medium up to four mailboxes) and **Minhas** (the open conversations assigned to me: the count, and in
+  medium the latest three, sender and subject). A tap opens the mailbox, the Minhas tab or the conversation
+  (`embermail://…`).
+  - Widgets cannot run the Ember client. The app builds a small snapshot per widget from queries it already holds
+    (`src/widgets/snapshot.ts`, pure and tested: mailbox list, `inbox:views`, the "assigned" view, the preview
+    preference) and writes it when it changes (at most every 15 s, the last change always lands) and when the app
+    goes to the background. The strings come in the app's language.
+  - Privacy: with **Mostrar prévia** off (or not loaded yet) the snapshot has counts only. Sign-out, an expired
+    session or "not a member" write a "sign in" snapshot with nothing of the inbox. On iOS sender and subject are
+    `privacySensitive`, so a locked device redacts them.
+  - iOS: `expo-widgets` (Expo's WidgetKit package; layouts in `src/widgets/*-widget.tsx`, drawn by `@expo/ui`'s SwiftUI
+    views), with lock-screen sizes too (Não lidas circular/inline, Minhas rectangular). Snapshots live in the App Group
+    `group.<bundle id>.widgets`.
+  - Android: native Jetpack Glance widgets in `modules/mail-system` (Material 3 with the wallpaper's dynamic colors,
+    the ember scheme before Android 12). They read the snapshots from the app's SharedPreferences. `expo-widgets`'
+    Android side cannot open a deep link or use dynamic colors, so it is excluded from Android autolinking.
+- **`modules/mail-system`**: a local Expo module, for what Expo has no JS API for.
+  - iOS: `beginBackgroundTask` / `endBackgroundTask` (UIApplication) for the notification actions.
+  - iOS: the quick action that cold-starts the app. Under the UIScene life cycle Expo forwards it as `performActionFor`
     before JS listens, and expo-quick-actions only reads the launch options. Worth reporting upstream.
+  - Android: the home-screen widgets (`setWidget`, `MailWidgets.kt`).
 - **Testing on a simulator**:
   - iOS: `xcrun simctl push <udid> app.freecorps.mail payload.apns` with an `aps.category` of `mail` and the data
     under `body`. That is the shape the Notification Service Extension leaves after decrypting; no APNs needed.

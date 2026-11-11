@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="mail_widget_unread_label">Não lidas</string>
+  <string name="mail_widget_unread_description">Mensagens não lidas em cada uma das suas caixas.</string>
+  <string name="mail_widget_mine_label">Minhas</string>
+  <string name="mail_widget_mine_description">Conversas abertas atribuídas a você.</string>
+  <string name="mail_widget_open_app">Abra o Ember Mail</string>
+</resources>

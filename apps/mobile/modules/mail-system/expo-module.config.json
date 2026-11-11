@@ -1,7 +1,10 @@
 {
-  "platforms": ["apple"],
+  "platforms": ["apple", "android"],
   "apple": {
     "modules": ["MailSystemModule"],
     "appDelegateSubscribers": ["MailSystemAppDelegate"]
+  },
+  "android": {
+    "modules": ["app.freecorps.mail.system.MailSystemModule"]
   }
 }

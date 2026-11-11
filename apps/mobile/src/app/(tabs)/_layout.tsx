@@ -11,6 +11,7 @@ import { setInboxMounted } from "../../navigation";
 import { flushNotificationTarget, useAppBadge, useMailboxChannels, useNotificationCategory } from "../../push/usePush";
 import { useQuickActions } from "../../quick-actions";
 import { useColors } from "../../theme";
+import { useHomeWidgets } from "../../widgets";
 
 export default function TabsLayout() {
   const c = useColors();
@@ -21,12 +22,13 @@ export default function TabsLayout() {
   // Edit mode on a list hides the tab bar: its bottom toolbar (archive, read, assign) takes the place.
   const hidden = useTabBarHidden();
   // What the system shows outside the app follows the inbox: the icon badge, the mailboxes' Android channels, the
-  // notification actions and the icon's quick actions, in the app's language.
+  // notification actions, the icon's quick actions and the home-screen widgets, in the app's language.
   const loaded = status === "ready";
   useAppBadge(mailboxes, loaded);
   useMailboxChannels(mailboxes, loaded, locale);
   useNotificationCategory(locale);
   useQuickActions(locale);
+  useHomeWidgets(locale);
   useEffect(() => {
     setInboxMounted(true);
     flushNotificationTarget();

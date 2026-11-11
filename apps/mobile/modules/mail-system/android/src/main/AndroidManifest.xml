@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application>
+    <!-- Home-screen widgets (MailWidgets.kt): their picker names and sizes are in res/xml/mail_widget_*.xml. -->
+    <receiver android:name="app.freecorps.mail.system.MailUnreadWidgetReceiver" android:exported="true" android:label="@string/mail_widget_unread_label">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/mail_widget_unread" />
+    </receiver>
+    <receiver android:name="app.freecorps.mail.system.MailMineWidgetReceiver" android:exported="true" android:label="@string/mail_widget_mine_label">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+      </intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/mail_widget_mine" />
+    </receiver>
+  </application>
+</manifest>

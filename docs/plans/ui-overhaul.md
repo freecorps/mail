@@ -248,7 +248,7 @@ e contagens por caixa/status/responsável numa query `counts`. Release e bump.
 | Ações na notificação + badge (+ Notificações por caixa e prévia, do M5) | review (#44) |
 | Quick actions | review (#44) |
 | Badge certo depois de ler em outro aparelho (push silencioso com `badge` no `markRead`/arquivar) | todo |
-| Widgets | todo |
+| Widgets | review |
 | iPad | todo |
 
 ### Onda 6: Polimento

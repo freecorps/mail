@@ -1,5 +1,6 @@
 // The app's iOS system glue (the local module `modules/mail-system`). Android needs neither: its push task runs until
-// its promise settles, and expo-quick-actions reads its launch shortcut from the activity's intent.
+// its promise settles, and expo-quick-actions reads its launch shortcut from the activity's intent. (The module's
+// Android side holds the home-screen widgets: src/widgets/store.android.ts.)
 import { requireOptionalNativeModule } from "expo";
 
 type MailSystem = {

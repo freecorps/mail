@@ -15,7 +15,7 @@
     "eas:submit-ids": "node scripts/set-submit-ids.mjs"
   },
   "dependencies": {
-    "@expo/ui": "~58.0.27",
+    "@expo/ui": "~58.0.28",
     "@freecorps/ember-email": "^0.7.2",
     "@freecorps/ember-expo-push": "^0.7.2",
     "@freecorps/ember-offline": "^0.7.2",
@@ -44,6 +44,7 @@
     "expo-symbols": "~58.0.4",
     "expo-task-manager": "~58.0.13",
     "expo-updates": "~58.0.21",
+    "expo-widgets": "~58.0.28",
     "react": "19.3.0",
     "react-native": "0.88.1",
     "react-native-gesture-handler": "3.4.0",
@@ -67,6 +68,13 @@
       "exclude": [
         "react-native-gesture-handler"
       ]
+    },
+    "autolinking": {
+      "android": {
+        "exclude": [
+          "expo-widgets"
+        ]
+      }
     }
   }
 }
