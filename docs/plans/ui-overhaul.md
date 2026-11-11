@@ -202,7 +202,7 @@ Depende de E1 (corpo HTML, assinatura).
 
 | Tarefa | Status |
 |---|---|
-| C-api assinaturas, rascunhos, respostas salvas | todo |
+| C-api assinaturas, rascunhos, respostas salvas (+ bump Ember 0.6.0) | review (#38) |
 | C-web composer + compose ancorado | todo |
 | C-mobile composer + compose | todo |
 | M4 conversa mobile | todo |
