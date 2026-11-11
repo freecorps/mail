@@ -10,7 +10,7 @@ import { useI18n } from "@/i18n/context";
 import { TAG_COLORS, type TagColor } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { openPicker, type TagTarget } from "@/model/picker";
-import { matchTags, nextColor, TAG_LIMITS, tagNameError, tagsOf, useAllTags, useTagActions } from "@/model/tags";
+import { matchTags, nextColor, TAG_LIMITS, tagCreateError, tagsOf, useAllTags, useTagActions } from "@/model/tags";
 import { useMailboxes } from "@/model/threads";
 
 export function TagMenu({
@@ -50,7 +50,8 @@ export function TagCommand({ targets, onClose }: { targets: TagTarget[]; onClose
   const [color, setColor] = useState<TagColor | null>(null);
   const q = query.trim();
   const matches = matchTags(tags, q);
-  const error = q ? tagNameError(q, tags) : null;
+  // A new tag goes on these threads at once: a thread at the most tags it takes blocks creating, as it blocks a toggle.
+  const error = q ? tagCreateError(q, tags, live) : null;
   const canCreate = !!mailbox && !!q && error === null;
   const createColor = color ?? nextColor(tags);
   const full = live.some((x) => x.tags.length >= TAG_LIMITS.perThread);
@@ -87,7 +88,7 @@ export function TagCommand({ targets, onClose }: { targets: TagTarget[]; onClose
         onValueChange={setQuery}
         placeholder={t("tags.search")}
         maxLength={TAG_LIMITS.name + 10}
-        aria-describedby={error === "tooLong" || error === "full" ? "tag-error" : undefined}
+        aria-describedby={error === "tooLong" || error === "full" ? "tag-error" : error === "threadFull" ? "tag-limit" : undefined}
       />
       <CommandList className="max-h-72">
         {!loading && !tags.length && !q && <p className="px-3 py-2.5 text-ui text-muted-foreground">{t("tags.empty")}</p>}
@@ -160,7 +161,11 @@ export function TagCommand({ targets, onClose }: { targets: TagTarget[]; onClose
             {error === "tooLong" ? t("tags.tooLong", { count: TAG_LIMITS.name }) : t("tags.full", { count: TAG_LIMITS.perMailbox })}
           </output>
         )}
-        {full && <p className="px-3 pb-2 text-xs text-muted-foreground">{t("tags.limit", { count: TAG_LIMITS.perThread })}</p>}
+        {full && (
+          <p id="tag-limit" className="px-3 pb-2 text-xs text-muted-foreground">
+            {t("tags.limit", { count: TAG_LIMITS.perThread })}
+          </p>
+        )}
         <CommandSeparator />
         <CommandGroup>
           <CommandItem

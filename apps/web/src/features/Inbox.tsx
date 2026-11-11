@@ -46,7 +46,7 @@ import { ShortcutsDialog } from "./ShortcutsDialog";
 import { PickerHost } from "./Pickers";
 import { openPicker, type TagTarget } from "@/model/picker";
 import { useAllTags } from "@/model/tags";
-import type { SnoozeTarget } from "@/model/snooze";
+import { snoozeTargetOf, type SnoozeTarget } from "@/model/snooze";
 import { Sidebar, type Folder } from "./Sidebar";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
@@ -356,23 +356,10 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           const rows = picked.length ? picked : target ? s.rows.filter((r) => r.threadId === target) : [];
           let list: Array<TagTarget & SnoozeTarget> = rows
             .filter((r) => !r.pending)
-            .map((r) => ({
-              threadId: r.threadId,
-              mailbox: r.mailbox,
-              tags: r.tags ?? [],
-              ...(r.snoozedUntil ? { snoozedUntil: r.snoozedUntil } : {}),
-            }));
+            .map((r) => ({ ...snoozeTargetOf(r), mailbox: r.mailbox, tags: r.tags ?? [] }));
           if (!list.length && target) {
             const th = client.localQueryResult(api.inbox.thread, { threadId: target }).value?.thread;
-            if (th && !isOptimisticId(th._id))
-              list = [
-                {
-                  threadId: th._id,
-                  mailbox: th.mailbox,
-                  tags: th.tags ?? [],
-                  ...(th.snoozed && th.snoozedUntil ? { snoozedUntil: th.snoozedUntil } : {}),
-                },
-              ];
+            if (th && !isOptimisticId(th._id)) list = [{ ...snoozeTargetOf(th), mailbox: th.mailbox, tags: th.tags ?? [] }];
           }
           if (!list.length) return;
           e.preventDefault();

@@ -9,7 +9,9 @@ import { checkPick, dayAt, formatAt, MAX_AHEAD_MS, sendPresets, snoozePresets, w
 import { phraseOf, placeEntries, showsInline } from "@/model/activity";
 import { HEARTBEAT_MS, presenceBeat, presenceLine, SETTLE_MS, type PresenceTimers } from "@/model/presence";
 import { ATTACH_LIMIT, isLinkRefusal, isScheduled, sendLaterCheck } from "@/model/schedule";
-import { matchTags, nextColor, swapOrders, tagNameError, threadTags } from "@/model/tags";
+import { matchTags, nextColor, swapOrders, tagCreateError, tagNameError, threadTags } from "@/model/tags";
+import { snoozeTargetOf } from "@/model/snooze";
+import { invalidChips } from "@/model/recipients";
 import { mailServer } from "./mailServer";
 
 const DAY = 86_400_000;
@@ -132,6 +134,32 @@ describe("optimistic snooze", () => {
     expect((s.dump("inbox:view")[0] as { page: Thread[] }).page.map((t) => t._id)).toEqual(["a", "c", "b"]);
   });
 
+  it("one snooze target builder: a stale wake time on an awake thread is never the undo baseline", () => {
+    expect(snoozeTargetOf(thread({ snoozed: true, snoozedUntil: 900 }))).toEqual({ threadId: "t1", snoozedUntil: 900 });
+    expect(snoozeTargetOf(thread({ snoozedUntil: 900 }))).toEqual({ threadId: "t1" });
+    expect(snoozeTargetOf(thread({ snoozed: false, snoozedUntil: 900 }))).toEqual({ threadId: "t1" });
+    // List rows carry the wake time only while snoozed (threadRow).
+    expect(snoozeTargetOf({ threadId: "r1", snoozedUntil: 5 })).toEqual({ threadId: "r1", snoozedUntil: 5 });
+    expect(snoozeTargetOf({ threadId: "r1", snoozedUntil: null })).toEqual({ threadId: "r1" });
+  });
+
+  it("snoozing again moves the row to its new place in Adiadas, or out of what is loaded", () => {
+    const z = (id: string, until: number) => thread({ _id: id, snoozed: true, snoozedUntil: until });
+    const s = store({
+      "inbox:view": [
+        { args: { view: "snoozed", limit: 30 }, value: { page: [z("a", 100), z("b", 200), z("c", 300)], isDone: false, partial: false } },
+      ],
+    });
+    const ids = () => (s.dump("inbox:view")[0] as { page: Thread[] }).page.map((t) => t._id);
+    u["inbox:snooze"]!(s, { threadId: "a", until: 250 }, rec);
+    expect(ids()).toEqual(["b", "a", "c"]);
+    u["inbox:snooze"]!(s, { threadId: "c", until: 50 }, rec);
+    expect(ids()).toEqual(["c", "b", "a"]);
+    // Later than the last loaded row of a list with more: the server's next page has it, not this one.
+    u["inbox:snooze"]!(s, { threadId: "b", until: 9_000 }, rec);
+    expect(ids()).toEqual(["c", "a"]);
+  });
+
   it("viewKeeps: snoozed only in snoozed; a tag narrows every view", () => {
     const z = thread({ snoozed: true, snoozedUntil: 1, tags: ["g1"] });
     expect(VIEWS.filter((v) => viewKeeps(v, undefined)(z))).toEqual(["snoozed"]);
@@ -204,6 +232,35 @@ describe("optimistic tags", () => {
     expect((s.dump("inbox:tags")[0] as TagDoc[]).map((x) => x._id)).not.toContain("g2");
     expect(s.dump("inbox:threads")[0].page[0].tags).toEqual(["g1"]);
     expect(s.dump("inbox:views")[0].tags).toEqual({ g1: { ...zero, threads: 1 } });
+  });
+
+  it("a created tag is one tag in every list (one temporary id), last in its mailbox", () => {
+    const s = store({
+      "inbox:tags": [
+        { args: {}, value: [tag("g1", 0), tag("p1", 4, { mailbox: "privacy" })] },
+        { args: { mailbox: "support" }, value: [tag("g1", 0)] },
+        { args: { mailbox: "privacy" }, value: [tag("p1", 4, { mailbox: "privacy" })] },
+      ],
+    });
+    u["inbox:createTag"]!(s, { mailbox: "support", name: "Nova" }, rec);
+    const [all, support, privacy] = s.dump("inbox:tags") as TagDoc[][];
+    const made = all!.find((x) => x.name === "Nova")!;
+    expect(support!.find((x) => x.name === "Nova")?._id).toBe(made._id);
+    expect(made.order).toBe(1);
+    expect(privacy!.map((x) => x._id)).toEqual(["p1"]);
+  });
+
+  it("a new conversation never joins a tag's list (it has no tags), only the plain views", () => {
+    const s = store({
+      "inbox:view": [
+        { args: { view: "all", tag: "g1", limit: 30 }, value: viewPage([thread({ _id: "old", tags: ["g1"] })]) },
+        { args: { view: "all", limit: 30 }, value: viewPage([]) },
+      ],
+    });
+    u["inbox:compose"]!(s, { mailbox: "support", to: ["ana@user.test"], subject: "Oi", text: "Olá" }, rec);
+    const [tagged, all] = s.dump("inbox:view") as Array<{ page: Thread[] }>;
+    expect(tagged!.page.map((t) => t._id)).toEqual(["old"]);
+    expect(all!.page).toHaveLength(1);
   });
 
   it("threadTags orders a thread's tags and drops unknown ids", () => {
@@ -316,6 +373,11 @@ describe("times in the member's zone", () => {
 });
 
 describe("scheduled sends", () => {
+  it("Cco chips that are not a recipient are named", () => {
+    expect(invalidChips(["a@b.test", "Bia <bia@x.test>", "nope", ""])).toEqual(["nope", ""]);
+    expect(invalidChips([])).toEqual([]);
+  });
+
   it("blocks past 10 MB in all (files would go as links); unknown sizes are the server's call", () => {
     expect(sendLaterCheck([])).toEqual({ ok: true, unknown: false });
     expect(sendLaterCheck([ATTACH_LIMIT])).toEqual({ ok: true, unknown: false });
@@ -480,6 +542,13 @@ describe("tag helpers", () => {
         Array.from({ length: 100 }, (_, i) => tag(`t${i}`, i)),
       ),
     ).toBe("full");
+  });
+
+  it("creating from the menu is blocked when a thread already has the most tags it takes", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => `t${i}`);
+    expect(tagCreateError("Nova", list, [{ tags: twenty }])).toBe("threadFull");
+    expect(tagCreateError("Nova", list, [{ tags: twenty.slice(1) }, { tags: [] }])).toBeNull();
+    expect(tagCreateError("reembolso", list, [{ tags: twenty }])).toBe("taken");
   });
 
   it("search folds accents and ranks starts-with first; colors and reordering", () => {

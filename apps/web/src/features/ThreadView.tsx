@@ -77,7 +77,8 @@ import { textToHtml } from "@/lib/editorText";
 import { placeEntries, useActivity } from "@/model/activity";
 import { useOwnPresence, usePresence } from "@/model/presence";
 import { isScheduled } from "@/model/schedule";
-import { useSnooze } from "@/model/snooze";
+import { snoozeTargetOf, useSnooze } from "@/model/snooze";
+import { useInFlight } from "@/model/inflight";
 import { threadTags, useTagActions, useTagIndex } from "@/model/tags";
 import type { ActivityEntry, Address } from "@/lib/api";
 
@@ -118,7 +119,8 @@ export function ThreadView({
   useOwnPresence(threadId, replying, vm.thread !== null);
   const [tagsOpen, setTagsOpen] = useState(false);
   const cancelM = useMutation(api.inbox.cancelScheduled);
-  const [busyEmail, setBusyEmail] = useState<string | null>(null);
+  // Per scheduled email: canceling one never holds up another.
+  const cancels = useInFlight();
   const after = useMemo(
     () =>
       placeEntries(
@@ -190,42 +192,43 @@ export function ThreadView({
   /** Cancels a scheduled send; with `edit`, its content goes back into a composer (the reply box, or a window). */
   const cancelSend = (m: Message, edit: boolean) => {
     const emailId = m.emailId;
-    if (!emailId || busyEmail) return;
-    setBusyEmail(emailId);
+    if (!emailId) return;
     const chip = (a: Address) => (a.name ? `${a.name} <${a.email}>` : a.email);
     const files = m.attachments.map((a) => ({ file: a.file, filename: a.filename, contentType: a.contentType }));
     const html = m.html ?? textToHtml(m.text);
-    cancelM({ emailId })
-      .then((r) => {
-        if (!r.ok) return void toast(t("schedule.gone"));
-        if (r.threadDeleted && edit) {
-          // A new conversation canceled before it went is gone: it comes back as a "Nova mensagem" window.
-          openWindow(
-            {
-              kind: "compose",
-              restore: {
-                mailbox: m.mailbox,
-                to: m.to.map(chip),
-                cc: m.cc.map(chip),
-                bcc: (m.bcc ?? []).map(chip),
-                subject: m.subject,
-                html,
-                text: m.text,
-                attachments: files,
-                signature: true,
-                draftId: null,
+    void cancels.run(emailId, () =>
+      cancelM({ emailId }).then(
+        (r) => {
+          if (!r.ok) return void toast(t("schedule.gone"));
+          if (r.threadDeleted && edit) {
+            // A new conversation canceled before it went is gone: it comes back as a "Nova mensagem" window.
+            openWindow(
+              {
+                kind: "compose",
+                restore: {
+                  mailbox: m.mailbox,
+                  to: m.to.map(chip),
+                  cc: m.cc.map(chip),
+                  bcc: (m.bcc ?? []).map(chip),
+                  subject: m.subject,
+                  html,
+                  text: m.text,
+                  attachments: files,
+                  signature: true,
+                  draftId: null,
+                },
               },
-            },
-            { always: true },
-          );
-        } else if (edit) {
-          composerRef.current?.load({ html, cc: m.cc.map(chip), bcc: (m.bcc ?? []).map(chip), attachments: files });
-        }
-        toast(edit ? t("schedule.editing") : t("schedule.canceled"));
-        if (r.threadDeleted) onBack();
-      })
-      .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusyEmail(null));
+              { always: true },
+            );
+          } else if (edit) {
+            composerRef.current?.load({ html, cc: m.cc.map(chip), bcc: (m.bcc ?? []).map(chip), attachments: files });
+          }
+          toast(edit ? t("schedule.editing") : t("schedule.canceled"));
+          if (r.threadDeleted) onBack();
+        },
+        (e: unknown) => void toast.error(e instanceof Error ? e.message : String(e)),
+      ),
+    );
   };
 
   const forward = (m: Message) => {
@@ -359,8 +362,8 @@ export function ThreadView({
   const unread = th.unreadCount > 0;
   const target = [{ threadId, status: th.status, unread }];
   const tags = threadTags(th.tags, tagIndex);
-  const snoozedUntil = th.snoozed ? (th.snoozedUntil ?? null) : null;
-  const snoozeTarget = [{ threadId, ...(snoozedUntil ? { snoozedUntil } : {}) }];
+  const snoozeTarget = [snoozeTargetOf(th)];
+  const snoozedUntil = snoozeTarget[0]!.snoozedUntil ?? null;
   return (
     <Pane onBack={onBack} showBack={showBack}>
       <div ref={pane} className="relative flex min-h-0 flex-1">
@@ -519,7 +522,11 @@ export function ThreadView({
                           item={item}
                           scheduled={
                             isScheduled(m) && !item.pending && m.emailId
-                              ? { busy: busyEmail === m.emailId, onEdit: () => cancelSend(m, true), onCancel: () => cancelSend(m, false) }
+                              ? {
+                                  busy: cancels.busy.has(m.emailId),
+                                  onEdit: () => cancelSend(m, true),
+                                  onCancel: () => cancelSend(m, false),
+                                }
                               : undefined
                           }
                           urls={vm.attachmentUrls}

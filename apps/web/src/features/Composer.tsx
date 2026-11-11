@@ -26,7 +26,7 @@ import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
 import { AttachButton, AttachmentTiles, DraftStatus, SavedRepliesButton, SignatureLine } from "./composer/parts";
 import { RecipientInput } from "./composer/RecipientInput";
 import { SendLaterButton } from "./composer/SendLater";
-import { contactsFrom } from "@/model/recipients";
+import { contactsFrom, invalidChips } from "@/model/recipients";
 import { isLinkRefusal, pickSendAt, sendLaterCheck } from "@/model/schedule";
 import { formatAt } from "@/lib/when";
 
@@ -77,6 +77,8 @@ export function Composer({
   // Blind copies of a reply (never the conversation's contact: Ember drops those), shown with "Cco".
   const [bcc, setBcc] = useState<string[]>([]);
   const [showBcc, setShowBcc] = useState(false);
+  // Cco addresses that are not a recipient: named under the field (which is marked invalid), and nothing is sent.
+  const [bccError, setBccError] = useState<string | null>(null);
   const recent = useQuerySnapshot(api.inbox.recent, showBcc ? { threads: 100 } : "skip");
   const contacts = useMemo(() => contactsFrom(recent.value, [p.mailbox]), [recent.value, p.mailbox]);
   const [focused, setFocused] = useState(false);
@@ -184,6 +186,8 @@ export function Composer({
     setMode(u.mode);
     setAll(u.all);
     setSignature(u.signature);
+    setBcc(u.bcc ?? []);
+    setShowBcc(!!u.bcc?.length);
     if (u.mode === "reply") uploads.restore(u.files);
     if (editor.current) {
       restoring.current = true;
@@ -326,6 +330,14 @@ export function Composer({
     if (body.empty || sending.current) return;
     if (at !== undefined && mode !== "reply") return;
     if (waitingFiles) return void toast(t("composer.waitUploads"));
+    // Cco is checked as the compose windows check theirs (each chip one recipient): a bad one stays, named, and
+    // nothing leaves.
+    const badBcc = mode === "reply" ? invalidChips(bcc) : [];
+    if (badBcc.length) {
+      setShowBcc(true);
+      return setBccError(t("compose.invalidList", { list: badBcc.join(", ") }));
+    }
+    setBccError(null);
     sending.current = true;
     const m = mode;
     const { html, text } = body;
@@ -338,8 +350,13 @@ export function Composer({
     const hold = holdForSend(autosave.id(), autosave.forget());
     const draft = hold.draft;
     editor.current?.clear();
-    // A note takes no files: the reply's uploads (ready or still going) stay for the reply.
-    if (m === "reply") uploads.clear();
+    // A note takes no files: the reply's uploads (ready or still going) and its Cco stay for the reply. A reply takes
+    // them along: the next message starts without them (an undo or a failure puts them back).
+    if (m === "reply") {
+      uploads.clear();
+      setBcc([]);
+      setShowBcc(false);
+    }
     // What was sent, as its draft: an undo or a failure after this composer is gone writes it back, so the text
     // comes back when the conversation opens again (the pending save was dropped by the send, and the server draft
     // may predate the last keystrokes).
@@ -378,7 +395,7 @@ export function Composer({
         },
         // The box is gone or off: what was sent waits in memory for it (read on its next mount or when it turns back
         // on), and is written back as the draft for a later visit (or another device).
-        keep: () => keepUndone(p.threadId, { mode: m, html, text, all: !!cc, signature: sig, files }),
+        keep: () => keepUndone(p.threadId, { mode: m, html, text, all: !!cc, signature: sig, files, bcc: blind ?? [] }),
         adopt: (id) => autosave.adopt(id),
         writeBack: (id) => saveDraft({ ...snapshot, ...(id ? { id } : {}) }),
         release: () => hold.release(),
@@ -417,7 +434,8 @@ export function Composer({
                       void cancelScheduled({ emailId })
                         .then((c) => {
                           if (!c.ok) return void toast(t("schedule.gone"));
-                          if (!mounted.current) return void toast(t("schedule.canceled"));
+                          // As an undone send: back in this box, or (the box gone or off) kept for it and written
+                          // back as a new draft (the scheduled send consumed the old one).
                           restore(false);
                           toast(t("schedule.editing"));
                         })
@@ -524,12 +542,19 @@ export function Composer({
               value={bcc}
               onChange={(next) => {
                 armed.current = true;
+                setBccError(null);
                 setBcc(next);
               }}
               contacts={contacts}
+              invalid={!!bccError}
               focusOnMount={!bcc.length}
             />
           </div>
+        )}
+        {!isNote && bccError && (
+          <p role="alert" className="px-3.5 pb-1 text-ui text-destructive">
+            {bccError}
+          </p>
         )}
         {!isNote && <SignatureLine mailbox={p.mailbox} on={signature} onToggle={setSignature} className="pb-2" />}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">

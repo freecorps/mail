@@ -69,6 +69,20 @@ export function tagNameError(name: string, mailboxTags: readonly TagDoc[], self?
   return null;
 }
 
+/**
+ * Why a tag can't be created from the menu for these threads: the name's own reason, or `threadFull` when a thread
+ * already has the most tags it takes (the new tag could not go on it, and would be left unused).
+ */
+export function tagCreateError(
+  name: string,
+  mailboxTags: readonly TagDoc[],
+  threads: ReadonlyArray<{ tags?: readonly string[] }>,
+): TagNameError | "threadFull" | null {
+  const e = tagNameError(name, mailboxTags);
+  if (e) return e;
+  return threads.some((x) => (x.tags?.length ?? 0) >= TAG_LIMITS.perThread) ? "threadFull" : null;
+}
+
 /** The tags whose name holds the query (ignoring case and accents), best first: starts-with, then contains. */
 export function matchTags(tags: readonly TagDoc[], query: string): TagDoc[] {
   const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();

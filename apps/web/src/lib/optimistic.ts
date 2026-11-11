@@ -268,9 +268,14 @@ function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Th
     if (!value || i < 0) continue;
     const next = patch(value.page[i]!);
     found ??= next;
-    const keep = viewKeeps(args.view, args.status, args.tag)(next);
+    const rest = value.page.filter((_, j) => j !== i);
+    // Adiadas is ordered by wake time: a new time moves the row to its place, or out of what is loaded (past the last
+    // row of a list that has more).
+    const order = orderOf(args);
+    const moves = order === soonerFirst && next.snoozedUntil !== value.page[i]!.snoozedUntil;
+    const keep = viewKeeps(args.view, args.status, args.tag)(next) && (!moves || inLoadedRange({ ...value, page: rest }, next, order));
     if (!keep) remember(next);
-    const page = keep ? value.page.map((t, j) => (j === i ? next : t)) : value.page.filter((_, j) => j !== i);
+    const page = !keep ? rest : moves ? [...rest, next].sort(order) : value.page.map((t, j) => (j === i ? next : t));
     store.setQuery<any>("inbox:view", args, { ...value, page });
   }
   return found && original ? { before: original, after: found } : null;
@@ -350,8 +355,10 @@ function editTags(store: Store, mailbox: string | null, edit: (list: TagDoc[]) =
   }>) {
     if (!value || (mailbox !== null && args.mailbox !== undefined && args.mailbox !== mailbox)) continue;
     // Grouped by mailbox as the server lists them (in the order the mailboxes come), each group in its tags' order.
-    const groups = [...new Set([...value, ...edit(value)].map((x) => x.mailbox))];
-    const next = edit(value).filter((x) => args.mailbox === undefined || x.mailbox === args.mailbox);
+    // `edit` runs once per list: what it returns is both the groups' source and the list.
+    const edited = edit(value);
+    const groups = [...new Set([...value, ...edited].map((x) => x.mailbox))];
+    const next = edited.filter((x) => args.mailbox === undefined || x.mailbox === args.mailbox);
     const at = (x: TagDoc) => groups.indexOf(x.mailbox);
     store.setQuery<any>(
       "inbox:tags",
@@ -429,7 +436,8 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
       }
       // The cross-mailbox views it belongs to (all, waiting) show it on top too, and their counts grow.
       for (const { args: va, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
-        if (!value || !viewKeeps(va.view, va.status)(thread)) continue;
+        // A tag's list (`tag`) never takes it: a new conversation has no tags.
+        if (!value || !viewKeeps(va.view, va.status, va.tag)(thread)) continue;
         store.setQuery<any>("inbox:view", va, { ...value, page: [thread, ...value.page] });
       }
       const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
@@ -466,20 +474,20 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
   };
   updates["inbox:createTag"] = (store, a: { mailbox: string; name: string; color?: string; order?: number }) => {
     const at = now();
-    editTags(store, a.mailbox, (list) => {
-      const order = a.order ?? list.filter((x) => x.mailbox === a.mailbox).reduce((n, x) => Math.max(n, x.order + 1), 0);
-      const tag: TagDoc = {
-        _id: tempId(at),
-        _creationTime: at,
-        mailbox: a.mailbox,
-        name: a.name.trim(),
-        nameKey: a.name.trim().toLowerCase(),
-        color: a.color ?? "gray",
-        order,
-        createdAt: at,
-      };
-      return [...list, tag];
-    });
+    // One tag for every list it joins (the same temporary id everywhere), last in its mailbox unless `order` says.
+    const loaded = (store.getAllQueries<any>("inbox:tags") as Array<{ value: TagDoc[] | undefined }>).flatMap((q) => q.value ?? []);
+    const order = a.order ?? loaded.filter((x) => x.mailbox === a.mailbox).reduce((n, x) => Math.max(n, x.order + 1), 0);
+    const tag: TagDoc = {
+      _id: tempId(at),
+      _creationTime: at,
+      mailbox: a.mailbox,
+      name: a.name.trim(),
+      nameKey: a.name.trim().toLowerCase(),
+      color: a.color ?? "gray",
+      order,
+      createdAt: at,
+    };
+    editTags(store, a.mailbox, (list) => [...list, tag]);
   };
   updates["inbox:updateTag"] = (store, a: { tagId: string; name?: string; color?: string; order?: number }) => {
     editTags(store, null, (list) =>

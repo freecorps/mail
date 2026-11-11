@@ -44,7 +44,7 @@ import { TagChips } from "@/components/TagChip";
 import type { TagDoc } from "@/lib/api";
 import { formatAtShort } from "@/lib/when";
 import { openPicker } from "@/model/picker";
-import { useSnooze } from "@/model/snooze";
+import { snoozeTargetOf, useSnooze } from "@/model/snooze";
 import { threadTags, useTagIndex } from "@/model/tags";
 
 export interface ThreadListProps {
@@ -385,7 +385,7 @@ const Row = memo(function Row({
   const tags = threadTags(r.tags, tagIndex);
   const snoozed = r.snoozedUntil ?? null;
   const snoozer = useSnooze();
-  const snoozeTarget = [{ threadId: r.threadId, ...(snoozed ? { snoozedUntil: snoozed } : {}) }];
+  const snoozeTarget = [snoozeTargetOf(r)];
   return (
     <div
       className={cn(
@@ -637,9 +637,7 @@ function BulkBar({
           </TooltipContent>
         </Tooltip>
         <DropdownMenuContent align="end" className="w-64">
-          <SnoozeItems
-            targets={confirmed.map((r) => ({ threadId: r.threadId, ...(r.snoozedUntil ? { snoozedUntil: r.snoozedUntil } : {}) }))}
-          />
+          <SnoozeItems targets={confirmed.map(snoozeTargetOf)} />
         </DropdownMenuContent>
       </DropdownMenu>
       {oneMailbox && (

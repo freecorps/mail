@@ -22,6 +22,9 @@ export function toChips(input: string): Chip[] {
 /** A chip already made (one recipient, never split again: a name may hold a comma). */
 export const chipOf = (value: string): Chip => ({ value, valid: isRecipient(value) });
 
+/** The chips of a field that are not a recipient (what the field's error names). */
+export const invalidChips = (values: readonly string[]): string[] => values.filter((v) => !chipOf(v).valid);
+
 /** The address inside a chip ("Bia <b@x.com>" → b@x.com), lower case. */
 export const chipEmail = (value: string) => (/<([^>]+)>\s*$/.exec(value)?.[1] ?? value).trim().toLowerCase();
 

@@ -60,7 +60,7 @@ import { isPersonal, MIN_QUERY, useDebounced } from "@/model/threads";
 import { mailboxIcon, VIEW_ICON, type Folder } from "@/lib/nav";
 import { formatAt, snoozePresets } from "@/lib/when";
 import { openPicker } from "@/model/picker";
-import { useSnooze } from "@/model/snooze";
+import { snoozeTargetOf, useSnooze } from "@/model/snooze";
 import { tagsOf, useAllTags, useTagActions } from "@/model/tags";
 
 export interface PaletteProps {
@@ -226,9 +226,7 @@ function Body(p: PaletteProps & { close: () => void }) {
                 icon={AlarmClock}
                 label={t("palette.snooze", { name: t(`snooze.${x.id}`) })}
                 hint={formatAt(x.at, openedAt, locale)}
-                onSelect={run(() =>
-                  snoozer.snooze([{ threadId: th._id, ...(th.snoozedUntil ? { snoozedUntil: th.snoozedUntil } : {}) }], x.at),
-                )}
+                onSelect={run(() => snoozer.snooze([snoozeTargetOf(th)], x.at))}
               />
             ))}
             <Item
@@ -239,12 +237,16 @@ function Body(p: PaletteProps & { close: () => void }) {
                 openPicker({
                   kind: "snooze",
                   date: true,
-                  targets: [{ threadId: th._id, ...(th.snoozedUntil ? { snoozedUntil: th.snoozedUntil } : {}) }],
+                  targets: [snoozeTargetOf(th)],
                 }),
               )}
             />
             {th.snoozed && (
-              <Item icon={AlarmClockOff} label={t("palette.unsnooze")} onSelect={run(() => snoozer.unsnooze(th._id, th.snoozedUntil))} />
+              <Item
+                icon={AlarmClockOff}
+                label={t("palette.unsnooze")}
+                onSelect={run(() => snoozer.unsnooze(th._id, snoozeTargetOf(th).snoozedUntil))}
+              />
             )}
             <Item
               icon={Tags}

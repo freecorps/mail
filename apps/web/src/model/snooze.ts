@@ -6,7 +6,7 @@ import { useMutation } from "@freecorps/ember-react";
 import { toast } from "sonner";
 import { useI18n } from "@/i18n/context";
 import { plural } from "@/i18n/strings";
-import { api } from "@/lib/api";
+import { api, type Thread } from "@/lib/api";
 import { formatAt } from "@/lib/when";
 import { UNDO_MS } from "./actions";
 
@@ -14,6 +14,19 @@ export interface SnoozeTarget {
   threadId: string;
   /** When it is snoozed until now (undefined: awake), for Desfazer. */
   snoozedUntil?: number;
+}
+
+/**
+ * The target of a snooze, the one builder every surface uses (keys, rows, the bulk bar, the header, ⌘K). Its wake time
+ * counts as "before" (what Desfazer goes back to) only while the thread is snoozed: a thread says so with `snoozed` (a
+ * stale `snoozedUntil` on an awake thread is ignored); a list row already carries `snoozedUntil` only then
+ * (`threadRow`).
+ */
+export function snoozeTargetOf(
+  t: Pick<Thread, "_id" | "snoozed" | "snoozedUntil"> | { threadId: string; snoozedUntil?: number | null },
+): SnoozeTarget {
+  if ("threadId" in t) return t.snoozedUntil ? { threadId: t.threadId, snoozedUntil: t.snoozedUntil } : { threadId: t.threadId };
+  return t.snoozed === true && t.snoozedUntil ? { threadId: t._id, snoozedUntil: t.snoozedUntil } : { threadId: t._id };
 }
 
 const report = (p: Promise<unknown>) => void p.catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e)));
