@@ -858,11 +858,24 @@ const TABLES: Record<Locale, Record<StringKey, string>> = { "pt-BR": ptBR, en };
 
 export type Vars = Record<string, string | number>;
 
-/** `{count}` strings may have a singular form under `<key>.one`, used when count is 1. */
+const counts: Partial<Record<Locale, Intl.NumberFormat>> = {};
+/** A count in the locale's digits and grouping: "10.482 não lidas", "10,482 unread" (never "10482"). */
+const formatCount = (locale: Locale, n: number) => (counts[locale] ??= new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })).format(n);
+
+/**
+ * `{count}` strings may have a singular form under `<key>.one`, used when count is 1. A numeric `{count}` is grouped
+ * for the locale; other numbers (a thread's #number) go in as they are.
+ */
 export function translate(locale: Locale, key: StringKey, vars?: Vars): string {
   const one = vars?.count === 1 ? (`${key}.one` as StringKey) : null;
   const s = (one && (TABLES[locale][one] ?? ptBR[one])) || (TABLES[locale][key] ?? ptBR[key] ?? key);
-  return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
+  return vars
+    ? s.replace(/\{(\w+)\}/g, (m, k: string) => {
+        if (!(k in vars)) return m;
+        const v = vars[k]!;
+        return k === "count" && typeof v === "number" ? formatCount(locale, v) : String(v);
+      })
+    : s;
 }
 
 /** Device language tags (most preferred first) → UI locale: English only when the device prefers it. */
