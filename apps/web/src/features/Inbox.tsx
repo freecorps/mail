@@ -71,7 +71,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = state.current;
-      if (s.dialogs || e.defaultPrevented) return;
+      // Any open dialog (compose, the delete confirmation, forwarding…) owns the keyboard.
+      if (
+        s.dialogs ||
+        e.defaultPrevented ||
+        document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')
+      )
+        return;
       const inField = isTextField(document.activeElement);
       const action = shortcutFor(e, inField);
       if (!action) return;
