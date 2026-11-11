@@ -75,7 +75,7 @@ export function Composer({
     >
       <div
         className={cn(
-          "rounded-xl border bg-card shadow-xs transition-colors duration-150 focus-within:border-ring/60 focus-within:ring-[3px] focus-within:ring-ring/15",
+          "rounded-lg border bg-card shadow-xs transition-colors duration-150 focus-within:border-ring/60 focus-within:ring-[3px] focus-within:ring-ring/15",
           note && "border-note-border bg-note",
         )}
       >
@@ -110,12 +110,12 @@ export function Composer({
               <ToggleGroupItem value="reply" className="gap-1.5 px-2.5 text-xs">
                 <Send className="size-3.5" aria-hidden="true" />
                 {t("thread.replyMode")}
-                <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">r</Kbd>
+                <Kbd className="ml-0.5 h-4 min-w-4">r</Kbd>
               </ToggleGroupItem>
               <ToggleGroupItem value="note" className="gap-1.5 px-2.5 text-xs">
                 <StickyNote className="size-3.5" aria-hidden="true" />
                 {t("thread.noteMode")}
-                <Kbd className="ml-0.5 h-4 min-w-4 text-[10px]">n</Kbd>
+                <Kbd className="ml-0.5 h-4 min-w-4">n</Kbd>
               </ToggleGroupItem>
             </ToggleGroup>
           )}

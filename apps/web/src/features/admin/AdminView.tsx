@@ -55,7 +55,7 @@ export function AdminView(p: { section: AdminSection; onSection: (s: AdminSectio
           <Button size="icon-sm" variant="ghost" aria-label={t("admin.back")} onClick={p.onClose}>
             <ArrowLeft aria-hidden="true" />
           </Button>
-          <h1 className="text-base font-semibold tracking-tight">{t("admin.title")}</h1>
+          <h1 className="text-base font-semibold">{t("admin.title")}</h1>
         </div>
         <ul className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:gap-0.5 md:overflow-visible">
           {ADMIN_SECTIONS.map((s) => {

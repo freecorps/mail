@@ -52,18 +52,18 @@ export function SignIn() {
   return (
     <main className="grid min-h-full lg:grid-cols-[1fr_minmax(420px,40%)]">
       <section className="relative hidden overflow-hidden bg-sidebar lg:flex lg:flex-col lg:justify-between lg:p-12">
-        <div className="flex items-center gap-2.5 text-sm font-semibold tracking-tight">
+        <div className="flex items-center gap-2.5 text-sm font-semibold">
           <Logo />
           {t("app.name")}
         </div>
         <InboxPreview />
-        <p className="max-w-sm text-balance text-2xl font-medium tracking-tight text-foreground/90">{t("signin.aside")}</p>
+        <p className="max-w-sm text-balance text-xl font-medium text-foreground/90">{t("signin.aside")}</p>
       </section>
       <section className="flex items-center justify-center px-6 py-16">
         <form onSubmit={submit} className="w-full max-w-sm space-y-6" aria-describedby={error ? ids.error : undefined}>
           <div className="space-y-1.5">
             <Logo className="mb-6 size-9 lg:hidden" />
-            <h1 className="text-2xl font-semibold tracking-tight">{mode === "signin" ? t("signin.title") : t("signin.signup")}</h1>
+            <h1 className="text-xl font-semibold">{mode === "signin" ? t("signin.title") : t("signin.signup")}</h1>
             <p className="text-sm text-muted-foreground">{t("signin.subtitle")}</p>
           </div>
           <div className="space-y-4">
@@ -126,10 +126,7 @@ function InboxPreview() {
     { who: "João Pereira", subject: "Pedido de exclusão de dados (LGPD)", tone: "open", unread: false },
   ];
   return (
-    <div
-      aria-hidden="true"
-      className="mx-auto w-full max-w-md rounded-xl border bg-card p-1.5 shadow-[0_1px_0_rgba(0,0,0,0.03),0_12px_40px_-12px_rgba(60,40,20,0.18)]"
-    >
+    <div aria-hidden="true" className="mx-auto w-full max-w-md rounded-lg border bg-card p-1.5 shadow-raised">
       {rows.map((r, i) => (
         <div key={r.who} className={`flex items-center gap-3 rounded-lg px-3 py-3 ${i === 0 ? "bg-selected" : ""}`}>
           <span className={`size-1.5 rounded-full ${r.unread ? "bg-primary" : "bg-transparent"}`} />
@@ -137,12 +134,12 @@ function InboxPreview() {
             <div className="flex items-center justify-between gap-2">
               <span className={`truncate text-sm ${r.unread ? "font-semibold" : "font-medium"}`}>{r.who}</span>
               <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${r.tone === "open" ? "bg-status-open/12 text-status-open" : "bg-status-waiting/14 text-status-waiting"}`}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.tone === "open" ? "bg-status-open/12 text-status-open" : "bg-status-waiting/14 text-status-waiting"}`}
               >
                 {t(r.tone === "open" ? "status.open" : "status.waiting")}
               </span>
             </div>
-            <p className="truncate text-[13px] text-muted-foreground">{r.subject}</p>
+            <p className="truncate text-ui text-muted-foreground">{r.subject}</p>
           </div>
         </div>
       ))}

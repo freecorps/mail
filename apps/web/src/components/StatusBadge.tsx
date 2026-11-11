@@ -12,7 +12,7 @@ const TONE: Record<ThreadStatus, string> = {
 export function StatusBadge({ status, className }: { status: ThreadStatus; className?: string }) {
   const { t } = useI18n();
   return (
-    <span className={cn("inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium", TONE[status], className)}>
+    <span className={cn("inline-flex h-5 items-center rounded-full px-2 text-xs font-medium", TONE[status], className)}>
       {t(`status.${status}`)}
     </span>
   );
