@@ -129,10 +129,20 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
     virtualizer.scrollToIndex(i, { align: "auto" });
   }, [p.cursorId, items, virtualizer]);
 
+  // Another list (view, mailbox, status, search) starts at its top: the list stays mounted (the search box keeps its
+  // focus), so a scroll left from the previous one would land mid-page and make infinite scroll load page two at once.
+  const { place, canLoadMore, loading, onLoadMore } = p;
+  const shownPlace = useRef(place);
+  useLayoutEffect(() => {
+    if (shownPlace.current === place) return;
+    shownPlace.current = place;
+    followed.current = null;
+    if (scroller.current) scroller.current.scrollTop = 0;
+  }, [place]);
+
   // Infinite scroll: the next page loads when the last rows come into view (once per page of each list).
   const asked = useRef<{ place: string; count: number } | null>(null);
   const lastIndex = virtual.at(-1)?.index ?? -1;
-  const { place, canLoadMore, loading, onLoadMore } = p;
   useEffect(() => {
     if (!loadMoreDue({ place, count: items.length, lastIndex, canLoadMore, loading, asked: asked.current })) return;
     asked.current = { place, count: items.length };

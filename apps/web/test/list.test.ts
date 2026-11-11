@@ -142,6 +142,11 @@ describe("selection", () => {
     expect(shortcutFor({ key: "ArrowDown", shiftKey: true }, false)).toBe("extendNext");
     expect(shortcutFor({ key: "ArrowUp" }, false)).toBe("prev");
     expect(shortcutFor({ key: "x" }, true)).toBeNull();
+    // Caps Lock: "J"/"K" without Shift still move; Shift with Caps Lock ("j") still extends.
+    expect(shortcutFor({ key: "J" }, false)).toBe("next");
+    expect(shortcutFor({ key: "K" }, false)).toBe("prev");
+    expect(shortcutFor({ key: "E" }, false)).toBe("archive");
+    expect(shortcutFor({ key: "j", shiftKey: true }, false)).toBe("extendNext");
   });
 
   it("counted strings pick one/other by locale", () => {

@@ -57,7 +57,9 @@ export function shortcutFor(e: KeyLike, inField: boolean): ShortcutAction | null
   // shift+↓/↑ extend the selection as shift+j/k do.
   if (e.shiftKey && e.key === "ArrowDown") return "extendNext";
   if (e.shiftKey && e.key === "ArrowUp") return "extendPrev";
-  return KEYS[e.key] ?? null;
+  // Letters by what Shift says, not by their case: with Caps Lock on, a plain j/k reports "J"/"K" and must still move.
+  const key = /^[a-z]$/i.test(e.key) ? (e.shiftKey ? e.key.toUpperCase() : e.key.toLowerCase()) : e.key;
+  return KEYS[key] ?? null;
 }
 
 /** Whether keys typed now go to a text field (inputs, textareas, selects, contenteditable). */
