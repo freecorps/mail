@@ -15,7 +15,8 @@ export type ShortcutAction =
   | "palette"
   | "select"
   | "extendNext"
-  | "extendPrev";
+  | "extendPrev"
+  | "info";
 
 export interface KeyLike {
   key: string;
@@ -42,6 +43,7 @@ const KEYS: Record<string, ShortcutAction> = {
   "?": "help",
   "[": "sidebar",
   x: "select",
+  i: "info",
   J: "extendNext",
   K: "extendPrev",
 };
@@ -101,6 +103,7 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["r"], action: "reply" },
   { keys: ["n"], action: "note" },
   { keys: ["c"], action: "compose" },
+  { keys: ["i"], action: "info" },
   { keys: ["/"], action: "search" },
   { keys: ["["], action: "sidebar" },
   { keys: ["Esc"], action: "escape" },

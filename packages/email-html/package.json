@@ -2,13 +2,14 @@
   "name": "@freecorps/mail-email-html",
   "version": "0.0.0",
   "private": true,
-  "description": "Safe rendering of inbound HTML mail (sanitizer, URL allowlist, CSP, cid: resolution), shared by the web inbox (iframe) and the mobile app (WebView); composer helpers (limits, saved reply variables) under ./compose.",
+  "description": "Safe rendering of inbound HTML mail (sanitizer, URL allowlist, CSP, cid: resolution), shared by the web inbox (iframe) and the mobile app (WebView); composer helpers (limits, saved reply variables) under ./compose; quoted-text detection under ./quote.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
   "exports": {
     ".": "./src/index.ts",
     "./compose": "./src/compose.ts",
+    "./quote": "./src/quote.ts",
     "./test-samples": "./test/samples.ts"
   },
   "scripts": {

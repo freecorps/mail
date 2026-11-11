@@ -24,6 +24,8 @@ export type Prefs = {
   reading: ReadingMode;
   sidebarCollapsed: boolean;
   panes: PaneWidths;
+  /** The conversation's context panel (contact, earlier conversations, files), where there is room for it. */
+  contextPanel: boolean;
 };
 
 const clampWidth = (v: unknown, min: number, max: number, fallback: number) =>
@@ -42,6 +44,7 @@ export function parsePrefs(raw: unknown): Prefs {
     density: r.density === "compact" ? "compact" : "comfortable",
     reading: READING_MODES.includes(r.reading as ReadingMode) ? (r.reading as ReadingMode) : "split",
     sidebarCollapsed: r.sidebarCollapsed === true,
+    contextPanel: r.contextPanel !== false,
     panes: {
       sidebar: clampWidth(panes.sidebar, PANE_LIMITS.sidebar.min, PANE_LIMITS.sidebar.max, DEFAULT_PANES.sidebar),
       list: clampWidth(panes.list, PANE_LIMITS.list.min, PANE_LIMITS.list.max, DEFAULT_PANES.list),
@@ -113,6 +116,7 @@ export function usePrefs() {
   const setSidebarCollapsed = useCallback((c: boolean) => {
     if (current.sidebarCollapsed !== c) write({ ...current, sidebarCollapsed: c });
   }, []);
+  const setContextPanel = useCallback((v: boolean) => write({ ...current, contextPanel: v }), []);
   const setPanes = useCallback((p: Partial<PaneWidths>) => {
     const next = { ...current.panes, ...p };
     if (next.sidebar !== current.panes.sidebar || next.list !== current.panes.list) write({ ...current, panes: next });
@@ -125,6 +129,8 @@ export function usePrefs() {
     reading: prefs.reading,
     sidebarCollapsed: prefs.sidebarCollapsed,
     panes: prefs.panes,
+    contextPanel: prefs.contextPanel,
+    setContextPanel,
     setTheme,
     setLocale,
     setDensity,

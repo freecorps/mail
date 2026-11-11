@@ -298,8 +298,10 @@ describe("theme", () => {
       reading: "split",
       sidebarCollapsed: false,
       panes: { sidebar: 248, list: 380 },
+      contextPanel: true,
     };
     expect(parsePrefs(null)).toEqual(defaults);
+    expect(parsePrefs({ contextPanel: false }).contextPanel).toBe(false);
     expect(parsePrefs({ theme: "dark", locale: "en", density: "compact", reading: "focus", sidebarCollapsed: true })).toEqual({
       ...defaults,
       theme: "dark",

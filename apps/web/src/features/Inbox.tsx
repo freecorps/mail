@@ -2,6 +2,7 @@
 // On wide windows the panes are resizable (widths and the sidebar's collapsed state are prefs) and the reading mode
 // decides where a conversation opens: its own pane (split), or over the list at full width (full, focus). Phones show
 // one pane at a time.
+import { createPortal } from "react-dom";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Columns2, Columns3, LayoutList, PenSquare, Settings, WifiOff } from "lucide-react";
 import { useConnectionState, useEmberClient, useMutation } from "@freecorps/ember-react";
@@ -31,6 +32,9 @@ import { extendSelection, selectable, selectRange, toggleSelected, visibleSelect
 import { useRoute, useSearchBox } from "@/model/route";
 import { useMailboxes, useThreadList } from "@/model/threads";
 import { DataToggle } from "@/dev/DataToggle";
+import { Slot } from "@/components/Reparent";
+import { useHost } from "@/lib/host";
+import { requestContextToggle } from "@/lib/contextPanel";
 import { ComposeDialog } from "./ComposeDialog";
 import type { ComposerHandle } from "./Composer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
@@ -93,6 +97,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const [composeOpen, setComposeOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const composer = useRef<ComposerHandle>(null);
+  const threadHost = useHost();
   const search = useRef<HTMLInputElement>(null);
   const actions = useThreadActions();
   const client = useEmberClient();
@@ -300,6 +305,10 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
               return;
           }
           return;
+        case "info":
+          if (!s.thread) return;
+          requestContextToggle();
+          return;
         case "help":
           setHelpOpen(true);
           return;
@@ -497,11 +506,18 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     />
   );
 
+  // The open conversation renders once, into `threadHost`; the slot of the current layout adopts it (no remount when
+  // the reading mode or the breakpoint changes).
+  const at = route.thread ? rows.findIndex((r) => r.threadId === route.thread) : -1;
+  const prevId = at > 0 ? rows[at - 1]!.threadId : null;
+  const nextId = at >= 0 && at < rows.length - 1 ? rows[at + 1]!.threadId : null;
   const thread = route.thread ? (
     <ThreadView
       key={route.thread}
       threadId={route.thread}
       onBack={() => navigate({ thread: null }, { push: true })}
+      onPrev={prevId ? () => open(prevId) : undefined}
+      onNext={nextId ? () => open(nextId) : undefined}
       showBack={overlay}
       composerRef={composer}
       onOpenThread={(id) => navigate({ thread: id }, { push: true })}
@@ -534,12 +550,16 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
             </ResizablePanel>
             <ResizableHandle />
             <ResizablePanel id="reader" minSize={PANE_LIMITS.reader.min}>
-              <main className="flex h-full min-w-0 flex-col bg-background">{(!overlay && thread) || today}</main>
+              <main className="flex h-full min-w-0 flex-col bg-background">{!overlay && thread ? <Slot host={threadHost} /> : today}</main>
             </ResizablePanel>
           </ResizablePanelGroup>
         )}
       </div>
-      {overlay && thread && <main className="absolute inset-0 flex min-w-0 flex-col bg-background">{thread}</main>}
+      {overlay && thread && (
+        <main className="absolute inset-0 flex min-w-0 flex-col bg-background">
+          <Slot host={threadHost} />
+        </main>
+      )}
     </div>
   );
 
@@ -595,7 +615,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           />
         </div>
       ) : (
-        <main className="flex min-h-0 min-w-0 flex-1">{thread ?? list}</main>
+        <main className="flex min-h-0 min-w-0 flex-1">{thread ? <Slot host={threadHost} /> : list}</main>
       )}
       {!route.thread && !adminSection && !wide && (
         <Button
@@ -615,6 +635,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
         onSent={(id) => open(id)}
       />
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      {thread && !adminSection && createPortal(thread, threadHost)}
       {import.meta.env.DEV && <DataToggle />}
       <Suspense fallback={null}>
         <CommandPalette

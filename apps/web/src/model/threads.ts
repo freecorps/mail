@@ -4,6 +4,7 @@ import { useQuerySnapshot } from "@freecorps/ember-react";
 import { api, type Mailbox, type SearchHit, type SentThread, type Thread, type ThreadStatus, type View } from "@/lib/api";
 import { contactOf, displayAddress } from "@/lib/format";
 import { isOptimisticId } from "@/lib/optimistic";
+import { snippetWithoutQuote } from "@freecorps/mail-email-html/quote";
 import { useDevData } from "@/dev/data";
 import { FIXTURES } from "@/dev/fixtures";
 
@@ -47,7 +48,7 @@ export function threadRow(t: Thread): ThreadRow {
     number: t.number,
     title: contactOf(t),
     subject: t.subject,
-    snippet: t.snippet,
+    snippet: snippetWithoutQuote(t.snippet),
     at: t.lastMessageAt,
     unread: t.unreadCount > 0,
     status: t.status,
