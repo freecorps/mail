@@ -16,7 +16,7 @@ const MineWidget = (props: MineSnapshot, env: WidgetEnvironment) => {
   const background = containerBackground(dark ? "#1C1C1E" : "#FFFFFF", "widget");
   const family = env.widgetFamily ?? "systemSmall";
   const ready = p.v === 1 && p.state === "ready";
-  const url = p.url ?? "embermail://";
+  const url = p.url || "embermail://";
   const rows = ready ? (p.rows ?? []) : [];
   const count = p.count ?? 0;
   const secondary = foregroundStyle({ type: "hierarchical", style: "secondary" });
@@ -81,7 +81,7 @@ const MineWidget = (props: MineSnapshot, env: WidgetEnvironment) => {
       {rows.length > 0 ? (
         <VStack alignment="leading" spacing={8} modifiers={[frame({ maxWidth: Infinity, alignment: "topLeading" })]}>
           {rows.map((r) => (
-            <Link key={r.url} destination={r.url}>
+            <Link key={r.url || r.sender} destination={r.url || url}>
               <VStack alignment="leading" spacing={1} modifiers={[frame({ maxWidth: Infinity, alignment: "leading" })]}>
                 <HStack spacing={5}>
                   {r.unread ? <Image systemName="circle.fill" size={7} color={accent} /> : null}

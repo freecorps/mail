@@ -19,13 +19,16 @@ export const MINE_ROWS = 3;
 /** At most one write per this many ms while the inbox changes (live counts move often). */
 export const WIDGET_WRITE_INTERVAL_MS = 15_000;
 
-/** The deep links a widget opens (expo-router routes, see src/navigation.ts). */
+/**
+ * The deep links a widget opens (expo-router routes, see src/navigation.ts). Never empty or dangling: a mailbox or
+ * thread without a name or id opens the list it belongs to instead.
+ */
 export const widgetUrls = {
   home: `${WIDGET_SCHEME}://`,
   unread: `${WIDGET_SCHEME}://view/unread`,
   mine: `${WIDGET_SCHEME}://mine`,
-  mailbox: (name: string) => `${WIDGET_SCHEME}://mailbox/${encodeURIComponent(name)}`,
-  thread: (id: string) => `${WIDGET_SCHEME}://thread/${encodeURIComponent(id)}`,
+  mailbox: (name: string) => (name ? `${WIDGET_SCHEME}://mailbox/${encodeURIComponent(name)}` : `${WIDGET_SCHEME}://`),
+  thread: (id: string) => (id ? `${WIDGET_SCHEME}://thread/${encodeURIComponent(id)}` : `${WIDGET_SCHEME}://mine`),
 };
 
 /**

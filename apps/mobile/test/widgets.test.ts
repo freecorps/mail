@@ -26,6 +26,9 @@ const zero = { threads: 0, unread: 0, capped: false };
 const counts = (assigned: Partial<ViewCounts["assigned"]> = {}): ViewCounts => ({ all: zero, unread: zero, waiting: zero, snoozed: zero, assigned: { ...zero, ...assigned } });
 const inputs = (o: Partial<WidgetInputs> = {}): WidgetInputs => ({ locale: "pt-BR", mailboxes: [], counts: counts(), assigned: [], preview: true, ...o });
 
+/** Every link a snapshot carries, the widget's own and its rows'. */
+const linksOf = (s: { url: string; rows: { url: string }[]; top?: { url: string } | null }) => [s.url, ...s.rows.map((r) => r.url), ...(s.top ? [s.top.url] : [])];
+
 describe("widget snapshots", () => {
   it("Não lidas: the total, the mailbox with the most, and up to four mailboxes, most unread first", () => {
     const mailboxes = [box("support", 3), box("privacy", 0, { displayName: "Privacidade" }), box("heitor", 1, { personal: true }), box("billing", 12), box("legal", 3), box("jobs", 0)];
@@ -100,6 +103,21 @@ describe("widget snapshots", () => {
     // A failed query is settled: its part is left out (counts only), which is what the widget can honestly show.
     expect(widgetInputsReady({ ...ok, notifications: "error", assigned: "error" })).toBe(true);
     expect(widgetInputsReady({ ...ok, mailboxes: "error" })).toBe(false);
+  });
+
+  it("every tap target is one of the app's deep links, never empty (a row tap needs a link that resolves)", () => {
+    const all = [
+      buildWidgetSnapshots(inputs({ mailboxes: [box("support", 3), box("", 1), box("privacy", 0)], counts: counts({ threads: 3 }), assigned: [thread("t1"), thread(""), thread("t/3")] })),
+      buildWidgetSnapshots(inputs()),
+      signedOutSnapshots("en"),
+    ];
+    for (const s of all) {
+      for (const url of [...linksOf(s.unread), ...linksOf(s.mine)]) {
+        expect(url).toMatch(/^embermail:\/\//);
+        // A mailbox or thread link always names one; without a name or id the row opens its list.
+        if (url !== widgetUrls.home) expect(url).not.toMatch(/\/$/);
+      }
+    }
   });
 
   it("signed out: no count, mailbox, sender or subject, only 'sign in' in the app's language", () => {

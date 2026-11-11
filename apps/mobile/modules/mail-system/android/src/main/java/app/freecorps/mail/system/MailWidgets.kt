@@ -98,10 +98,17 @@ internal object MailWidgets {
       null
     }
 
-  /** Opens one of the app's deep links in its own task (the app's activity handles `embermail://`). */
-  fun open(context: Context, url: String): Action =
+  /** The app's home (the mailbox list): where a tap without a link of its own goes. */
+  const val HOME = "embermail://"
+
+  /**
+   * Opens one of the app's deep links in its own task (the app's activity handles `embermail://`). A missing or empty
+   * link (an older or damaged snapshot) opens the app's home instead of an intent nothing resolves.
+   */
+  fun open(context: Context, url: String?): Action =
     actionStartActivity(
-      Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(context.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      Intent(Intent.ACTION_VIEW, Uri.parse(url?.takeIf { it.isNotEmpty() } ?: HOME)).setPackage(context.packageName)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     )
 
   /** Below Android 12 (no dynamic colors): Material 3 schemes around the ember accent (src/theme/colors.ts). */
@@ -128,7 +135,7 @@ private abstract class MailWidget(private val kind: String) : GlanceAppWidget() 
         val snapshot = MailWidgets.parse(json)
         Column(
           modifier = GlanceModifier.fillMaxSize().appWidgetBackground().systemCorners().background(GlanceTheme.colors.widgetBackground)
-            .padding(16.dp).clickable(MailWidgets.open(context, snapshot?.optString("url")?.takeIf { it.isNotEmpty() } ?: "embermail://")),
+            .padding(16.dp).clickable(MailWidgets.open(context, snapshot?.optString("url"))),
         ) {
           Content(snapshot, LocalSize.current.width >= MailWidgets.MEDIUM.width)
         }

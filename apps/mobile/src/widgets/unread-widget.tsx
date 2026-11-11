@@ -18,7 +18,7 @@ const UnreadWidget = (props: UnreadSnapshot, env: WidgetEnvironment) => {
   const background = containerBackground(dark ? "#1C1C1E" : "#FFFFFF", "widget");
   const family = env.widgetFamily ?? "systemSmall";
   const ready = p.v === 1 && p.state === "ready";
-  const url = p.url ?? "embermail://";
+  const url = p.url || "embermail://";
   const secondary = foregroundStyle({ type: "hierarchical", style: "secondary" });
 
   if (family === "accessoryInline") {
@@ -87,7 +87,7 @@ const UnreadWidget = (props: UnreadSnapshot, env: WidgetEnvironment) => {
       ) : (
         <VStack alignment="leading" spacing={5}>
           {rows.map((r) => (
-            <Link key={r.url} destination={r.url}>
+            <Link key={r.label} destination={r.url || url}>
               <HStack spacing={8}>
                 <Text modifiers={[font({ textStyle: "subheadline", weight: r.unread > 0 ? "semibold" : "regular" }), lineLimit(1), ...(r.unread > 0 ? [] : [secondary])]}>{r.label}</Text>
                 <Spacer />
