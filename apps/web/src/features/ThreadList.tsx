@@ -389,7 +389,8 @@ const Row = memo(function Row({
   return (
     <div
       className={cn(
-        "group/row relative my-px flex gap-2 rounded-md py-(--row-y) pr-(--row-x) pl-1.5 transition-colors duration-(--motion-hover) select-none",
+        // No color transition: j/k moves the cursor and Enter opens rows all day, and a keyboard action never animates.
+        "group/row relative my-px flex gap-2 rounded-md py-(--row-y) pr-(--row-x) pl-1.5 select-none",
         open ? "bg-selected" : checked ? "bg-selected/55" : "hover:bg-accent/70",
         cursor && !open && "ring-1 ring-ring/40 ring-inset",
         cursor && !open && !checked && "bg-accent",
@@ -435,9 +436,14 @@ const Row = memo(function Row({
         }}
         className="min-w-0 flex-1 rounded-md text-left outline-none after:absolute after:inset-0 after:rounded-md after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring focus-visible:after:ring-inset"
       >
-        <span className="flex items-baseline gap-2">
+        {/* While the hover actions show (they sit over the time), the name fades out under them instead of running
+            beneath the icons. */}
+        <span className="flex items-baseline gap-2 group-hover/row:mask-(--under-actions) group-has-[:focus-visible]/row:mask-(--under-actions) group-has-[[aria-expanded=true]]/row:mask-(--under-actions) [--under-actions:linear-gradient(to_left,transparent_6.75rem,#000_7.75rem)]">
           <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-            <span className={cn("min-w-0 truncate text-sm", r.unread ? "font-semibold text-foreground" : "font-medium text-foreground/85")}>
+            <span
+              dir="auto"
+              className={cn("min-w-0 truncate text-sm", r.unread ? "font-semibold text-foreground" : "font-medium text-foreground/85")}
+            >
               {r.title}
             </span>
             {mailboxName && <span className="max-w-[35%] shrink-0 truncate text-xs text-muted-foreground">{mailboxName}</span>}
@@ -483,7 +489,9 @@ const Row = memo(function Row({
         </span>
         {(r.snippet || tags.length > 0) && (
           <span className="mt-0.5 flex min-w-0 items-center gap-2 compact:hidden">
-            <span className="line-clamp-1 min-w-0 flex-1 text-ui text-muted-foreground">{r.snippet}</span>
+            <span dir="auto" className="line-clamp-1 min-w-0 flex-1 text-left text-ui text-muted-foreground">
+              {r.snippet}
+            </span>
             {tags.length > 0 && <TagChips tags={tags} max={3} className="max-w-[65%] shrink-0" />}
           </span>
         )}

@@ -498,7 +498,7 @@ export function Composer({
       <div
         ref={box}
         className={cn(
-          "relative rounded-lg border bg-card shadow-xs transition-colors duration-150 focus-within:border-ring/60 focus-within:ring-[3px] focus-within:ring-ring/15",
+          "relative rounded-lg border bg-card shadow-xs transition-[border-color,box-shadow] duration-(--motion-hover) focus-within:border-ring/60 focus-within:ring-[3px] focus-within:ring-ring/15",
           isNote && "border-note-border bg-note",
           dragging && "border-primary ring-[3px] ring-primary/20",
         )}

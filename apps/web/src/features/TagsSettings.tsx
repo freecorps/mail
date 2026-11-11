@@ -16,7 +16,7 @@ import { api, TAG_COLORS, type TagColor, type TagDoc } from "@/lib/api";
 import { isOptimisticId } from "@/lib/optimistic";
 import { asColor, nextColor, swapOrders, TAG_LIMITS, tagNameError, tagsOf, useAllTags, type TagNameError } from "@/model/tags";
 import { useMailboxes } from "@/model/threads";
-import { Confirm } from "./admin/parts";
+import { Confirm } from "@/components/Confirm";
 
 /** "1 conversa", else "0 conversas", "2 conversas" (Intl calls 0 "one" in Portuguese; a count reads plural). */
 const countKey = <B extends string>(base: B, n: number) => `${base}.${n === 1 ? "one" : "other"}` as const;

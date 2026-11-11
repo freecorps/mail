@@ -14,7 +14,7 @@ import { useI18n } from "@/i18n/context";
 import { api, type Mailbox, type SavedReply } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { openComposerDialog, useComposerDialog } from "@/model/dock";
-import { Confirm } from "../admin/parts";
+import { Confirm } from "@/components/Confirm";
 
 export function ComposerDialogs({ mailboxes }: { mailboxes: Mailbox[] }) {
   const d = useComposerDialog();

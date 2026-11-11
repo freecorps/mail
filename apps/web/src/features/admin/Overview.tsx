@@ -5,6 +5,7 @@ import { useI18n } from "@/i18n/context";
 import { api, type ServerInfo } from "@/lib/api";
 import { formatFull } from "@/lib/format";
 import type { AdminSection } from "@/model/route";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, Failure, Loading, SectionHeader } from "./parts";
 import { useLive } from "./hooks";
 
@@ -59,7 +60,15 @@ export function Overview(p: { server: ServerInfo | null; serverError: string | n
         {stats.state === "error" ? (
           <Failure message={stats.message} />
         ) : stats.state === "loading" ? (
-          <Loading rows={2} />
+          <ul className="grid grid-cols-2 gap-3 lg:grid-cols-5" aria-busy="true">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <li key={i} className="space-y-2.5 rounded-lg border bg-card p-4" aria-hidden="true">
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="h-6 w-10" />
+                <Skeleton className="h-3 w-20" />
+              </li>
+            ))}
+          </ul>
         ) : (
           <ul className="grid grid-cols-2 gap-3 lg:grid-cols-5">
             {tiles.map((x) => (
@@ -67,11 +76,12 @@ export function Overview(p: { server: ServerInfo | null; serverError: string | n
                 <button
                   type="button"
                   onClick={() => onOpen(x.key)}
-                  className="pressable block h-full w-full rounded-lg border bg-card p-4 text-left hover:border-foreground/20"
+                  // A column from the top: a button centers its content, which dropped a tile without a subline.
+                  className="pressable flex h-full w-full min-w-0 flex-col items-start rounded-lg border bg-card p-4 text-left hover:border-foreground/20"
                 >
-                  <span className="block text-xs text-muted-foreground">{x.label}</span>
-                  <span className="mt-1 block text-xl font-semibold tabular-nums">{nf.format(x.value)}</span>
-                  {x.sub && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{x.sub}</span>}
+                  <span className="max-w-full truncate text-xs text-muted-foreground">{x.label}</span>
+                  <span className="mt-1 max-w-full truncate text-xl font-semibold tabular-nums">{nf.format(x.value)}</span>
+                  {x.sub && <span className="mt-0.5 max-w-full truncate text-xs text-muted-foreground">{x.sub}</span>}
                 </button>
               </li>
             ))}

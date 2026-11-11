@@ -1,11 +1,12 @@
 // UI strings. Portuguese (pt-BR) is the default; English is the alternative. Keys are shared, so a missing
 // translation is a type error. `{name}` placeholders are filled by `translate`.
 
-import { adminEn, adminPtBR } from "./admin";
+import type { AdminKey } from "./admin";
+import { adminShellEn, adminShellPtBR } from "./adminShell";
 import { featuresEn, featuresPtBR } from "./features";
 
 const ptBR = {
-  ...adminPtBR,
+  ...adminShellPtBR,
   ...featuresPtBR,
   "app.name": "Ember Mail",
   "common.cancel": "Cancelar",
@@ -352,12 +353,15 @@ const ptBR = {
   "when.yesterday": "Ontem",
 };
 
-export type StringKey = keyof typeof ptBR;
+/** The strings in the first-load bundle. */
+type CoreKey = keyof typeof ptBR;
+/** Every key: the core ones and the admin screen's, which arrive with its chunk (`registerStrings`). */
+export type StringKey = CoreKey | AdminKey;
 export type Locale = "pt-BR" | "en";
 export const LOCALES: Locale[] = ["pt-BR", "en"];
 
-const en: Record<StringKey, string> = {
-  ...adminEn,
+const en: Record<CoreKey, string> = {
+  ...adminShellEn,
   ...featuresEn,
   "app.name": "Ember Mail",
   "common.cancel": "Cancel",
@@ -704,12 +708,17 @@ const en: Record<StringKey, string> = {
   "when.yesterday": "Yesterday",
 };
 
-const TABLES: Record<Locale, Record<StringKey, string>> = { "pt-BR": ptBR, en };
+const TABLES: Record<Locale, Partial<Record<StringKey, string>>> = { "pt-BR": { ...ptBR }, en: { ...en } };
+
+/** Adds a lazily loaded part of the tables (the admin screen's strings, from its chunk). */
+export function registerStrings(tables: Record<Locale, Partial<Record<StringKey, string>>>) {
+  for (const l of LOCALES) Object.assign(TABLES[l], tables[l]);
+}
 
 export type Vars = Record<string, string | number>;
 
 export function translate(locale: Locale, key: StringKey, vars?: Vars): string {
-  const s = TABLES[locale][key] ?? ptBR[key] ?? key;
+  const s = TABLES[locale][key] ?? TABLES["pt-BR"][key] ?? key;
   return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
 }
 

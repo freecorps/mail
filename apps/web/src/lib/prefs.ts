@@ -85,6 +85,17 @@ export function resolveTheme(pref: ThemePref, systemDark: boolean): "light" | "d
   return pref === "system" ? (systemDark ? "dark" : "light") : pref;
 }
 
+/** The page background (`--background` in index.css) as hex, for the phone's status bar and the browser chrome. */
+export const THEME_COLOR = { light: "#faf9f7", dark: "#171513" } as const;
+
+/**
+ * Points every `theme-color` meta at the app's theme. index.html ships one per OS scheme; a theme picked in the account
+ * menu overrides the OS, so both get the chosen color (public/theme.js does the same before first paint).
+ */
+export function applyThemeColor(theme: "light" | "dark") {
+  for (const m of document.head.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) m.content = THEME_COLOR[theme];
+}
+
 const darkQuery = () => (typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)") : null);
 
 function useSystemDark(): boolean {
@@ -107,6 +118,7 @@ export function usePrefs() {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
     root.style.colorScheme = theme;
+    applyThemeColor(theme);
   }, [theme]);
   useEffect(() => {
     document.documentElement.lang = locale;
