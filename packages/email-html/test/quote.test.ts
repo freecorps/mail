@@ -34,6 +34,11 @@ describe("HTML quotes", () => {
     expect(text(splitQuotedHtml(span)!.quote)).toBe("On Wed, Nov 5, 2026, Acme wrote: Send it?");
     const said = `<p>Please note what he wrote:</p><blockquote type="cite"><p>It breaks on save.</p></blockquote>`;
     expect(text(splitQuotedHtml(said)!.body)).toBe("Please note what he wrote:");
+    // An earlier paragraph starting with "On"/"Em" stays in the body (the walk never leaves the attribution's line).
+    const earlier = `<p>On my side it works.</p><p>Thanks, Bia wrote:</p><blockquote type="cite"><p>Still broken?</p></blockquote>`;
+    expect(text(splitQuotedHtml(earlier)!.body)).toBe("On my side it works. Thanks, Bia wrote:");
+    const br = `<div>Em anexo.<br>Em 5 de nov. de 2026, Acme escreveu:<br></div><blockquote type="cite">Pode mandar?</blockquote>`;
+    expect(text(splitQuotedHtml(br)!.body)).toBe("Em anexo.");
   });
 
   it("the quote keeps the message's styles (it renders in a frame of its own)", () => {

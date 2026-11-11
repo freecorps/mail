@@ -77,11 +77,15 @@ function withAttribution(html: string, cut: number): number {
   for (let m = words.exec(before); m; m = words.exec(before)) last = m.index;
   if (last < 0) return cut;
   // The opening div/p/span (or a <br>) before the "…wrote:" text whose text starts the attribution; the closest first
-  // (`<div>On Tue, <span>Ana</span> wrote:</div>` walks back past the span to the div).
+  // (`<div>On Tue, <span>Ana</span> wrote:</div>` walks back past the span to the div). The walk stays inside the
+  // attribution's own line: it stops at a block that closes (`</p>`, `</div>`) or a `<br>` on the way, so an earlier
+  // paragraph that happens to start with "On"/"Em" is never swallowed.
   const opens = [...before.slice(0, last).matchAll(/<(?:div|p|span|br)\b/gi)].map((m) => m.index);
   for (let i = opens.length - 1; i >= 0; i--) {
-    const line = visibleText(before.slice(opens[i]!));
-    if (ATTRIBUTION_START.test(line)) return from + opens[i]!;
+    const at = opens[i]!;
+    if (/<\/(?:p|div)\s*>|<br\b/i.test(before.slice(at + 1, last))) break;
+    const line = visibleText(before.slice(at));
+    if (line.length <= 400 && ATTRIBUTION_START.test(line)) return from + at;
   }
   return cut;
 }
