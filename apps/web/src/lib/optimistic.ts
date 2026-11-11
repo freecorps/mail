@@ -7,6 +7,7 @@ import {
   type Mailbox,
   type Message,
   type Page,
+  type SearchHit,
   type SentArgs,
   type SentThread,
   type Thread,
@@ -75,7 +76,38 @@ function adjustViewCounts(store: Store, before: Thread, after: Thread) {
  * Applies `patch` to the thread wherever it is loaded (its detail, every thread-list page, the cross-mailbox views)
  * and moves the view counts with it.
  */
+/**
+ * Search hits of the thread carry its state (status, unread, assignee) and act like list rows: the same patch applies
+ * to them, so a hover or bulk action on a search result toggles the right way the next time too.
+ */
+function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Thread) {
+  for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: any; value: SearchHit[] | undefined }>) {
+    if (!value?.some((h) => h.threadId === threadId)) continue;
+    const next = value.map((h) => {
+      if (h.threadId !== threadId) return h;
+      const t = patch({
+        _id: h.threadId,
+        mailbox: h.mailbox,
+        subject: h.subject,
+        status: h.status,
+        unreadCount: h.unreadCount ?? 0,
+        assignee: h.assignee,
+        assigneeName: h.assigneeName,
+      } as unknown as Thread);
+      return {
+        ...h,
+        status: t.status,
+        unreadCount: t.unreadCount,
+        assignee: t.assignee ?? undefined,
+        assigneeName: t.assigneeName ?? undefined,
+      };
+    });
+    store.setQuery<any>("inbox:search", args, next);
+  }
+}
+
 function patchThread(store: Store, threadId: string, patch: (t: Thread) => Thread): Thread | null {
+  patchSearch(store, threadId, patch);
   let found = patchLoaded(store, threadId, patch);
   // Loaded nowhere any more (an archive dropped it from the only list showing it): the copy kept when it was dropped
   // lets a later patch, such as "Desfazer", put it back.

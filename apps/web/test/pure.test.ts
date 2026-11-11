@@ -395,6 +395,26 @@ describe("optimistic updates", () => {
     expect(s.dump("inbox:threads").map((p: Page<Thread>) => p.page.length)).toEqual([1, 0]);
   });
 
+  it("search hits follow read, archive and assign (also when the thread is loaded in no list)", () => {
+    const hit = {
+      messageId: "m1",
+      threadId: "t1",
+      mailbox: "support",
+      direction: "inbound",
+      subject: "S",
+      from: { email: "a@b.test" },
+      snippet: "",
+      at: 1,
+      status: "open",
+      unreadCount: 2,
+    };
+    const s = store({ "inbox:search": [{ args: { query: "oi" }, value: [hit, { ...hit, messageId: "m2", threadId: "t2" }] }] });
+    u["inbox:markRead"]!(s, { threadId: "t1" }, rec);
+    u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
+    expect(s.dump("inbox:search")[0][0]).toMatchObject({ threadId: "t1", status: "closed", unreadCount: 0 });
+    expect(s.dump("inbox:search")[0][1]).toMatchObject({ threadId: "t2", status: "open", unreadCount: 2 });
+  });
+
   it("a new conversation shows on top of the views it belongs to, and their counts grow", () => {
     const zero = { threads: 0, unread: 0, capped: false };
     const s = store({
