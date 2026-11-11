@@ -4,7 +4,7 @@
 // draft) and send. What is typed is autosaved as the member's draft of this thread (`inbox:saveDraft`), restored when
 // the conversation is opened again, on any of their devices. A reply waits out the undo-send delay as a pending
 // message; a note goes at once (it is never emailed).
-import { useMutation, useQuery } from "@freecorps/ember-react-native";
+import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, TextInput, View, type LayoutChangeEvent, type TextInputInstance } from "react-native";
@@ -20,7 +20,7 @@ import { useSendLater } from "../model/send";
 import { corner, radius, spacing, type, useColors } from "../theme";
 import { Icons, type IconSpec } from "./icons";
 import { IconButton, MenuButton, type MenuItem } from "./native";
-import { canSchedule, isLinkRefusal } from "../model/schedule";
+import { canSchedule, isLinkRefusal, runScheduled } from "../model/schedule";
 import { notify } from "../model/undo";
 import { setWhenRequest } from "../model/when-request";
 import { haptics } from "../lib/haptics";
@@ -74,6 +74,7 @@ export function QuickReply({
   const replyM = useMutation(api.inbox.reply);
   const noteM = useMutation(api.inbox.note);
   const sendLater = useSendLater();
+  const { connected } = useConnectionState();
   const uploads = useUploads(useUploadOne());
 
   const [picked, setModeState] = useState<ReplyMode>("reply");
@@ -177,18 +178,80 @@ export function QuickReply({
   const canSend = !!text.trim() && !busy && (mode !== "note" || notes);
   // "Enviar mais tarde" (the mode menu's submenu): not for a note, and not with files past 10 MB in all (links).
   const schedulable = canSchedule(uploads.items.map((i) => ({ size: i.size })));
+  // A scheduled reply waiting for the server's answer: the bar keeps its text until it confirms.
+  const [scheduling, setScheduling] = useState(false);
+  const clearBar = () => {
+    dirty.current = false;
+    restored.current = { cc: [], bcc: [] };
+    setText("");
+    uploads.clear();
+    input.current?.blur();
+    onClose();
+  };
   const send = (sendAt?: number) => {
     const body = text.trim();
-    if (!canSend) return;
+    if (!canSend || scheduling) return;
     const later = sendAt !== undefined && mode !== "note";
     if (later && !schedulable.ok) return notify(t("compose.scheduleBlocked"));
-    // The pending save goes first (an undone send reads the text back from the draft); then no more saves.
-    void saver.flush();
-    saver.pause();
     const files = mode === "note" ? [] : uploads.attachments;
     const sentCc = cc;
     // A Bcc the draft had (written in the full composer or on the web) goes too: the bar does not show it, never drops it.
     const sentBcc = restored.current.bcc;
+    const quoted = quotedMessage(messages);
+    const header = quoted ? quoteHeader(quoted, locale, clock24) : undefined;
+    const requestId = newRequestId();
+    const reply = (draftId: string | null, at?: number) =>
+      replyM({
+        threadId,
+        text: body,
+        requestId,
+        ...(sentCc.length ? { cc: sentCc } : {}),
+        ...(sentBcc.length ? { bcc: sentBcc } : {}),
+        ...(files.length ? { attachments: files } : {}),
+        ...(header ? { quoteHeader: header } : {}),
+        ...(draftId ? { draftId } : {}),
+        ...(at !== undefined ? { sendAt: at } : {}),
+      });
+    if (later) {
+      // Scheduled only once the server confirms (offline: queued, "will be scheduled"); a refusal keeps the text.
+      setScheduling(true);
+      saver.pause();
+      const when = formatLater(sendAt!, Date.now(), locale, clock24, deviceTimeZone());
+      let used: string | null = null;
+      let closed = false;
+      const leave = () => {
+        closed = true;
+        saver.sent(used);
+        setScheduling(false);
+        clearBar();
+      };
+      void runScheduled({
+        connected,
+        fire: async () => {
+          await saver.flush();
+          used = saver.id();
+          return reply(used, sendAt);
+        },
+        done: () => {
+          haptics.success();
+          notify(t("compose.scheduledAt", { when }));
+          leave();
+        },
+        queued: () => {
+          notify(t("compose.scheduleQueued", { when }));
+          leave();
+        },
+        later: () => notify(t("compose.scheduledAt", { when })),
+        failed: (e) => {
+          notify(isLinkRefusal(e) ? t("compose.scheduleRefused") : t("compose.scheduleFailed"));
+          if (!closed) setScheduling(false);
+        },
+      });
+      return;
+    }
+    // The pending save goes first (an undone send reads the text back from the draft); then no more saves.
+    void saver.flush();
+    saver.pause();
     if (mode === "note") {
       const draftId = saver.id();
       void noteM({ threadId, text: body, ...(draftId ? { draftId } : {}) }).catch(() => {});
@@ -202,44 +265,18 @@ export function QuickReply({
         saver.update(replyDraftArgs({ kind: "reply", threadId, text: "", cc: [], autoCc: [], bcc: restored.current.bcc, attachments: uploads.attachments }));
         return;
       }
-    } else {
-      const quoted = quotedMessage(messages);
-      const header = quoted ? quoteHeader(quoted, locale, clock24) : undefined;
-      const requestId = newRequestId();
-      const fire = () => {
-        const draftId = saver.id();
-        void replyM({
-          threadId,
-          text: body,
-          requestId,
-          ...(sentCc.length ? { cc: sentCc } : {}),
-          ...(sentBcc.length ? { bcc: sentBcc } : {}),
-          ...(files.length ? { attachments: files } : {}),
-          ...(header ? { quoteHeader: header } : {}),
-          ...(draftId ? { draftId } : {}),
-          ...(later ? { sendAt } : {}),
-        }).catch((e: unknown) => (later ? notify(isLinkRefusal(e) ? t("compose.scheduleRefused") : t("compose.scheduleFailed")) : undefined));
-        saver.sent(draftId);
-      };
-      if (later) {
-        // Scheduled: it goes to the server now (queued offline), and shows in the conversation as "Agendada para …".
-        fire();
-        haptics.success();
-        notify(t("compose.scheduledAt", { when: formatLater(sendAt!, Date.now(), locale, clock24, deviceTimeZone()) }));
-      } else
-        sendLater(
-          { kind: "reply", threadId, text: body, ...(sentCc.length ? { cc: sentCc } : {}) },
-          fire,
-          // "Desfazer": the bar opens again over the kept draft (this bar has closed by then).
-          onUndone,
-        );
-    }
-    dirty.current = false;
-    restored.current = { cc: [], bcc: [] };
-    setText("");
-    uploads.clear();
-    input.current?.blur();
-    onClose();
+    } else
+      sendLater(
+        { kind: "reply", threadId, text: body, ...(sentCc.length ? { cc: sentCc } : {}) },
+        () => {
+          const draftId = saver.id();
+          void reply(draftId).catch(() => {});
+          saver.sent(draftId);
+        },
+        // "Desfazer": the bar opens again over the kept draft (this bar has closed by then).
+        onUndone,
+      );
+    clearBar();
   };
 
   const expand = async () => {
@@ -276,7 +313,7 @@ export function QuickReply({
     : [{ key: "blocked", label: t("compose.scheduleBlocked"), icon: Icons.attach, disabled: true, onPress: () => {} }];
   const menuItems: MenuItem[] = [
     ...(modes.length > 1 ? modes.map((x) => ({ key: x.m, label: x.label, icon: MODE_ICON[x.m], checked: x.m === mode, onPress: () => setMode(x.m) })) : []),
-    ...(mode !== "note" ? [{ key: "later", label: t("compose.sendLater"), icon: Icons.sendLater, disabled: !canSend, submenu: canSend ? laterItems : [], onPress: () => {} }] : []),
+    ...(mode !== "note" ? [{ key: "later", label: t("compose.sendLater"), icon: Icons.sendLater, disabled: !canSend || scheduling, submenu: laterItems, onPress: () => {} }] : []),
   ];
   // While the bar is open, the member is replying here (others see "Bia está respondendo…").
   usePresence(threadId, "bar", "replying");
@@ -319,7 +356,7 @@ export function QuickReply({
             <IconButton variant="plain" icon={Icons.expand} label={t("compose.expand")} onPress={() => void expand()} disabled={uploads.busy} />
           </View>
           <View style={styles.ctrl}>
-            <IconButton icon={mode === "note" ? Icons.note : Icons.send} label={mode === "note" ? t("thread.addNote") : t("thread.send")} onPress={() => send()} disabled={!canSend} />
+            <IconButton icon={mode === "note" ? Icons.note : Icons.send} label={mode === "note" ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("thread.send")} onPress={() => send()} disabled={!canSend || scheduling} />
           </View>
         </View>
       </View>

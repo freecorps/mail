@@ -84,7 +84,7 @@ export const ExpandedMessage = memo(function ExpandedMessage({
   /** Its actions (forward, copy text), in a ⋯ menu beside the date. */
   menu?: MenuItem[] | undefined;
   /** A send waiting for its time: "Agendada para …", with "Cancelar envio" and "Editar" (absent until the server has it). */
-  scheduled?: { when: string; onCancel?: (() => void) | undefined; onEdit?: (() => void) | undefined } | undefined;
+  scheduled?: { when: string; pending?: boolean; onCancel?: (() => void) | undefined; onEdit?: (() => void) | undefined } | undefined;
 }) {
   const c = useColors();
   const { t, locale, clock24 } = useI18n();
@@ -169,7 +169,7 @@ export const ExpandedMessage = memo(function ExpandedMessage({
           <View style={styles.line}>
             <Symbol icon={Icons.scheduled} size={17} color={c.tint} />
             <ThemedText variant="footnote" style={styles.grow}>
-              {t("thread.scheduledFor", { when: scheduled.when })}
+              {scheduled.pending ? t("thread.scheduledPending", { when: scheduled.when }) : t("thread.scheduledFor", { when: scheduled.when })}
             </ThemedText>
           </View>
           {scheduled.onEdit || scheduled.onCancel ? (

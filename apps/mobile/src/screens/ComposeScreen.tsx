@@ -7,7 +7,7 @@
 //
 // Plain text on purpose: the email goes out as clean HTML from Ember (paragraphs, links), and an `expo-dom` rich editor
 // was not native enough on a phone (see the PR of this layer).
-import { useMutation, useQuery } from "@freecorps/ember-react-native";
+import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { fillSavedReply } from "@freecorps/mail-email-html/compose";
 import { Host, Switch } from "@expo/ui";
 import { router, Stack, useLocalSearchParams, usePreventRemove } from "expo-router";
@@ -30,7 +30,7 @@ import type { AttachmentArg } from "../lib/uploads";
 import { keepUndoneCompose, takeUndoneCompose } from "../model/undone-compose";
 import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
-import { canSchedule, isLinkRefusal } from "../model/schedule";
+import { canSchedule, isLinkRefusal, runScheduled } from "../model/schedule";
 import { notify } from "../model/undo";
 import { setWhenRequest } from "../model/when-request";
 import { haptics } from "../lib/haptics";
@@ -170,7 +170,10 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   const noteM = useMutation(api.inbox.note);
   const composeM = useMutation(api.inbox.compose);
   const forwardM = useMutation(api.inbox.forward);
-  const sendLaterNow = useSendLater();
+  const sendLater = useSendLater();
+  const { connected } = useConnectionState();
+  // A scheduled send waiting for the server's answer (the composer stays open until it confirms).
+  const [scheduling, setScheduling] = useState(false);
   const uploads = useUploads(useUploadOne());
 
   const { kind, mode } = init;
@@ -293,7 +296,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   const forwarded = kind === "forward" && init.messageId ? forwardedFiles(messages.find((m) => m._id === init.messageId)?.attachments ?? []) : [];
   const schedulable = canSchedule([...uploads.items.map((i) => ({ size: i.size })), ...forwarded.map((a) => ({ size: a.size ?? 0 }))]);
   const send = (sendAt?: number) => {
-    if (!ready) return;
+    if (!ready || scheduling) return;
     const later = sendAt !== undefined;
     if (later && !schedulable.ok) return notify(t("compose.scheduleBlocked"));
     // What is still being typed becomes a token (so a bad address shows as one, in red).
@@ -315,34 +318,23 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
     const to = toNow;
     const cc = ccNow;
     const bcc = bccNow;
+    const text = body.trim();
+    const files = uploads.attachments;
+    if (later) return schedule(sendAt, { to, cc, bcc, text, files });
     // The pending save goes first (an undone send gets the text back from the draft); then no more saves.
     void saver.flush();
     saver.pause();
     done.current = true;
-    const text = body.trim();
-    const files = uploads.attachments;
     // One id for this send, whatever its retries (the server sends it once).
     // A scheduled send carries its time; it goes through the same mutation (optimistic, queued offline, one requestId).
     const extra = {
       ...(files.length ? { attachments: files } : {}),
       ...(bcc.length ? { bcc } : {}),
       ...(withSignature ? {} : { signature: false }),
-      ...(later ? { sendAt } : {}),
       requestId: newRequestId(),
     };
     const draftId = () => saver.id() ?? undefined;
     const reopen = (params: Record<string, string>) => () => router.push({ pathname: "/compose", params });
-    // Scheduled: no undo delay (it can be canceled from the conversation until it goes); the server's refusal is said
-    // in the app's words, and the draft stays (the send that would have consumed it failed).
-    const failed = (e: unknown) => (later ? notify(isLinkRefusal(e) ? t("compose.scheduleRefused") : t("compose.scheduleFailed")) : undefined);
-    const sendLater: typeof sendLaterNow = later
-      ? (_entry, run) => {
-          run();
-          haptics.success();
-          notify(t("compose.scheduledAt", { when: formatLater(sendAt, Date.now(), locale, clock24, deviceTimeZone()) }));
-          return null;
-        }
-      : sendLaterNow;
     if (note && init.threadId) {
       const id = draftId();
       void noteM({ threadId: init.threadId, text, ...(id ? { draftId: id } : {}) }).catch(() => {});
@@ -355,7 +347,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
         { kind: "reply", threadId, text, ...(cc.length ? { cc } : {}) },
         () => {
           const id = draftId();
-          void replyM({ threadId, text, ...(cc.length ? { cc } : {}), ...extra, ...(header ? { quoteHeader: header } : {}), ...(id ? { draftId: id } : {}) }).catch(failed);
+          void replyM({ threadId, text, ...(cc.length ? { cc } : {}), ...extra, ...(header ? { quoteHeader: header } : {}), ...(id ? { draftId: id } : {}) }).catch(() => {});
           saver.sent(id);
         },
         reopen({ threadId, mode: cc.length ? "all" : "reply" }),
@@ -366,7 +358,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
         { kind: "forward", threadId: init.threadId, text },
         () => {
           const id = draftId();
-          void forwardM({ ...args, ...(id ? { draftId: id } : {}) }).catch(failed);
+          void forwardM({ ...args, ...(id ? { draftId: id } : {}) }).catch(() => {});
           saver.sent(id);
         },
         reopen({ forwardThread: init.threadId, forwardMessage: init.messageId }),
@@ -377,7 +369,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
         { kind: "compose", text },
         () => {
           const id = draftId();
-          void composeM({ ...args, ...(id ? { draftId: id } : {}) }).catch(failed);
+          void composeM({ ...args, ...(id ? { draftId: id } : {}) }).catch(() => {});
           saver.sent(id);
         },
         () => {
@@ -390,6 +382,67 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
       );
     }
     setLeaving(true);
+  };
+
+  /**
+   * "Enviar mais tarde": the same send with `sendAt` (one requestId, queued offline), with no undo delay (it can be
+   * canceled from the conversation until it goes). It counts as scheduled only once the server confirms: until then the
+   * composer stays open ("Agendando…"), and a refusal keeps the text and the draft. Offline it is queued: the sheet
+   * closes saying it will be scheduled when the connection is back, and how it ended is said when it reaches the server.
+   */
+  const schedule = (sendAt: number, o: { to: string[]; cc: string[]; bcc: string[]; text: string; files: AttachmentArg[] }) => {
+    if (scheduling) return;
+    setScheduling(true);
+    saver.pause();
+    const when = formatLater(sendAt, Date.now(), locale, clock24, deviceTimeZone());
+    const extra = {
+      ...(o.files.length ? { attachments: o.files } : {}),
+      ...(o.bcc.length ? { bcc: o.bcc } : {}),
+      ...(withSignature ? {} : { signature: false }),
+      sendAt,
+      requestId: newRequestId(),
+    };
+    let used: string | undefined;
+    const fire = async (): Promise<unknown> => {
+      // The draft is written first, so the send consumes it (and a refusal leaves it as it was).
+      await saver.flush();
+      used = saver.id() ?? undefined;
+      const draft = used ? { draftId: used } : {};
+      const copies = o.cc.length ? { cc: o.cc } : {};
+      if (isReply && init.threadId) {
+        const quoted = quotedMessage(messages);
+        return replyM({ threadId: init.threadId, text: o.text, ...copies, ...extra, ...(quoted ? { quoteHeader: quoteHeader(quoted, locale, clock24) } : {}), ...draft });
+      }
+      if (kind === "forward" && init.threadId && init.messageId)
+        return forwardM({ threadId: init.threadId, messageId: init.messageId, to: o.to.map((x) => x.trim()), ...copies, subject: subject.trim(), text: o.text, ...extra, ...draft });
+      if (!from) throw new Error("no mailbox");
+      return composeM({ mailbox: from, to: o.to.map((x) => x.trim()), ...copies, subject: subject.trim(), text: o.text, ...extra, ...draft });
+    };
+    const leave = () => {
+      done.current = true;
+      saver.sent(used);
+      setLeaving(true);
+    };
+    const refused = (e: unknown) => notify(isLinkRefusal(e) ? t("compose.scheduleRefused") : t("compose.scheduleFailed"));
+    void runScheduled({
+      connected,
+      fire,
+      done: () => {
+        haptics.success();
+        notify(t("compose.scheduledAt", { when }));
+        leave();
+      },
+      queued: () => {
+        notify(t("compose.scheduleQueued", { when }));
+        leave();
+      },
+      later: () => notify(t("compose.scheduledAt", { when })),
+      failed: (e) => {
+        refused(e);
+        // Still open (online): the text stays and editing saves the draft again.
+        if (!done.current) setScheduling(false);
+      },
+    });
   };
 
   // ---- Saved replies -----------------------------------------------------------------------------------------------
@@ -429,7 +482,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
           <Stack.Toolbar placement="right">
             {/* "Enviar mais tarde" beside Send (Mail's long-press menu, made visible): presets with their time, "Escolher…". */}
             {note || !laterIcon ? null : (
-              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} disabled={!ready}>
+              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} disabled={!ready || scheduling}>
                 {/* Direct children only: the native menu does not read through a fragment. */}
                 {schedulable.ok
                   ? [
@@ -449,8 +502,8 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                     ]}
               </Stack.Toolbar.Menu>
             )}
-            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready} onPress={() => send()}>
-              {note ? t("thread.addNote") : t("compose.send")}
+            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready || scheduling} onPress={() => send()}>
+              {note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")}
             </Stack.Toolbar.Button>
           </Stack.Toolbar>
         </>

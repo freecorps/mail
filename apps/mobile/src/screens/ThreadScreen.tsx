@@ -487,15 +487,17 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         preview={preview}
         onCollapse={id === latest || preview ? undefined : collapse}
         menu={menu}
-        scheduled={m.scheduledFor !== undefined && !preview ? scheduledProps(m) : undefined}
+        scheduled={m.scheduledFor !== undefined && !preview ? scheduledProps(m, item.pending) : undefined}
       />
     );
   };
 
-  const scheduledProps = (m: Message) => {
-    const s = scheduledOf(scheduled, m);
+  const scheduledProps = (m: Message, pending: boolean) => {
+    const s = pending ? null : scheduledOf(scheduled, m);
     return {
       when: formatLater(m.scheduledFor!, now, locale, clock24, zone),
+      // Still in the offline queue: not scheduled yet (the server has not confirmed it).
+      pending,
       // Known to the server (it has an email id): cancel works offline too (queued); editing needs to know it did not go.
       onCancel: s ? () => cancelSend(s.emailId) : undefined,
       onEdit: s && online ? () => void editSend(m, s.emailId) : undefined,

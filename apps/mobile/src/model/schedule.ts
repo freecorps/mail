@@ -27,3 +27,41 @@ export function scheduledOf(list: readonly ScheduledSend[] | undefined, m: { _id
 
 /** The server's refusal of a scheduled send with linked files (its ValidationError), to say it in the app's words. */
 export const isLinkRefusal = (e: unknown): boolean => /scheduled send can't link files/i.test(e instanceof Error ? e.message : String(e ?? ""));
+
+export type ScheduleOutcome = "done" | "queued" | "failed";
+
+/**
+ * A scheduled send's states. Online, it counts as scheduled only once the server confirms it (`done`): the composer
+ * stays open meanwhile and keeps its text on a refusal (`failed`). Offline, the mutation waits in the queue (`queued`):
+ * that is "will be scheduled when it connects", not success; once it reaches the server, `later` (confirmed) or
+ * `failed` (refused: the draft the send would have consumed is still there) says how it ended.
+ */
+export async function runScheduled(o: {
+  connected: boolean;
+  fire(): Promise<unknown>;
+  done(): void;
+  queued(): void;
+  later(): void;
+  failed(e: unknown): void;
+}): Promise<ScheduleOutcome> {
+  let p: Promise<unknown>;
+  try {
+    p = o.fire();
+  } catch (e) {
+    o.failed(e);
+    return "failed";
+  }
+  if (!o.connected) {
+    o.queued();
+    p.then(o.later, o.failed);
+    return "queued";
+  }
+  try {
+    await p;
+  } catch (e) {
+    o.failed(e);
+    return "failed";
+  }
+  o.done();
+  return "done";
+}

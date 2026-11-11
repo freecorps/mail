@@ -213,7 +213,7 @@ function append(store: Store, args: AppendArgs, direction: "outbound" | "note", 
       cc: (args.cc ?? []).map(asAddress),
       ...(args.bcc?.length ? { bcc: args.bcc.map(asAddress) } : {}),
       // Scheduled: shown at once as "Agendada para …" (the server keeps its message in the thread from now on).
-      ...(direction === "outbound" && args.sendAt !== undefined && args.sendAt > now ? { scheduledFor: args.sendAt } : {}),
+      ...(isScheduled(args, direction, now) ? { scheduledFor: args.sendAt } : {}),
       subject: t.subject,
       text: args.text,
       snippet,
@@ -224,14 +224,25 @@ function append(store: Store, args: AppendArgs, direction: "outbound" | "note", 
     };
     store.setQuery<any>("inbox:thread", { threadId: args.threadId }, { ...detail, messages: [...detail.messages, msg] });
   }
-  const thread = patchThread(store, args.threadId, (t) => ({
-    ...t,
-    messageCount: t.messageCount + 1,
-    lastMessageAt: now,
-    ...(direction === "note" ? {} : { status: t.status === "spam" ? "spam" : ("waiting" as ThreadStatus), snippet }),
-  }));
-  if (thread && direction === "outbound") sentNow(store, thread, now);
+  // A scheduled reply has not gone: the conversation only gains its message ("Agendada para …"). It does not move to
+  // "waiting", to the top of the lists or of Sent until the server says what it did, so canceling it has nothing else
+  // to undo.
+  const scheduled = isScheduled(args, direction, now);
+  const thread = patchThread(store, args.threadId, (t) =>
+    scheduled
+      ? { ...t, messageCount: t.messageCount + 1 }
+      : {
+          ...t,
+          messageCount: t.messageCount + 1,
+          lastMessageAt: now,
+          ...(direction === "note" ? {} : { status: t.status === "spam" ? "spam" : ("waiting" as ThreadStatus), snippet }),
+        },
+  );
+  if (thread && direction === "outbound" && !scheduled) sentNow(store, thread, now);
 }
+
+/** A send that waits for its time (`sendAt` ahead of now): not sent, so never in Sent. */
+const isScheduled = (a: { sendAt?: number }, direction: string, now: number) => direction === "outbound" && a.sendAt !== undefined && a.sendAt > now;
 
 /** A thread gone for good (deleted, or a scheduled new conversation canceled): out of every list and count. */
 function dropThread(store: Store, threadId: string) {
@@ -386,7 +397,7 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         return { ...t, assignee: userId, assigneeName: members?.find((m) => m.userId === userId)?.name ?? userId };
       });
     },
-    "inbox:compose": (store, args: { mailbox: string; to: string[]; subject: string; text: string }) => {
+    "inbox:compose": (store, args: { mailbox: string; to: string[]; subject: string; text: string; sendAt?: number }) => {
       const at = now();
       const contact = (args.to[0] ?? "").replace(/^.*<([^>]+)>.*$/, "$1").trim().toLowerCase();
       const thread: Thread = {
@@ -419,7 +430,8 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         for (const view of INBOX_VIEWS) if (counts[view] && viewKeeps(view, undefined)(thread)) next[view] = { ...counts[view], threads: counts[view].threads + 1 };
         store.setQuery<any>("inbox:views", {}, next);
       }
-      sentNow(store, thread, at);
+      // Scheduled: the new conversation is there (the server makes it at once), but nothing went out, so not in Sent.
+      if (!isScheduled(args, "outbound", at)) sentNow(store, thread, at);
     },
   };
   // Snooze: the thread leaves every list and count but "Adiadas" (and joins that one); waking it (`until: null`,
@@ -486,8 +498,10 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
       const gone = value.messages.find((m) => m.emailId === emailId || (messageId !== undefined && m._id === messageId));
       if (!gone) continue;
       const messages = value.messages.filter((m) => m !== gone);
-      store.setQuery<any>("inbox:thread", args, { ...value, messages, thread: { ...value.thread, messageCount: Math.max(0, value.thread.messageCount - 1) } });
+      store.setQuery<any>("inbox:thread", args, { ...value, messages });
+      // What the schedule did is undone: one message fewer, wherever the thread is listed (it never moved for it).
       if (!messages.length) dropThread(store, args.threadId);
+      else patchThread(store, args.threadId, (t) => ({ ...t, messageCount: Math.max(0, t.messageCount - 1) }));
     }
   };
   // Drafts: the cached `inbox:drafts` answers follow saves, deletes and sends, so a draft written offline is there when
@@ -502,9 +516,9 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
   // A deleted conversation leaves every loaded list at once (the conversation screen has already closed).
   updates["inbox:deleteThread"] = (store, { threadId }: { threadId: string }) => dropThread(store, threadId);
   // A forward is a new conversation from the forwarded thread's mailbox: it shows at the top as a compose does.
-  updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string }, rec) => {
+  updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string; sendAt?: number }, rec) => {
     const mailbox = mailboxOf(store, args.threadId);
-    if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text }, rec);
+    if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text, ...(args.sendAt !== undefined ? { sendAt: args.sendAt } : {}) }, rec);
   };
   // Ajustes › Notificações: the switches move at once (offline too; the server filters pushes once it lands).
   updates["inbox:setNotifications"] = (store, a: { mailbox?: string; enabled?: boolean; preview?: boolean }) => {

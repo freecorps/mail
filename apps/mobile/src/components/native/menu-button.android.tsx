@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useColors } from "../../theme";
 import { Icons, useMaterialSource } from "../icons";
 import { BrandHost as Host } from "./brand-host";
+import { menuEntryEnabled, menuEntryKind } from "./menu-items";
 import type { MenuButtonProps, MenuItem } from "./types";
 
 
@@ -61,7 +62,8 @@ export function MenuButton({ label, icon, variant = "chip", items, accessibility
               item={i}
               onPress={() => {
                 if (i.key === "__back") return setLevel(null);
-                if (i.submenu) return setLevel(i);
+                if (!menuEntryEnabled(i)) return;
+                if (menuEntryKind(i) === "submenu") return setLevel(i);
                 close();
                 i.onPress();
               }}
@@ -79,7 +81,7 @@ function Row({ item, onPress }: { item: MenuItem; onPress(): void }) {
   const lead = useMaterialSource(item.icon ?? null, 24, color);
   const check = useMaterialSource(item.checked ? Icons.check : null, 24, c.tint);
   return (
-    <DropdownMenuItem onClick={onPress} enabled={!item.disabled}>
+    <DropdownMenuItem onClick={onPress} enabled={menuEntryEnabled(item)}>
       {lead ? (
         <DropdownMenuItem.LeadingIcon>
           <Icon source={lead} size={24} tint={color} />

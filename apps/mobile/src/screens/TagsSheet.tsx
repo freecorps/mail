@@ -10,7 +10,7 @@ import { Icons } from "../components/icons";
 import { Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
-import { tagColor, tagSearch, THREAD_TAGS_MAX, toggleTag } from "../model/tags";
+import { TAG_NAME_MAX, tagColor, tagSearch, THREAD_TAGS_MAX, toggleTag } from "../model/tags";
 import { notify } from "../model/undo";
 import { useColors, useTagColors } from "../theme";
 
@@ -78,7 +78,7 @@ export function TagsSheet() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 returnKeyType="done"
-                maxLength={40}
+                maxLength={TAG_NAME_MAX}
                 onSubmitEditing={() => (newName && online ? void create(newName) : undefined)}
               />
             </FieldGroup.Section>

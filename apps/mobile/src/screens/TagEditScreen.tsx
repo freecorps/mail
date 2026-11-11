@@ -5,7 +5,7 @@
 import { Button, FieldGroup, Host, ListItem, Text, TextInput } from "@expo/ui";
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert } from "react-native";
 import { api, TAG_COLORS, type TagColor } from "../api";
 import { Icons } from "../components/icons";
@@ -33,15 +33,15 @@ export function TagEditScreen() {
   const [color, setColor] = useState<TagColor | null>(null);
   const [busy, setBusy] = useState(false);
   const left = useRef(false);
+  // Deleted (here or elsewhere) while open: nothing to edit, so back once (an effect, never during render).
+  const gone = !!tags && !isNew && !tag;
+  useEffect(() => {
+    if (!gone || left.current) return;
+    left.current = true;
+    router.back();
+  }, [gone]);
   if (!tags) return <Loading />;
-  if (!isNew && !tag) {
-    // Deleted (here or elsewhere): nothing to edit.
-    if (!left.current) {
-      left.current = true;
-      setTimeout(() => router.back(), 0);
-    }
-    return null;
-  }
+  if (gone) return null;
   const shownName = name ?? tag?.name ?? "";
   const shownColor = color ?? tagColor(tag?.color ?? "gray");
   const clean = shownName.trim().replace(/\s+/g, " ");

@@ -396,6 +396,9 @@ const ptBR = {
   "presence.replyingMany": "{who} estão respondendo…",
   "presence.two": "{a} e {b}",
   "presence.many": "{a}, {b} e mais {count}",
+  "compose.scheduleQueued": "Sem conexão: será agendada para {when} quando a conexão voltar",
+  "compose.scheduling": "Agendando…",
+  "thread.scheduledPending": "Será agendada para {when} quando a conexão voltar",
   "when.yesterday": "Ontem",
 };
 
@@ -796,6 +799,9 @@ const en: Record<StringKey, string> = {
   "presence.replyingMany": "{who} are replying…",
   "presence.two": "{a} and {b}",
   "presence.many": "{a}, {b} and {count} more",
+  "compose.scheduleQueued": "Offline: it will be scheduled for {when} once you're back online",
+  "compose.scheduling": "Scheduling…",
+  "thread.scheduledPending": "Will be scheduled for {when} once online",
   "when.yesterday": "Yesterday",
 };
 

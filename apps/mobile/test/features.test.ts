@@ -9,7 +9,8 @@ import { combineDateTime, formatAgo, formatLater, fromWallClock, sendPresets, sn
 import { describe as describeEntry, mergeTimeline, quiet } from "../src/model/activity";
 import { keepsArchived, keepsSnoozed, parseListPrefs, swipeKinds } from "../src/model/list-actions";
 import { createPresence, effectiveState, presenceLine } from "../src/model/presence";
-import { ATTACH_LIMIT, canSchedule, isLinkRefusal, scheduledOf } from "../src/model/schedule";
+import { ATTACH_LIMIT, canSchedule, isLinkRefusal, runScheduled, scheduledOf } from "../src/model/schedule";
+import { menuEntryEnabled, menuEntryKind } from "../src/components/native/menu-items";
 import { moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
 import { writtenText } from "../src/model/thread-view";
 import { filtersFor, threadRow } from "../src/model/threads";
@@ -236,7 +237,8 @@ describe("scheduled sends", () => {
     up["inbox:reply"]!(s.store, { threadId: a._id, text: "Amanhã", sendAt: 90_000, cc: ["Bia <bia@x.test>"], bcc: ["chefe@x.test"] }, rec);
     const m = (s.get("inbox:thread", { threadId: a._id }) as ThreadDetail).messages[0]!;
     expect(m).toMatchObject({ scheduledFor: 90_000, cc: [{ email: "bia@x.test", name: "Bia" }], bcc: [{ email: "chefe@x.test" }] });
-    expect(s.get("inbox:thread", { threadId: a._id }).thread.status).toBe("waiting");
+    // Not sent: the thread keeps its status and its place.
+    expect(s.get("inbox:thread", { threadId: a._id }).thread).toMatchObject({ status: "open", lastMessageAt: 10, messageCount: 2 });
     // A past time sends now: no scheduled mark.
     up["inbox:reply"]!(s.store, { threadId: a._id, text: "Agora", sendAt: 10 }, rec);
     expect((s.get("inbox:thread", { threadId: a._id }) as ThreadDetail).messages[1]!.scheduledFor).toBeUndefined();
@@ -251,6 +253,94 @@ describe("scheduled sends", () => {
     expect(s2.get("inbox:scheduled", { threadId: lone._id })).toEqual([]);
     expect(s2.get("inbox:view", { view: "all" }).page).toEqual([]);
     expect(s2.get("inbox:thread", { threadId: lone._id })).toBeNull();
+  });
+
+  it("a scheduled reply is not a send: no move to waiting, to the top or into Sent; canceling it undoes only its message", () => {
+    const a = thread({ status: "open", lastMessageAt: 10, messageCount: 1 });
+    const older = thread({ _id: "email$threads_old", lastMessageAt: 50 });
+    const sent = { mailbox: "support", limit: 30 };
+    const s = fakeStore([
+      ["inbox:thread", { threadId: a._id }, { thread: a, messages: [{ _id: "m0", direction: "inbound", at: 10 }] }],
+      ["inbox:view", { view: "all" }, viewPage([older, a])],
+      ["inbox:view", { view: "all", status: "open" }, viewPage([older, a])],
+      ["inbox:sent", sent, { page: [], isDone: true }],
+      ["inbox:scheduled", { threadId: a._id }, [{ emailId: "e9", messageId: "m9", sendAt: 90_000, subject: "s", to: [] }]],
+    ]);
+    up["inbox:reply"]!(s.store, { threadId: a._id, text: "Amanhã", sendAt: 90_000 }, rec);
+    expect(ids(s.get("inbox:view", { view: "all" }))).toEqual([older._id, a._id]);
+    expect(ids(s.get("inbox:view", { view: "all", status: "open" }))).toEqual([older._id, a._id]);
+    expect(s.get("inbox:view", { view: "all" }).page[1]).toMatchObject({ status: "open", lastMessageAt: 10, messageCount: 2, snippet: "oi" });
+    expect(s.get("inbox:sent", sent).page).toEqual([]);
+    // The server confirmed it (its message has an email id); canceling removes it and its count, nothing else moved.
+    const detail = s.get("inbox:thread", { threadId: a._id }) as ThreadDetail;
+    const pending = detail.messages[1]!;
+    s.store.setQuery<any>("inbox:thread", { threadId: a._id }, { ...detail, messages: [detail.messages[0]!, { ...pending, _id: "m9", emailId: "e9" }] });
+    up["inbox:cancelScheduled"]!(s.store, { emailId: "e9" }, rec);
+    expect((s.get("inbox:thread", { threadId: a._id }) as ThreadDetail).messages.map((m) => m._id)).toEqual(["m0"]);
+    expect(s.get("inbox:view", { view: "all" }).page[1]).toMatchObject({ status: "open", lastMessageAt: 10, messageCount: 1 });
+    expect(s.get("inbox:scheduled", { threadId: a._id })).toEqual([]);
+  });
+
+  it("a scheduled new message or forward is a new conversation in the lists, never in Sent; sent now, it is", () => {
+    const src = thread({ _id: "email$threads_src" });
+    const sent = { mailbox: "support", limit: 30 };
+    const s = fakeStore([
+      ["inbox:thread", { threadId: src._id }, { thread: src, messages: [] }],
+      ["inbox:view", { view: "all" }, viewPage([src])],
+      ["inbox:sent", sent, { page: [], isDone: true }],
+    ]);
+    up["inbox:compose"]!(s.store, { mailbox: "support", to: ["lia@user.test"], subject: "Amanhã", text: "Oi", sendAt: 90_000 }, rec);
+    up["inbox:forward"]!(s.store, { threadId: src._id, to: ["bia@user.test"], subject: "Fwd", text: "Veja", sendAt: 90_000 }, rec);
+    expect(s.get("inbox:view", { view: "all" }).page.map((t: Thread) => t.subject)).toEqual(["Fwd", "Amanhã", "Fatura"]);
+    expect(s.get("inbox:sent", sent).page).toEqual([]);
+    up["inbox:compose"]!(s.store, { mailbox: "support", to: ["lia@user.test"], subject: "Agora", text: "Oi" }, rec);
+    expect(s.get("inbox:sent", sent).page.map((t: Thread) => t.subject)).toEqual(["Agora"]);
+  });
+
+  it("scheduled counts only once the server confirms; offline it is queued, then confirmed or refused", async () => {
+    const log: string[] = [];
+    const hooks = { done: () => log.push("done"), queued: () => log.push("queued"), later: () => log.push("later"), failed: (e: unknown) => log.push(`failed:${(e as Error).message}`) };
+    let settle!: { ok(): void; no(e: Error): void };
+    const pending = () => new Promise<void>((ok, no) => (settle = { ok: () => ok(), no }));
+    // Online: nothing is said until the answer; then done.
+    const online = runScheduled({ connected: true, fire: pending, ...hooks });
+    await Promise.resolve();
+    expect(log).toEqual([]);
+    settle.ok();
+    expect(await online).toBe("done");
+    expect(log).toEqual(["done"]);
+    // Online, refused: failed only (the composer keeps its text).
+    log.length = 0;
+    const refused = runScheduled({ connected: true, fire: pending, ...hooks });
+    settle.no(new Error("a scheduled send can't link files"));
+    expect(await refused).toBe("failed");
+    expect(log).toEqual(["failed:a scheduled send can't link files"]);
+    // Offline: queued at once (not success), then how it ended once it reached the server.
+    log.length = 0;
+    expect(await runScheduled({ connected: false, fire: pending, ...hooks })).toBe("queued");
+    expect(log).toEqual(["queued"]);
+    settle.ok();
+    await Promise.resolve();
+    expect(log).toEqual(["queued", "later"]);
+    log.length = 0;
+    await runScheduled({ connected: false, fire: pending, ...hooks });
+    settle.no(new Error("refused"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(log).toEqual(["queued", "failed:refused"]);
+    // A fire that throws before any request: failed.
+    log.length = 0;
+    expect(await runScheduled({ connected: true, fire: () => { throw new Error("no mailbox"); }, ...hooks })).toBe("failed");
+  });
+
+  it("menus: an item with a submenu opens it only when enabled and not empty; else a disabled plain item", () => {
+    const sub = [{ key: "a", label: "a", onPress: () => {} }];
+    expect(menuEntryKind({ submenu: sub })).toBe("submenu");
+    expect(menuEntryKind({ submenu: sub, disabled: true })).toBe("action");
+    expect(menuEntryEnabled({ submenu: sub, disabled: true })).toBe(false);
+    expect(menuEntryKind({ submenu: [] })).toBe("action");
+    expect(menuEntryEnabled({ submenu: [] })).toBe(false);
+    expect(menuEntryKind({ checked: false })).toBe("choice");
+    expect(menuEntryEnabled({})).toBe(true);
   });
 
   it("10 MB in all: up to the limit it can be scheduled, past it not (links); unknown sizes count as 0", () => {
