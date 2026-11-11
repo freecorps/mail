@@ -1,1 +1,1 @@
-export { DateTimePicker } from "./date-time-picker.ios";
+export { useDateTimePicker } from "./date-time-picker.ios";

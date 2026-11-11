@@ -1,11 +1,11 @@
 // iOS: SwiftUI's graphical DatePicker (calendar and time) inside a Form section, between `min` and `max`. The sheet's
-// toolbar confirms the time (`onCommit` is not used here).
+// toolbar confirms the time (`onCommit` is not used here). A hook that returns the row, like the Android one.
 import { DatePicker } from "@expo/ui/swift-ui";
 import { datePickerStyle, tint } from "@expo/ui/swift-ui/modifiers";
 import { useColors } from "../../theme";
 import type { DateTimePickerProps } from "./types";
 
-export function DateTimePicker({ label, value, min, max, onChange }: DateTimePickerProps) {
+export function useDateTimePicker({ label, value, min, max, onChange }: DateTimePickerProps) {
   const c = useColors();
   return (
     <DatePicker

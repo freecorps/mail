@@ -1,5 +1,5 @@
 // Native controls with one API and a SwiftUI (iOS) / Jetpack Compose (Android) implementation each.
-export { DateTimePicker } from "./date-time-picker";
+export { useDateTimePicker } from "./date-time-picker";
 export { EmptyState } from "./empty-state";
 export { IconButton } from "./icon-button";
 export { LabeledPicker } from "./labeled-picker";

@@ -6,7 +6,7 @@ import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
 import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Icons } from "../components/icons";
-import { DateTimePicker, NativeIcon } from "../components/ui";
+import { NativeIcon, useDateTimePicker } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
 import { defaultCustom, formatLater, laterChoices, MAX_AHEAD_MS, validLater } from "../lib/when";
@@ -28,9 +28,25 @@ export function WhenScreen() {
     if (!req) router.back();
   }, [req]);
   const choices = useMemo(() => (req ? laterChoices(req.purpose, { now, timeZone: zone, locale, clock24 }) : []), [req, now, zone, locale, clock24]);
+  const detail = formatLater(picked, now, locale, clock24, zone);
+  // The row (Android) / the graphical picker (iOS) as an element of the section itself (see useDateTimePicker).
+  const picker = useDateTimePicker({
+    label: ios ? t("when.pickTitle") : t("when.pick"),
+    value: picked,
+    min: now + 60_000,
+    max: now + MAX_AHEAD_MS,
+    detail,
+    autoOpen: !!req?.custom,
+    onChange: (at) => {
+      setPicked(at);
+      setError(false);
+    },
+    onCommit: (at) => pick(at),
+  });
   if (!req) return null;
 
-  const pick = (at: number) => {
+  function pick(at: number) {
+    if (!req) return;
     if (!validLater(at, Date.now())) {
       setError(true);
       haptics.warning();
@@ -39,10 +55,9 @@ export function WhenScreen() {
     haptics.selection();
     router.back();
     req.onPick(at);
-  };
+  }
   const title = req.purpose === "snooze" ? t("snooze.title") : t("when.sendTitle");
   const confirm = req.purpose === "snooze" ? t("when.confirmSnooze") : t("when.confirmSend");
-  const detail = formatLater(picked, now, locale, clock24, zone);
 
   return (
     <>
@@ -77,19 +92,7 @@ export function WhenScreen() {
             </FieldGroup.Section>
           )}
           <FieldGroup.Section title={t("when.pickTitle")}>
-            <DateTimePicker
-              label={ios ? t("when.pickTitle") : t("when.pick")}
-              value={picked}
-              min={now + 60_000}
-              max={now + MAX_AHEAD_MS}
-              detail={detail}
-              autoOpen={!!req.custom}
-              onChange={(at) => {
-                setPicked(at);
-                setError(false);
-              }}
-              onCommit={pick}
-            />
+            {picker}
             <FieldGroup.SectionFooter>
               <Text textStyle={{ color: error ? c.dangerText : c.secondaryText }}>{error ? t("when.invalid") : req.purpose === "snooze" ? t("snooze.footer") : detail}</Text>
             </FieldGroup.SectionFooter>

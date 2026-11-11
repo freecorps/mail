@@ -14,7 +14,7 @@ import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
-export { DateTimePicker, EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner } from "./native";
+export { EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner, useDateTimePicker } from "./native";
 
 /**
  * A neutral monogram, like Contacts: white initials on a grey gradient (iOS), a Material tonal container (Android).
