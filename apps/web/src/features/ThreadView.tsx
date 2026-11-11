@@ -1,4 +1,7 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type Ref } from "react";
+// The open conversation: a header with status and assignee as menus and previous/next, the messages as one column
+// of email "paper" separated by hairlines (older ones collapsed to a line, the latest open, quoted text behind
+// "•••"), internal notes as tinted blocks, the composer under them, and the context panel (`i`) at the side.
+import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -6,51 +9,61 @@ import {
   Ban,
   Check,
   CheckCheck,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
   CircleAlert,
+  CircleDot,
   Clock,
-  Download,
-  FileText,
+  CornerUpRight,
+  Ellipsis,
   Forward,
   Mail,
   MailOpen,
+  PanelRight,
+  ShieldAlert,
   StickyNote,
   Trash2,
   UserRound,
 } from "lucide-react";
 import { useMutation } from "@freecorps/ember-react";
+import { snippetWithoutQuote, splitQuotedHtml, splitQuotedText } from "@freecorps/mail-email-html/quote";
 import { toast } from "sonner";
 import { Avatar } from "@/components/Avatar";
-import { StatusBadge } from "@/components/StatusBadge";
+import { Kbd } from "@/components/Kbd";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Kbd } from "@/components/Kbd";
 import { useI18n } from "@/i18n/context";
-import type { Attachment, Message } from "@/lib/api";
+import { plural } from "@/i18n/strings";
+import { api, type Message, type ThreadStatus } from "@/lib/api";
+import { onContextToggle, useEscapeCloses } from "@/lib/contextPanel";
 import { linkifyText } from "@/lib/emailHtml";
-import { contactOf, displayAddress, fileSize, formatFull } from "@/lib/format";
+import { contactOf, displayAddress, formatFull, formatWhen } from "@/lib/format";
+import { useNow } from "@/lib/now";
+import { usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
-import { deliveryState, useMembers, useThread, type DeliveryState, type MessageItem } from "@/model/thread";
-import { isPersonal, useMailboxes } from "@/model/threads";
+import { useThreadActions } from "@/model/actions";
 import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "@/model/forward";
+import { deliveryState, foldMessages, useThread, type DeliveryState, type MessageItem } from "@/model/thread";
+import { isPersonal, useMailboxes } from "@/model/threads";
+import { AssignItems } from "./AssignMenu";
 import { ComposeDialog, type ForwardSource } from "./ComposeDialog";
 import { Composer, type ComposerHandle } from "./Composer";
+import { ContextPanel, Files } from "./ContextPanel";
 import { EmailFrame } from "./EmailFrame";
 import { Confirm } from "./admin/parts";
-import { api } from "@/lib/api";
-import { useThreadActions } from "@/model/actions";
+
+/** Width of the conversation pane from which the context panel sits beside the messages (else it covers them). */
+const SIDE_PANEL_MIN = 880;
 
 export function ThreadView({
   threadId,
   onBack,
+  onPrev,
+  onNext,
   showBack = false,
   composerRef,
   onOpenThread,
@@ -58,18 +71,20 @@ export function ThreadView({
 }: {
   threadId: string;
   onBack: () => void;
+  /** The neighbors in the list (undefined at either end, or when the thread is not in the list). */
+  onPrev?: () => void;
+  onNext?: () => void;
   /** The back button also shows on wide windows (the conversation covers the list: full and focus modes). */
   showBack?: boolean;
   /** The signed-in member is an admin: they may delete a shared mailbox's conversation. */
   admin?: boolean;
   composerRef: Ref<ComposerHandle>;
-  /** Opens another thread (a forwarded message's new conversation). */
+  /** Opens another thread (a forwarded message's new conversation, an earlier conversation of the contact). */
   onOpenThread?: (threadId: string) => void;
 }) {
   const { t, locale } = useI18n();
   const vm = useThread(threadId);
-  const threadActions = useThreadActions();
-  const members = useMembers(vm.thread?.mailbox ?? null);
+  const actions = useThreadActions();
   const boxes = useMailboxes().mailboxes;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
   const personal = isPersonal(boxes, vm.thread?.mailbox);
@@ -89,6 +104,45 @@ export function ThreadView({
         : [],
     [vm.items, vm.thread, own],
   );
+
+  // The context panel: beside the messages where the pane has room (remembered), over them where it has not (asked
+  // for each time). `i` and the header button flip whichever applies.
+  const prefs = usePrefs();
+  const loaded = vm.thread !== null;
+  const pane = useRef<HTMLDivElement>(null);
+  // Null until the pane is measured (the skeleton and "not found" have none): no panel shows and `i` does nothing, so
+  // it never flips the remembered side panel on a pane that may turn out narrow.
+  const [roomy, setRoomy] = useState<boolean | null>(null);
+  const [overlay, setOverlay] = useState(false);
+  // Measured before the first paint (a layout effect), so a narrow pane never shows the side panel for a frame.
+  useLayoutEffect(() => {
+    const el = pane.current;
+    if (!el) {
+      setRoomy(null);
+      return;
+    }
+    setRoomy(el.clientWidth >= SIDE_PANEL_MIN);
+    const ro = new ResizeObserver(() => setRoomy(el.clientWidth >= SIDE_PANEL_MIN));
+    ro.observe(el);
+    return () => ro.disconnect();
+    // The pane exists once the thread has loaded (the skeleton has none).
+  }, [loaded]);
+  // The overlay is for a narrow pane only: widening past the side column closes it, so narrowing again does not bring
+  // it back on its own.
+  useEffect(() => {
+    if (roomy) setOverlay(false);
+  }, [roomy]);
+  const contextShown = roomy === null ? false : roomy ? prefs.contextPanel : overlay;
+  const { contextPanel, setContextPanel } = prefs;
+  const toggleContext = useCallback(() => {
+    if (roomy === null) return;
+    if (roomy) setContextPanel(!contextPanel);
+    else setOverlay((o) => !o);
+  }, [roomy, contextPanel, setContextPanel]);
+  useEffect(() => (roomy === null ? undefined : onContextToggle(toggleContext)), [roomy, toggleContext]);
+  // Over the messages, the panel is the top layer: Escape hides it before it closes the conversation.
+  useEscapeCloses(roomy === false && overlay, toggleContext);
+
   // The message being forwarded stays while the dialog is closed, so a failed send can reopen it with its draft.
   const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
   const [forwardOpen, setForwardOpen] = useState(false);
@@ -113,26 +167,74 @@ export function ThreadView({
       files: forwardedFiles(m.attachments).map((a) => a.filename),
     });
   };
+
+  // Opens at the top of the latest message (a long email starts where it starts), and keeps it there while frames
+  // above load and grow, until the reader scrolls. After that, new messages follow only while the reader is at the
+  // bottom; the reader's own reply or note (pending) always scrolls into view.
   const scroller = useRef<HTMLOListElement>(null);
+  const anchored = useRef(true);
+  const stick = useRef(false);
+  // The reader opened something (a message, the older ones, a quote): the pane stays where they are, neither on the
+  // latest message nor at the bottom (what they opened would scroll away). Reaching the bottom again sticks again.
+  const readerGrows = () => {
+    anchored.current = false;
+    stick.current = false;
+  };
+  // Which messages are open: the latest by default, any the reader toggled, and the one that was latest before the
+  // reader's own reply arrived (so answering does not fold what they were answering).
   const count = vm.items.length;
-  // Open on the newest message (the view is keyed by thread, so `stick` starts true per thread) and follow new ones
-  // only while the reader is at the bottom — someone reading history is not yanked down by a customer's answer. The
-  // reader's own reply/note (pending) always scrolls into view. HTML messages grow after their frame loads, so sizes
-  // are observed too.
-  const stick = useRef(true);
+  const lastId = vm.items.at(-1)?.message._id ?? null;
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const [prevLast, setPrevLast] = useState(lastId);
+  if (prevLast !== lastId) {
+    setPrevLast(lastId);
+    // Only for the reader's own reply (pending): mail that arrives while reading folds the previous one as usual.
+    if (prevLast && !toggled.has(prevLast) && vm.items.at(-1)?.pending) setToggled(new Map(toggled).set(prevLast, true));
+  }
+  const isOpen = (id: string) => toggled.get(id) ?? id === lastId;
+  const toggle = (id: string) => {
+    readerGrows();
+    setToggled((m) => new Map(m).set(id, !isOpen(id)));
+  };
+  const [showAll, setShowAll] = useState(false);
+  const folds = foldMessages(count, showAll);
+
   const ownNew = vm.items.at(-1)?.pending === true;
+  // The pending reply that already pulled the pane down: re-runs for other reasons (unfolding the older messages while
+  // it is still sending, or queued offline) leave the reader where they are.
+  const stuckFor = useRef<string | null>(null);
   useEffect(() => {
     const el = scroller.current;
     if (!el || !count) return;
-    if (ownNew) stick.current = true;
-    const toBottom = () => {
-      if (stick.current) el.scrollTop = el.scrollHeight;
+    if (ownNew && stuckFor.current !== lastId) {
+      stuckFor.current = lastId;
+      anchored.current = false;
+      stick.current = true;
+    }
+    const place = () => {
+      if (anchored.current) {
+        const last = el.lastElementChild as HTMLElement | null;
+        if (last) el.scrollTop = Math.max(0, last.offsetTop - 8);
+      } else if (stick.current) el.scrollTop = el.scrollHeight;
     };
-    toBottom();
-    const ro = new ResizeObserver(toBottom);
+    place();
+    const ro = new ResizeObserver(place);
     for (const li of el.children) ro.observe(li);
     return () => ro.disconnect();
-  }, [count, ownNew]);
+  }, [count, ownNew, showAll, lastId]);
+  // Any scrolling by the reader (wheel, touch, the scrollbar, keys) ends the anchoring.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const release = () => {
+      anchored.current = false;
+    };
+    const kinds = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+    for (const k of kinds) el.addEventListener(k, release, { passive: true });
+    return () => {
+      for (const k of kinds) el.removeEventListener(k, release);
+    };
+  }, [loaded]);
 
   if (vm.status === "error" || (vm.status === "ready" && !vm.thread)) {
     return (
@@ -146,10 +248,19 @@ export function ThreadView({
   if (!vm.thread) {
     return (
       <Pane onBack={onBack} showBack={showBack}>
-        <div className="space-y-4 p-8" aria-busy="true">
+        <div className="space-y-3 border-b px-4 py-4 sm:px-6" aria-busy="true">
           <Skeleton className="h-6 w-2/3" />
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-40 w-full" />
+          <div className="flex gap-2">
+            <Skeleton className="h-5 w-16 rounded-full" />
+            <Skeleton className="h-5 w-24 rounded-full" />
+          </div>
+        </div>
+        <div className="space-y-3 px-4 py-5 sm:px-6" aria-hidden="true">
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-8 rounded-full" />
+            <Skeleton className="h-4 w-40" />
+          </div>
+          <Skeleton className="h-48 w-full" />
         </div>
       </Pane>
     );
@@ -158,117 +269,146 @@ export function ThreadView({
   const th = vm.thread;
   const archived = th.status === "closed";
   const unread = th.unreadCount > 0;
+  const target = [{ threadId, status: th.status, unread }];
   return (
     <Pane onBack={onBack} showBack={showBack}>
-      <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b px-4 py-3.5 sm:px-6">
-        <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold text-balance sm:text-lg">{th.subject}</h2>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            {th.number > 0 && <span className="font-mono tabular-nums">#{th.number}</span>}
-            <span>{contactOf(th)}</span>
-            <StatusBadge status={th.status} />
-            {th.assigneeName && !personal && <span>{t("thread.assignedTo", { name: th.assigneeName })}</span>}
-          </p>
-        </div>
-        <div className="flex items-center gap-1">
-          <Action
-            label={archived ? t("thread.unarchive") : t("thread.archive")}
-            kbd="e"
-            onClick={() => threadActions.archive([{ threadId, status: th.status, unread }])}
-          >
-            {archived ? <ArchiveRestore /> : <Archive />}
-          </Action>
-          <Action label={unread ? t("thread.markRead") : t("thread.markUnread")} kbd="u" onClick={vm.toggleRead}>
-            {unread ? <MailOpen /> : <Mail />}
-          </Action>
-          {canDelete && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label={t("thread.delete")} onClick={() => setConfirmDelete(true)}>
-                  <Trash2 aria-hidden="true" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t("thread.delete")}</TooltipContent>
-            </Tooltip>
-          )}
-          {!personal && (
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm" aria-label={t("thread.assign")} className="gap-1.5">
-                      <UserRound aria-hidden="true" />
-                      <span className="hidden max-w-28 truncate lg:inline">{th.assigneeName ?? t("thread.unassigned")}</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>{t("thread.assign")}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuLabel className="text-xs text-muted-foreground">{t("assign.title")}</DropdownMenuLabel>
-                {members.members.map((m) => (
-                  <DropdownMenuItem key={m.userId} onSelect={() => vm.assign(m.userId)}>
-                    <Avatar name={m.name} className="size-5" />
-                    <span className="flex-1 truncate">{m.name}</span>
-                    {th.assignee === m.userId && <Check aria-label="✓" />}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => vm.assign(null)}>
-                  <span className="flex-1">{t("assign.nobody")}</span>
-                  {!th.assignee && <Check aria-label="✓" />}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </header>
-      <Confirm
-        open={confirmDelete}
-        onOpenChange={setConfirmDelete}
-        title={t("thread.deleteTitle")}
-        body={t("thread.deleteBody")}
-        action={t("thread.delete")}
-        onConfirm={() => {
-          setConfirmDelete(false);
-          deleteThread({ threadId })
-            .then(() => {
-              toast(t("thread.deleted"));
-              onBack();
-            })
-            .catch((e: Error) => toast.error(e.message));
-        }}
-      />
+      <div ref={pane} className="relative flex min-h-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="border-b px-4 pt-3 pb-3 sm:px-6">
+            <div className="flex items-start gap-3">
+              <h2 className="min-w-0 flex-1 pt-0.5 text-base font-semibold text-balance [overflow-wrap:anywhere] sm:text-lg">
+                {th.subject.trim() || t("thread.noSubject")}
+              </h2>
+              <div className="-mr-1.5 flex shrink-0 items-center">
+                <Action label={archived ? t("thread.unarchive") : t("thread.archive")} kbd="e" onClick={() => actions.archive(target)}>
+                  {archived ? <ArchiveRestore /> : <Archive />}
+                </Action>
+                <Action label={unread ? t("thread.markRead") : t("thread.markUnread")} kbd="u" onClick={vm.toggleRead}>
+                  {unread ? <MailOpen /> : <Mail />}
+                </Action>
+                {canDelete && (
+                  <Action label={t("thread.delete")} onClick={() => setConfirmDelete(true)}>
+                    <Trash2 />
+                  </Action>
+                )}
+                <Action label={t("context.toggle")} kbd="i" pressed={contextShown} onClick={toggleContext}>
+                  <PanelRight />
+                </Action>
+                <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+                <Action label={t("thread.prev")} kbd="k" onClick={onPrev} disabled={!onPrev}>
+                  <ChevronLeft />
+                </Action>
+                <Action label={t("thread.next")} kbd="j" onClick={onNext} disabled={!onNext}>
+                  <ChevronRight />
+                </Action>
+              </div>
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
+              {th.number > 0 && <span className="font-mono tabular-nums">#{th.number}</span>}
+              <span className="min-w-0 truncate">{contactOf(th)}</span>
+              <StatusMenu status={th.status} onPick={(s) => actions.setStatus(target, s)} />
+              {!personal && (
+                <AssigneeMenu mailbox={th.mailbox} assignee={th.assignee ?? null} name={th.assigneeName ?? null} onAssign={vm.assign} />
+              )}
+            </div>
+          </header>
+          <Confirm
+            open={confirmDelete}
+            onOpenChange={setConfirmDelete}
+            title={t("thread.deleteTitle")}
+            body={t("thread.deleteBody")}
+            action={t("thread.delete")}
+            onConfirm={() => {
+              setConfirmDelete(false);
+              deleteThread({ threadId })
+                .then(() => {
+                  toast(t("thread.deleted"));
+                  onBack();
+                })
+                .catch((e: Error) => toast.error(e.message));
+            }}
+          />
 
-      <ol
-        ref={scroller}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-        }}
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6"
-        aria-label={th.subject}
-      >
-        {vm.items.map((item) => (
-          <li key={item.message._id}>
-            <MessageCard
-              item={item}
-              urls={vm.attachmentUrls}
-              onForward={item.pending || item.message.direction === "note" ? undefined : () => forward(item.message)}
-            />
-          </li>
-        ))}
-      </ol>
+          <ReaderGrows value={readerGrows}>
+            <ol
+              ref={scroller}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+                // Dragging the scrollbar fires none of the input events above: a scroll away from where the anchoring
+                // put it is the reader's.
+                // (Compared with where the anchor is now, not where it was: the browser's own scroll anchoring may have
+                // moved it while frames above grew.)
+                if (anchored.current) {
+                  const last = el.lastElementChild as HTMLElement | null;
+                  const target = last ? Math.min(Math.max(0, last.offsetTop - 8), el.scrollHeight - el.clientHeight) : 0;
+                  if (Math.abs(el.scrollTop - target) > 2) anchored.current = false;
+                }
+              }}
+              className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4"
+              aria-label={th.subject}
+            >
+              {folds.map((f) => {
+                if (f.kind === "fold")
+                  return (
+                    <li key="fold" className="border-b">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          readerGrows();
+                          setShowAll(true);
+                        }}
+                        className="flex w-full items-center gap-3 px-4 py-2 text-left text-ui text-muted-foreground hover:bg-accent/50 sm:px-6"
+                      >
+                        <span className="grid size-6 place-items-center text-muted-foreground">
+                          <ChevronsUpDown className="size-4" aria-hidden="true" />
+                        </span>
+                        {t(plural(locale, "thread.older", f.count), { count: f.count })}
+                      </button>
+                    </li>
+                  );
+                const item = vm.items[f.index]!;
+                const m = item.message;
+                const open = isOpen(m._id);
+                return (
+                  <li key={m._id} className={cn(m.direction !== "note" && "border-b last:border-b-0")}>
+                    {open ? (
+                      <MessageBlock
+                        item={item}
+                        urls={vm.attachmentUrls}
+                        onCollapse={m._id === lastId && count === 1 ? undefined : () => toggle(m._id)}
+                        onForward={item.pending || m.direction === "note" ? undefined : () => forward(m)}
+                      />
+                    ) : (
+                      <CollapsedMessage item={item} onExpand={() => toggle(m._id)} />
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </ReaderGrows>
 
-      <Composer
-        ref={composerRef}
-        contactName={contactOf(th)}
-        disabled={!vm.canReply}
-        onReply={vm.reply}
-        onNote={vm.note}
-        notes={!personal}
-        others={others}
-      />
+          <Composer
+            ref={composerRef}
+            contactName={contactOf(th)}
+            disabled={!vm.canReply}
+            onReply={vm.reply}
+            onNote={vm.note}
+            notes={!personal}
+            others={others}
+          />
+        </div>
+        {contextShown && (
+          <ContextPanel
+            thread={th}
+            items={vm.items}
+            urls={vm.attachmentUrls}
+            overlay={!roomy}
+            onClose={toggleContext}
+            onOpenThread={(id) => onOpenThread?.(id)}
+          />
+        )}
+      </div>
       <ComposeDialog
         key={forwarding?.messageId ?? "none"}
         open={forwardOpen && forwarding !== null}
@@ -299,64 +439,244 @@ function Pane({ children, onBack, showBack }: { children: React.ReactNode; onBac
   );
 }
 
-function Action({ label, kbd, onClick, children }: { label: string; kbd: string; onClick: () => void; children: React.ReactNode }) {
+function Action({
+  label,
+  kbd,
+  onClick,
+  disabled,
+  pressed,
+  children,
+}: {
+  label: string;
+  kbd?: string;
+  onClick?: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label={label} aria-keyshortcuts={kbd} onClick={onClick}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={label}
+          aria-keyshortcuts={kbd}
+          aria-pressed={pressed}
+          onClick={onClick}
+          disabled={disabled}
+          className={cn("text-muted-foreground hover:text-foreground", pressed && "bg-accent text-foreground")}
+        >
           {children}
         </Button>
       </TooltipTrigger>
       <TooltipContent className="flex items-center gap-2">
         {label}
-        <Kbd className="border-background/20 bg-background/15 text-background">{kbd}</Kbd>
+        {kbd && <Kbd className="border-background/20 bg-background/15 text-background">{kbd}</Kbd>}
       </TooltipContent>
     </Tooltip>
   );
 }
 
-function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Record<string, string | null>; onForward?: () => void }) {
+const STATUS_ICON: Record<ThreadStatus, typeof Clock> = { open: CircleDot, waiting: Clock, closed: Archive, spam: ShieldAlert };
+const STATUS_TONE: Record<ThreadStatus, string> = {
+  open: "text-status-open",
+  waiting: "text-status-waiting",
+  closed: "text-status-closed",
+  spam: "text-status-spam",
+};
+const STATUSES: ThreadStatus[] = ["open", "waiting", "closed", "spam"];
+
+/** The status as a small pill that opens the list of statuses. */
+function StatusMenu({ status, onPick }: { status: ThreadStatus; onPick: (s: ThreadStatus) => void }) {
+  const { t } = useI18n();
+  const Icon = STATUS_ICON[status];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`${t("thread.status")}: ${t(`status.${status}`)}`}
+        className="pressable inline-flex h-6 items-center gap-1 rounded-full border px-2 text-xs font-medium text-foreground hover:bg-accent data-[state=open]:bg-accent"
+      >
+        <Icon className={cn("size-3.5", STATUS_TONE[status])} aria-hidden="true" />
+        {t(`status.${status}`)}
+        <ChevronDown className="size-3 text-muted-foreground" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-48">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("thread.status")}</DropdownMenuLabel>
+        {STATUSES.map((s) => {
+          const I = STATUS_ICON[s];
+          return (
+            <DropdownMenuItem key={s} onSelect={() => s !== status && onPick(s)}>
+              <I className={STATUS_TONE[s]} aria-hidden="true" />
+              <span className="flex-1">{t(`status.${s}`)}</span>
+              {s === status && <Check aria-label="✓" />}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The assignee as a pill (mini monogram and name, or "Sem responsável") that opens the members of the mailbox. */
+function AssigneeMenu({
+  mailbox,
+  assignee,
+  name,
+  onAssign,
+}: {
+  mailbox: string;
+  assignee: string | null;
+  name: string | null;
+  onAssign: (userId: string | null) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`${t("thread.assign")}: ${name ?? t("thread.unassigned")}`}
+        className="pressable inline-flex h-6 max-w-48 min-w-0 items-center gap-1.5 rounded-full border pr-2 pl-1 text-xs font-medium text-foreground hover:bg-accent data-[state=open]:bg-accent"
+      >
+        {name ? (
+          <Avatar name={name} className="size-4" />
+        ) : (
+          <UserRound className="ml-0.5 size-3.5 text-muted-foreground" aria-hidden="true" />
+        )}
+        <span className={cn("truncate", !name && "text-muted-foreground")}>{name ?? t("thread.unassigned")}</span>
+        <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <AssignItems mailboxes={[mailbox]} current={assignee} onAssign={onAssign} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** Who wrote a message, as the conversation names them: the member for a reply, the sender for mail received. */
+function authorOf(m: Message): string {
+  return m.direction !== "inbound" && m.author ? m.author : displayAddress(m.from);
+}
+
+/** An older message as one line: who, a preview, when. Opens on click. */
+function CollapsedMessage({ item, onExpand }: { item: MessageItem; onExpand: () => void }) {
+  const { t, locale } = useI18n();
+  const now = useNow();
+  const m = item.message;
+  const note = m.direction === "note";
+  const name = authorOf(m);
+  return (
+    <button
+      type="button"
+      aria-expanded={false}
+      aria-label={`${t("thread.expand")}: ${name}`}
+      onClick={onExpand}
+      className={cn(
+        "flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-(--motion-hover) hover:bg-accent/50 sm:px-6",
+        note && "my-1 rounded-lg bg-note/60 text-note-foreground hover:bg-note sm:mx-0",
+      )}
+    >
+      {note ? <StickyNote className="size-4 shrink-0" aria-hidden="true" /> : <Avatar name={name} className="size-6" />}
+      <span className="flex w-28 min-w-0 shrink-0 items-center gap-1 truncate text-ui font-medium sm:w-36">
+        <span className="truncate">{note ? t("thread.note") : name}</span>
+        {m.direction === "outbound" && <CornerUpRight className="size-3 shrink-0 text-primary" aria-label={t("thread.sentBy")} />}
+      </span>
+      <span className={cn("min-w-0 flex-1 truncate text-ui", note ? "opacity-80" : "text-muted-foreground")}>
+        {snippetWithoutQuote(m.snippet || m.text)}
+      </span>
+      <time className="shrink-0 text-xs text-muted-foreground tabular-nums" dateTime={new Date(m.at).toISOString()}>
+        {item.pending ? t("thread.sending") : formatWhen(m.at, now, locale)}
+      </time>
+    </button>
+  );
+}
+
+/** One open message: the header row, then the body as the sender wrote it (HTML on white paper, or text). */
+function MessageBlock({
+  item,
+  urls,
+  onCollapse,
+  onForward,
+}: {
+  item: MessageItem;
+  urls: Record<string, string | null>;
+  onCollapse?: () => void;
+  onForward?: () => void;
+}) {
   const { t, locale } = useI18n();
   const m = item.message;
-  const from = displayAddress(m.from);
+  const name = authorOf(m);
   const files = m.attachments.filter((a) => !(a.inline && a.contentId && item.cid[a.contentId.replace(/^<|>$/g, "")]));
 
   if (m.direction === "note") {
+    const noteHead = (
+      <>
+        <StickyNote className="size-3.5" aria-hidden="true" />
+        <span className="font-medium">{t("thread.note")}</span>
+        {m.author && <span className="min-w-0 truncate">{m.author}</span>}
+        <span className="ml-auto shrink-0 opacity-80">{item.pending ? t("thread.sending") : formatFull(m.at, locale)}</span>
+      </>
+    );
     return (
-      <article className="rounded-lg border border-note-border bg-note px-4 py-3 text-note-foreground" aria-label={t("thread.note")}>
-        <header className="mb-1.5 flex items-center gap-2 text-xs">
-          <StickyNote className="size-3.5" aria-hidden="true" />
-          <span className="font-medium">{t("thread.note")}</span>
-          {m.author && <span>· {m.author}</span>}
-          <span className="ml-auto opacity-80">{item.pending ? t("thread.sending") : formatFull(m.at, locale)}</span>
-        </header>
-        <PlainText text={m.text} />
+      <article className="mx-4 my-3 rounded-lg bg-note px-4 py-3 text-note-foreground sm:mx-6" aria-label={t("thread.note")}>
+        {onCollapse ? (
+          <button
+            type="button"
+            aria-expanded={true}
+            aria-label={`${t("thread.collapse")}: ${t("thread.note")}`}
+            onClick={onCollapse}
+            className="-m-1 mb-0.5 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-md p-1 text-left text-xs"
+          >
+            {noteHead}
+          </button>
+        ) : (
+          <header className="mb-1.5 flex items-center gap-2 text-xs">{noteHead}</header>
+        )}
+        <MessageText text={m.text} />
       </article>
     );
   }
 
   const outbound = m.direction === "outbound";
-  return (
-    <article
-      className={cn(
-        "rounded-lg border bg-card",
-        outbound && "border-primary/20 bg-primary/[0.035] dark:bg-primary/[0.06]",
-        item.pending && "opacity-75",
-      )}
-    >
-      <header className="flex items-start gap-3 px-4 pt-3.5 pb-2.5">
-        <Avatar name={outbound && m.author ? m.author : from} />
-        <div className="min-w-0 flex-1">
-          <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-            <span className="font-medium">{outbound && m.author ? m.author : from}</span>
-            <span className="truncate text-xs text-muted-foreground">{outbound ? m.fromEmail : m.from.email}</span>
-          </p>
-          {m.to.length > 0 && (
-            <p className="truncate text-xs text-muted-foreground">{t("thread.to", { to: m.to.map(displayAddress).join(", ") })}</p>
+  const head = (
+    <>
+      <Avatar name={name} className="size-8" />
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 items-baseline gap-1.5 text-sm">
+          <span className="truncate font-medium">{name}</span>
+          {outbound && (
+            <span className="inline-flex shrink-0 self-center text-primary" title={t("thread.sentBy")}>
+              <CornerUpRight className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">{t("thread.sentBy")}</span>
+            </span>
           )}
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-0.5">
-          <time className="text-xs text-muted-foreground" dateTime={new Date(m.at).toISOString()}>
+          <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">{outbound ? m.fromEmail : m.from.email}</span>
+        </span>
+        {m.to.length > 0 && (
+          <span className="block truncate text-xs text-muted-foreground">
+            {t("thread.to", { to: m.to.map(displayAddress).join(", ") })}
+          </span>
+        )}
+      </span>
+    </>
+  );
+  return (
+    <article className={cn("px-4 pt-3.5 pb-4 sm:px-6", item.pending && "opacity-75")}>
+      <header className="flex items-start gap-3">
+        {onCollapse ? (
+          <button
+            type="button"
+            aria-expanded={true}
+            aria-label={`${t("thread.collapse")}: ${name}`}
+            onClick={onCollapse}
+            className="-m-1 flex min-w-0 flex-1 items-start gap-3 rounded-md p-1 text-left"
+          >
+            {head}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-start gap-3">{head}</div>
+        )}
+        <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5">
+          <time className="text-xs text-muted-foreground tabular-nums" dateTime={new Date(m.at).toISOString()}>
             {item.pending ? t("thread.sending") : formatFull(m.at, locale)}
           </time>
           {!item.pending && <DeliveryMarker message={m} />}
@@ -364,7 +684,13 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
         {onForward && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" className="-mt-1 -mr-2" aria-label={t("thread.forward")} onClick={onForward}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="-mt-1 -mr-2 text-muted-foreground"
+                aria-label={t("thread.forward")}
+                onClick={onForward}
+              >
                 <Forward aria-hidden="true" />
               </Button>
             </TooltipTrigger>
@@ -372,15 +698,78 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
           </Tooltip>
         )}
       </header>
-      <div className="px-4 pb-4">
-        {m.html && m.direction === "inbound" ? (
-          <EmailFrame html={m.html} cid={item.cid} title={t("thread.messageFrame", { from })} />
+      <div className="mt-3">
+        {m.html && !item.pending ? (
+          <HtmlBody html={m.html} cid={item.cid} title={t("thread.messageFrame", { from: name })} />
         ) : (
-          <PlainText text={m.text} />
+          <MessageText text={m.text} />
         )}
-        {files.length > 0 && <Attachments files={files} urls={urls} />}
+        {files.length > 0 && <Files files={files} urls={urls} className="mt-3" />}
       </div>
     </article>
+  );
+}
+
+/** Tells the conversation the reader opened something inside a message (a quote): see `readerGrows`. */
+const ReaderGrowsContext = createContext<() => void>(() => {});
+const ReaderGrows = ReaderGrowsContext.Provider;
+
+/** "•••": shows or hides the quoted part of a message. */
+function QuoteToggle({ open, onToggle: flip }: { open: boolean; onToggle: () => void }) {
+  const { t } = useI18n();
+  const grows = useContext(ReaderGrowsContext);
+  const onToggle = () => {
+    grows();
+    flip();
+  };
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={open ? t("thread.hideQuote") : t("thread.showQuote")}
+          onClick={onToggle}
+          className="pressable my-2 inline-flex h-5 items-center rounded-full bg-muted px-2 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Ellipsis className="size-4" aria-hidden="true" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{open ? t("thread.hideQuote") : t("thread.showQuote")}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Like plain text: the body's frame stays as it is (no reload, same height, same scroll) and the quote opens in a
+ * frame of its own under "•••", so the toggle stays where it was clicked. Loading images loads them in both.
+ */
+function HtmlBody({ html, cid, title }: { html: string; cid: Record<string, string>; title: string }) {
+  const { t } = useI18n();
+  const split = useMemo(() => splitQuotedHtml(html), [html]);
+  const [quote, setQuote] = useState(false);
+  const [load, setLoad] = useState(false);
+  const images = useMemo(() => ({ load, onLoad: () => setLoad(true) }), [load]);
+  if (!split) return <EmailFrame html={html} cid={cid} title={title} images={images} />;
+  return (
+    <>
+      <EmailFrame html={split.body} cid={cid} title={title} images={images} />
+      <QuoteToggle open={quote} onToggle={() => setQuote((q) => !q)} />
+      {quote && <EmailFrame html={split.quote} cid={cid} title={`${title}: ${t("thread.quoted")}`} images={images} />}
+    </>
+  );
+}
+
+function MessageText({ text }: { text: string }) {
+  const split = useMemo(() => splitQuotedText(text), [text]);
+  const [quote, setQuote] = useState(false);
+  if (!split) return <PlainText text={text} />;
+  return (
+    <>
+      <PlainText text={split.body} />
+      <QuoteToggle open={quote} onToggle={() => setQuote((q) => !q)} />
+      {quote && <PlainText text={split.quote} className="text-muted-foreground" />}
+    </>
   );
 }
 
@@ -432,9 +821,9 @@ function DeliveryMarker({ message }: { message: Message }) {
   );
 }
 
-function PlainText({ text }: { text: string }) {
+function PlainText({ text, className }: { text: string; className?: string }) {
   return (
-    <div className="text-sm leading-relaxed break-words whitespace-pre-wrap">
+    <div className={cn("text-sm leading-relaxed [overflow-wrap:anywhere] whitespace-pre-wrap", className)}>
       {linkifyText(text).map((p, i) =>
         p.kind === "link" ? (
           <a
@@ -450,49 +839,6 @@ function PlainText({ text }: { text: string }) {
           <Fragment key={i}>{p.value}</Fragment>
         ),
       )}
-    </div>
-  );
-}
-
-function Attachments({ files, urls }: { files: Attachment[]; urls: Record<string, string | null> }) {
-  const { t, locale } = useI18n();
-  return (
-    <div className="mt-3 border-t pt-3">
-      <h3 className="sr-only">{t("thread.attachments")}</h3>
-      <ul className="flex flex-wrap gap-2">
-        {files.map((a: Attachment) => {
-          const url = urls[a.file];
-          const body = (
-            <>
-              <span className="grid size-8 place-items-center rounded-md bg-muted text-muted-foreground">
-                <FileText className="size-4" aria-hidden="true" />
-              </span>
-              <span className="min-w-0">
-                <span className="block max-w-48 truncate text-ui font-medium">{a.filename}</span>
-                <span className="block text-xs text-muted-foreground">{fileSize(a.size, locale) || a.contentType}</span>
-              </span>
-              {url && <Download className="size-4 text-muted-foreground" aria-hidden="true" />}
-            </>
-          );
-          return (
-            <li key={a.file}>
-              {url ? (
-                <a
-                  href={url}
-                  download={a.filename}
-                  rel="noopener noreferrer"
-                  aria-label={t("thread.download", { name: a.filename })}
-                  className="pressable flex items-center gap-2.5 rounded-lg border bg-background py-1.5 pr-3 pl-1.5 hover:bg-accent"
-                >
-                  {body}
-                </a>
-              ) : (
-                <span className="flex items-center gap-2.5 rounded-lg border py-1.5 pr-3 pl-1.5 opacity-60">{body}</span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }

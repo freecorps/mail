@@ -7,9 +7,22 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/context";
 import { buildEmailDocument, EMAIL_SANDBOX, hasRemoteImages } from "@/lib/emailHtml";
 
-export function EmailFrame({ html, cid, title }: { html: string; cid: Record<string, string>; title: string }) {
+export function EmailFrame({
+  html,
+  cid,
+  title,
+  images,
+}: {
+  html: string;
+  cid: Record<string, string>;
+  title: string;
+  /** Shared "load images" choice (a message and its quote, in two frames); else the frame keeps its own. */
+  images?: { load: boolean; onLoad: () => void };
+}) {
   const { t } = useI18n();
-  const [loadImages, setLoadImages] = useState(false);
+  const [own, setOwn] = useState(false);
+  const loadImages = images ? images.load : own;
+  const setLoadImages = images ? images.onLoad : () => setOwn(true);
   const remote = useMemo(() => hasRemoteImages(html), [html]);
   const doc = useMemo(() => buildEmailDocument(html, { loadImages, cid }), [html, loadImages, cid]);
   const ref = useRef<HTMLIFrameElement>(null);
@@ -20,9 +33,16 @@ export function EmailFrame({ html, cid, title }: { html: string; cid: Record<str
     if (!frame) return;
     let observer: ResizeObserver | null = null;
     const forwardKeys = (e: KeyboardEvent) => {
-      // Shortcuts keep working after a click inside the message.
+      // Shortcuts keep working after a click inside the message (cancelable: a layer over the messages can take the key).
       window.dispatchEvent(
-        new KeyboardEvent("keydown", { key: e.key, metaKey: e.metaKey, ctrlKey: e.ctrlKey, altKey: e.altKey, shiftKey: e.shiftKey }),
+        new KeyboardEvent("keydown", {
+          key: e.key,
+          metaKey: e.metaKey,
+          ctrlKey: e.ctrlKey,
+          altKey: e.altKey,
+          shiftKey: e.shiftKey,
+          cancelable: true,
+        }),
       );
     };
     const onLoad = () => {
@@ -50,7 +70,7 @@ export function EmailFrame({ html, cid, title }: { html: string; cid: Record<str
             <ImageOff className="size-3.5" aria-hidden="true" />
             {t("thread.imagesBlocked")}
           </span>
-          <Button size="xs" variant="outline" onClick={() => setLoadImages(true)}>
+          <Button size="xs" variant="outline" onClick={setLoadImages}>
             {t("thread.loadImages")}
           </Button>
         </div>

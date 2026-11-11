@@ -124,3 +124,16 @@ export function useMembers(mailbox: string | null) {
   const s = useQuerySnapshot(api.inbox.members, mailbox ? { mailbox } : "skip");
   return { members: s.value ?? [], status: (s.status === "success" ? "ready" : s.status) as LoadStatus };
 }
+
+/** A run of older messages folded into one "N earlier messages" line. */
+export type Fold = { kind: "message"; index: number } | { kind: "fold"; from: number; count: number };
+
+/**
+ * Which messages show (each one collapsed or open) and which fold into a single line: a long conversation keeps its
+ * first message and the last three, the rest behind "N mensagens anteriores" until asked for.
+ */
+export function foldMessages(count: number, showAll: boolean): Fold[] {
+  const all = Array.from({ length: count }, (_, index): Fold => ({ kind: "message", index }));
+  if (showAll || count <= 5) return all;
+  return [all[0]!, { kind: "fold", from: 1, count: count - 4 }, ...all.slice(count - 3)];
+}

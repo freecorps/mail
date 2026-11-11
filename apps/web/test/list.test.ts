@@ -249,3 +249,20 @@ describe("scrolling", () => {
     expect(loadMoreDue({ ...base, canLoadMore: false })).toBe(false);
   });
 });
+
+describe("conversation folds", () => {
+  it("long conversations keep the first and the last three, the rest behind one line", async () => {
+    const { foldMessages } = await import("@/model/thread");
+    expect(foldMessages(3, false).map((f) => f.kind)).toEqual(["message", "message", "message"]);
+    expect(foldMessages(5, false)).toHaveLength(5);
+    expect(foldMessages(9, false)).toEqual([
+      { kind: "message", index: 0 },
+      { kind: "fold", from: 1, count: 5 },
+      { kind: "message", index: 6 },
+      { kind: "message", index: 7 },
+      { kind: "message", index: 8 },
+    ]);
+    expect(foldMessages(9, true)).toHaveLength(9);
+    expect(foldMessages(0, false)).toEqual([]);
+  });
+});

@@ -117,5 +117,14 @@ export function useThreadActions() {
     [assignTo],
   );
 
-  return { archive, toggleRead, assign };
+  /** Any status; archiving goes through `archive` (it offers Desfazer). */
+  const setStatusOf = useCallback(
+    (targets: readonly ActionTarget[], status: ThreadStatus) => {
+      if (status === "closed") return archive(targets);
+      for (const x of targets) quiet(setStatus({ threadId: x.threadId, status }));
+    },
+    [archive, setStatus],
+  );
+
+  return { archive, toggleRead, assign, setStatus: setStatusOf };
 }
