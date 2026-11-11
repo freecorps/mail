@@ -27,6 +27,14 @@ describe("HTML quotes", () => {
     expect(text(s.quote)).toBe("Em 5 de nov. de 2026, Acme escreveu: Pode mandar o comprovante?");
   });
 
+  it("the quote keeps the message's styles (it renders in a frame of its own)", () => {
+    const html = `<html><head><style>.x{color:red}</style></head><body><p class="x">Ok.</p><blockquote type="cite"><p class="x">Old</p></blockquote></body></html>`;
+    const s = splitQuotedHtml(html)!;
+    expect(s.quote.startsWith("<style>.x{color:red}</style>")).toBe(true);
+    expect(text(s.quote)).toBe(".x{color:red} Old");
+    expect(s.body).not.toContain("Old");
+  });
+
   it("Thunderbird: moz-cite-prefix", () => {
     const html = `<p>Works now.</p><div class="moz-cite-prefix">On 11/5/26 10:12, Acme Support wrote:<br></div><blockquote type="cite" cite="mid:abc@acme.test">Try again please.</blockquote>`;
     expect(text(splitQuotedHtml(html)!.body)).toBe("Works now.");
@@ -102,6 +110,19 @@ describe("snippets", () => {
     expect(snippetWithoutQuote("Perfect. > On 5 Nov, Acme wrote: > x")).toBe("Perfect.");
     expect(snippetWithoutQuote("Em breve mando o comprovante, obrigado")).toBe("Em breve mando o comprovante, obrigado");
     expect(snippetWithoutQuote("> only a quote")).toBe("> only a quote");
+    // Prepositions in the body ("em anexo", "on my side") before a later attribution are not where it starts.
+    expect(
+      snippetWithoutQuote("Segue em anexo a nota, chega em 2 dias. Em ter., 11 de nov. de 2026 às 01:14, Acme <s@acme.test> escreveu: > Olá"),
+    ).toBe("Segue em anexo a nota, chega em 2 dias.");
+    expect(snippetWithoutQuote("Fixed on my side, deploying on 12 Nov. On Wed, Nov 5, 2026 at 10:12 AM Acme <s@acme.test> wrote: > It breaks")).toBe(
+      "Fixed on my side, deploying on 12 Nov.",
+    );
+    // A name with "em" in the attribution itself still cuts at its start.
+    expect(snippetWithoutQuote("Ok! Em ter., 11 de nov. de 2026, Ana em nome da Acme escreveu: > Olá")).toBe("Ok!");
+    // A nested quote: the first attribution wins.
+    expect(snippetWithoutQuote("Thanks! On Wed, Nov 5, 2026 Acme wrote: > Sure. On Tue, Nov 4, 2026 Ana wrote: > hi")).toBe("Thanks!");
+    // "em"/"on" in the body with no attribution after it: untouched.
+    expect(snippetWithoutQuote("Chego em 2 dias, on time")).toBe("Chego em 2 dias, on time");
     // A ">" in the text is not a quote by itself (a snippet has no line starts to tell).
     expect(snippetWithoutQuote("A conta 2 > 1 está certa")).toBe("A conta 2 > 1 está certa");
   });

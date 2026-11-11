@@ -14,7 +14,7 @@
 export interface QuoteSplit {
   /** What the sender wrote (HTML or text, as given). */
   body: string;
-  /** The trailing quote, to show on demand. */
+  /** The trailing quote, to show on demand (HTML: with the message's `<style>` blocks, to render on its own). */
   quote: string;
 }
 
@@ -95,7 +95,9 @@ export function splitQuotedHtml(html: string): QuoteSplit | null {
   const body = html.slice(0, cut);
   const quote = html.slice(cut);
   if (!visibleText(body) || !visibleText(quote)) return null;
-  return { body, quote };
+  // The quote shows in a frame of its own under the body (which stays as it is): it keeps the styles it had in place.
+  const styles = (body.match(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi) ?? []).join("");
+  return { body, quote: styles + quote };
 }
 
 const QUOTED = /^\s*>/;
@@ -137,16 +139,37 @@ export function splitQuotedText(text: string): QuoteSplit | null {
   return { body, quote };
 }
 
-const SNIPPET_QUOTE = new RegExp(
-  `\\s(?:>\\s*)?(?:on|em|el|le|am|il|op)\\s.{4,240}?${SAID}.*$|\\s-{2,}\\s*(?:original message|mensagem original|mensaje original)\\s*-{2,}.*$`,
-  "is",
-);
+const SNIPPET_SAID = new RegExp(SAID, "gi");
+const SNIPPET_START = /\s(?:>\s*)?(?:on|em|el|le|am|il|op)\s/gi;
+const SNIPPET_SEPARATOR = /\s-{2,}\s*(?:original message|mensagem original|mensaje original)\s*-{2,}/i;
+
+/**
+ * Where a one-line snippet's attribution starts, or -1. For each "wrote:" in turn, the closest "On"/"Em"/… before it
+ * whose stretch to it (4 to 240 characters) holds a date (a digit): so "envio em anexo. Em ter., 11 de nov. …
+ * escreveu:" cuts at "Em ter.", not at the "em" of "em anexo", and "Em ter., 11 … Ana em nome da Acme escreveu:" still
+ * cuts at "Em ter." (the stretch from "em nome" has no date). The first "wrote:" with one wins (a nested quote's
+ * attribution comes later).
+ */
+function snippetAttribution(snippet: string): number {
+  const starts = [...snippet.matchAll(SNIPPET_START)].map((m) => ({ at: m.index, text: m.index + m[0].length }));
+  for (const said of snippet.matchAll(SNIPPET_SAID)) {
+    for (let i = starts.length - 1; i >= 0; i--) {
+      const s = starts[i]!;
+      const span = said.index - s.text;
+      if (span < 4) continue;
+      if (span > 240) break;
+      if (/\d/.test(snippet.slice(s.text, said.index))) return s.at;
+    }
+  }
+  return -1;
+}
 
 /**
  * A one-line preview without the quote it ends with ("Obrigada! Em ter., 11 de nov., Acme escreveu: > Olá…" →
  * "Obrigada!"), for list rows and collapsed messages. Left as is when nothing would remain.
  */
 export function snippetWithoutQuote(snippet: string): string {
-  const cut = snippet.replace(SNIPPET_QUOTE, "").trim();
+  const cuts = [snippetAttribution(snippet), SNIPPET_SEPARATOR.exec(snippet)?.index ?? -1].filter((i) => i >= 0);
+  const cut = cuts.length ? snippet.slice(0, Math.min(...cuts)).trim() : snippet.trim();
   return cut || snippet;
 }

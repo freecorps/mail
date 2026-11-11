@@ -39,7 +39,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useI18n } from "@/i18n/context";
 import { plural } from "@/i18n/strings";
 import { api, type Message, type ThreadStatus } from "@/lib/api";
-import { onContextToggle } from "@/lib/contextPanel";
+import { onContextToggle, useEscapeCloses } from "@/lib/contextPanel";
 import { linkifyText } from "@/lib/emailHtml";
 import { contactOf, displayAddress, formatFull, formatWhen } from "@/lib/format";
 import { useNow } from "@/lib/now";
@@ -129,6 +129,8 @@ export function ThreadView({
     else setOverlay((o) => !o);
   }, [roomy, contextPanel, setContextPanel]);
   useEffect(() => onContextToggle(toggleContext), [toggleContext]);
+  // Over the messages, the panel is the top layer: Escape hides it before it closes the conversation.
+  useEscapeCloses(!roomy && overlay, toggleContext);
 
   // The message being forwarded stays while the dialog is closed, so a failed send can reopen it with its draft.
   const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
@@ -700,13 +702,22 @@ function QuoteToggle({ open, onToggle }: { open: boolean; onToggle: () => void }
   );
 }
 
+/**
+ * Like plain text: the body's frame stays as it is (no reload, same height, same scroll) and the quote opens in a
+ * frame of its own under "•••", so the toggle stays where it was clicked. Loading images loads them in both.
+ */
 function HtmlBody({ html, cid, title }: { html: string; cid: Record<string, string>; title: string }) {
+  const { t } = useI18n();
   const split = useMemo(() => splitQuotedHtml(html), [html]);
   const [quote, setQuote] = useState(false);
+  const [load, setLoad] = useState(false);
+  const images = useMemo(() => ({ load, onLoad: () => setLoad(true) }), [load]);
+  if (!split) return <EmailFrame html={html} cid={cid} title={title} images={images} />;
   return (
     <>
-      <EmailFrame html={split && !quote ? split.body : html} cid={cid} title={title} />
-      {split && <QuoteToggle open={quote} onToggle={() => setQuote((q) => !q)} />}
+      <EmailFrame html={split.body} cid={cid} title={title} images={images} />
+      <QuoteToggle open={quote} onToggle={() => setQuote((q) => !q)} />
+      {quote && <EmailFrame html={split.quote} cid={cid} title={`${title}: ${t("thread.quoted")}`} images={images} />}
     </>
   );
 }
