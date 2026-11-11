@@ -102,6 +102,12 @@ export interface SearchHit {
   from: Address;
   snippet: string;
   at: number;
+  /** The thread's state (Ember 0.7.1): a hit can be acted on (archive or reopen, read or unread) as a list row. */
+  status?: ThreadStatus;
+  unreadCount?: number;
+  assignee?: string;
+  assigneeName?: string;
+  snoozedUntil?: number;
 }
 
 export interface ThreadDetail {

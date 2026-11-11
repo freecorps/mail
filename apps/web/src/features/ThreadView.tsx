@@ -46,6 +46,7 @@ import { Composer, type ComposerHandle } from "./Composer";
 import { EmailFrame } from "./EmailFrame";
 import { Confirm } from "./admin/parts";
 import { api } from "@/lib/api";
+import { useThreadActions } from "@/model/actions";
 
 export function ThreadView({
   threadId,
@@ -67,6 +68,7 @@ export function ThreadView({
 }) {
   const { t, locale } = useI18n();
   const vm = useThread(threadId);
+  const threadActions = useThreadActions();
   const members = useMembers(vm.thread?.mailbox ?? null);
   const boxes = useMailboxes().mailboxes;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
@@ -172,10 +174,7 @@ export function ThreadView({
           <Action
             label={archived ? t("thread.unarchive") : t("thread.archive")}
             kbd="e"
-            onClick={() => {
-              vm.toggleArchive();
-              toast(archived ? t("thread.reopened") : t("thread.archived"));
-            }}
+            onClick={() => threadActions.archive([{ threadId, status: th.status, unread }])}
           >
             {archived ? <ArchiveRestore /> : <Archive />}
           </Action>
@@ -209,7 +208,7 @@ export function ThreadView({
                 <DropdownMenuLabel className="text-xs text-muted-foreground">{t("assign.title")}</DropdownMenuLabel>
                 {members.members.map((m) => (
                   <DropdownMenuItem key={m.userId} onSelect={() => vm.assign(m.userId)}>
-                    <Avatar name={m.name} seed={m.userId} className="size-5" />
+                    <Avatar name={m.name} className="size-5" />
                     <span className="flex-1 truncate">{m.name}</span>
                     {th.assignee === m.userId && <Check aria-label="✓" />}
                   </DropdownMenuItem>
@@ -346,7 +345,7 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
       )}
     >
       <header className="flex items-start gap-3 px-4 pt-3.5 pb-2.5">
-        <Avatar name={outbound && m.author ? m.author : from} seed={outbound ? m.mailbox : m.fromEmail} />
+        <Avatar name={outbound && m.author ? m.author : from} />
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
             <span className="font-medium">{outbound && m.author ? m.author : from}</span>

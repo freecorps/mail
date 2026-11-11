@@ -74,7 +74,8 @@ const ptBR = {
   "threads.emptyHint": "Quando chegar um e-mail nesta caixa, ele aparece aqui.",
   "threads.emptyHintSent": "As conversas em que esta caixa escreveu aparecem aqui.",
   "threads.emptySearch": "Nada encontrado para “{query}”",
-  "threads.results": "{count} resultados",
+  "threads.results.one": "{count} resultado",
+  "threads.results.other": "{count} resultados",
   "threads.loadMore": "Carregar mais",
   "threads.filters": "Filtrar conversas",
   "threads.filter.all": "Todas",
@@ -225,6 +226,27 @@ const ptBR = {
   "shortcuts.sidebar": "Recolher / expandir a barra lateral",
   "shortcuts.palette": "Comandos",
 
+  "common.undo": "Desfazer",
+  "list.group.today": "Hoje",
+  "list.group.yesterday": "Ontem",
+  "list.group.week": "Esta semana",
+  "list.select": "Selecionar conversa de {name}",
+  "list.selectAll": "Selecionar todas as carregadas",
+  "list.selected.one": "{count} selecionada",
+  "list.selected.other": "{count} selecionadas",
+  "list.clearSelection": "Limpar seleção",
+  "list.archivedMany.one": "{count} conversa arquivada",
+  "list.archivedMany.other": "{count} conversas arquivadas",
+  "list.reopenedMany.one": "{count} conversa reaberta",
+  "list.reopenedMany.other": "{count} conversas reabertas",
+  "list.loadingMore": "Carregando mais conversas…",
+  "list.assignedTo": "Atribuída a {name}",
+  "list.actions": "Ações da conversa",
+  "list.assignMixed": "As conversas selecionadas são de caixas diferentes: só aparece quem vê todas.",
+  "list.noAssign": "Ninguém vê todas as caixas selecionadas.",
+  "shortcuts.select": "Selecionar conversa",
+  "shortcuts.extendNext": "Estender a seleção para baixo",
+  "shortcuts.extendPrev": "Estender a seleção para cima",
   "when.yesterday": "Ontem",
 };
 
@@ -303,7 +325,8 @@ const en: Record<StringKey, string> = {
   "threads.emptyHint": "When an email reaches this mailbox, it shows up here.",
   "threads.emptyHintSent": "Conversations this mailbox wrote in show up here.",
   "threads.emptySearch": "Nothing found for “{query}”",
-  "threads.results": "{count} results",
+  "threads.results.one": "{count} result",
+  "threads.results.other": "{count} results",
   "threads.loadMore": "Load more",
   "threads.filters": "Filter conversations",
   "threads.filter.all": "All",
@@ -454,6 +477,27 @@ const en: Record<StringKey, string> = {
   "shortcuts.sidebar": "Collapse / expand the sidebar",
   "shortcuts.palette": "Commands",
 
+  "common.undo": "Undo",
+  "list.group.today": "Today",
+  "list.group.yesterday": "Yesterday",
+  "list.group.week": "This week",
+  "list.select": "Select conversation from {name}",
+  "list.selectAll": "Select all loaded",
+  "list.selected.one": "{count} selected",
+  "list.selected.other": "{count} selected",
+  "list.clearSelection": "Clear selection",
+  "list.archivedMany.one": "{count} conversation archived",
+  "list.archivedMany.other": "{count} conversations archived",
+  "list.reopenedMany.one": "{count} conversation reopened",
+  "list.reopenedMany.other": "{count} conversations reopened",
+  "list.loadingMore": "Loading more conversations…",
+  "list.assignedTo": "Assigned to {name}",
+  "list.actions": "Conversation actions",
+  "list.assignMixed": "The selected conversations are in different mailboxes: only people who see all of them are listed.",
+  "list.noAssign": "Nobody sees every selected mailbox.",
+  "shortcuts.select": "Select conversation",
+  "shortcuts.extendNext": "Extend selection down",
+  "shortcuts.extendPrev": "Extend selection up",
   "when.yesterday": "Yesterday",
 };
 
@@ -464,6 +508,13 @@ export type Vars = Record<string, string | number>;
 export function translate(locale: Locale, key: StringKey, vars?: Vars): string {
   const s = TABLES[locale][key] ?? ptBR[key] ?? key;
   return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
+}
+
+type PluralBase = StringKey extends infer K ? (K extends `${infer B}.one` ? B : never) : never;
+
+/** The `.one` or `.other` form of a counted string for `n` (pt-BR and en: one only for exactly 1). */
+export function plural<B extends PluralBase>(locale: Locale, base: B, n: number): StringKey {
+  return `${base}.${new Intl.PluralRules(locale).select(n) === "one" ? "one" : "other"}` as StringKey;
 }
 
 /** Browser language tags (most preferred first) → UI locale: English only when the browser prefers it. */

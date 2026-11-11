@@ -12,13 +12,17 @@ export type ShortcutAction =
   | "escape"
   | "help"
   | "sidebar"
-  | "palette";
+  | "palette"
+  | "select"
+  | "extendNext"
+  | "extendPrev";
 
 export interface KeyLike {
   key: string;
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
+  shiftKey?: boolean;
 }
 
 const KEYS: Record<string, ShortcutAction> = {
@@ -37,6 +41,9 @@ const KEYS: Record<string, ShortcutAction> = {
   Escape: "escape",
   "?": "help",
   "[": "sidebar",
+  x: "select",
+  J: "extendNext",
+  K: "extendPrev",
 };
 
 /**
@@ -47,7 +54,12 @@ export function shortcutFor(e: KeyLike, inField: boolean): ShortcutAction | null
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") return "palette";
   if (e.metaKey || e.ctrlKey || e.altKey) return null;
   if (inField) return e.key === "Escape" ? "escape" : null;
-  return KEYS[e.key] ?? null;
+  // shift+↓/↑ extend the selection as shift+j/k do.
+  if (e.shiftKey && e.key === "ArrowDown") return "extendNext";
+  if (e.shiftKey && e.key === "ArrowUp") return "extendPrev";
+  // Letters by what Shift says, not by their case: with Caps Lock on, a plain j/k reports "J"/"K" and must still move.
+  const key = /^[a-z]$/i.test(e.key) ? (e.shiftKey ? e.key.toUpperCase() : e.key.toLowerCase()) : e.key;
+  return KEYS[key] ?? null;
 }
 
 /** Whether keys typed now go to a text field (inputs, textareas, selects, contenteditable). */
@@ -81,6 +93,9 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["j", "↓"], action: "next" },
   { keys: ["k", "↑"], action: "prev" },
   { keys: ["Enter", "o"], action: "open" },
+  { keys: ["x"], action: "select" },
+  { keys: ["⇧ j"], action: "extendNext" },
+  { keys: ["⇧ k"], action: "extendPrev" },
   { keys: ["e"], action: "archive" },
   { keys: ["u"], action: "unread" },
   { keys: ["r"], action: "reply" },
@@ -91,3 +106,14 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["Esc"], action: "escape" },
   { keys: ["?"], action: "help" },
 ];
+
+/**
+ * What Escape does, first match: leave the field being typed in, clear the selection (only rows still in the list
+ * count: ids that left it are not a selection anyone sees), close the open conversation.
+ */
+export function escapeStep(s: { inField: boolean; selected: number; thread: boolean }): "blur" | "clear" | "close" | null {
+  if (s.inField) return "blur";
+  if (s.selected > 0) return "clear";
+  if (s.thread) return "close";
+  return null;
+}

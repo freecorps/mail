@@ -21,6 +21,7 @@
     "@freecorps/ember-client": "^0.7.2",
     "@freecorps/ember-react": "^0.7.2",
     "@freecorps/mail-email-html": "workspace:*",
+    "@tanstack/react-virtual": "^3.13.12",
     "better-auth": "~1.7.17",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

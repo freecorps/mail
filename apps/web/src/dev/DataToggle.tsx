@@ -2,7 +2,7 @@
 // of the design under test. Rendered only when import.meta.env.DEV.
 import { DEV_DATA, setDevData, useDevData, type DevData } from "./data";
 
-const LABEL: Record<DevData | "demo", string> = { demo: "Demo data", worst: "Worst case", empty: "Empty", one: "One" };
+const LABEL: Record<DevData | "demo", string> = { demo: "Demo data", worst: "Worst case", empty: "Empty", one: "One", huge: "1,000 rows" };
 
 export function DataToggle() {
   const current = useDevData();

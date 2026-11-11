@@ -1,10 +1,10 @@
-// Dev only (break-ui): swap the sidebar's and Hoje's data for fixtures, at the hooks that read it. `?data=worst|empty|one`
+// Dev only (break-ui): swap the sidebar's and Hoje's data for fixtures, at the hooks that read it. `?data=worst|empty|one|huge`
 // (kept in sessionStorage too, since navigating rewrites the query). Every use sits behind `import.meta.env.DEV`, so
 // production builds drop it with the fixtures.
 import { useSyncExternalStore } from "react";
 
-export type DevData = "worst" | "empty" | "one";
-export const DEV_DATA: DevData[] = ["worst", "empty", "one"];
+export type DevData = "worst" | "empty" | "one" | "huge";
+export const DEV_DATA: DevData[] = ["worst", "empty", "one", "huge"];
 const KEY = "ember-mail:dev-data";
 const valid = (v: string | null): v is DevData => v !== null && (DEV_DATA as string[]).includes(v);
 

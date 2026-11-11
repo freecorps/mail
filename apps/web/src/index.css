@@ -54,6 +54,10 @@
   --status-closed: oklch(0.55 0.01 60);
   --status-spam: oklch(0.56 0.2 27);
   --scrim: oklch(0.2 0.015 55 / 0.32);
+  /* Monogram avatars (D2): white initials on a neutral stone gradient, like Contacts. Never a per-person tint. */
+  --monogram-top: oklch(0.74 0.008 70);
+  --monogram-bottom: oklch(0.6 0.01 65);
+  --monogram-text: oklch(0.995 0.002 75);
 
   /* Elevation: stone-tinted shadows (never pure black on a warm page). */
   --elevation-hairline: 0 1px 2px 0 oklch(0.35 0.03 55 / 0.05);
@@ -111,6 +115,9 @@
   --status-closed: oklch(0.65 0.01 70);
   --status-spam: oklch(0.68 0.18 25);
   --scrim: oklch(0.06 0.01 50 / 0.6);
+  --monogram-top: oklch(0.52 0.008 70);
+  --monogram-bottom: oklch(0.41 0.008 65);
+  --monogram-text: oklch(0.97 0.004 75);
 
   /* On a dark page a shadow alone disappears: a faint light edge on top carries the elevation. */
   --elevation-hairline: 0 1px 2px 0 oklch(0.08 0.01 50 / 0.4);
@@ -189,6 +196,9 @@
   --color-status-closed: var(--status-closed);
   --color-status-spam: var(--status-spam);
   --color-scrim: var(--scrim);
+  --color-monogram-top: var(--monogram-top);
+  --color-monogram-bottom: var(--monogram-bottom);
+  --color-monogram-text: var(--monogram-text);
 }
 
 @layer base {
