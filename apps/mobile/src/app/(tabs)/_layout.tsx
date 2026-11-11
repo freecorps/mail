@@ -16,6 +16,10 @@ import { useQuickActions } from "../../quick-actions";
 import { useColors } from "../../theme";
 import { useHomeWidgets } from "../../widgets";
 
+// Signing in swaps the root stack to the tabs with no route of its own; without a named first tab Android's tab bar
+// opened on Minhas (the second). Caixas, as on a cold start.
+export const unstable_settings = { initialRouteName: "(mailboxes)" };
+
 export default function TabsLayout() {
   const c = useColors();
   const { t, locale } = useI18n();
