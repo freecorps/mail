@@ -4,8 +4,17 @@ import { describe, expect, it } from "vite-plus/test";
 import { plural, translate } from "@/i18n/strings";
 import type { Page, Thread } from "@/lib/api";
 import { inboxOptimisticUpdates } from "@/lib/optimistic";
-import { shortcutFor } from "@/model/keys";
-import { dateGroup, extendSelection, listItems, selectRange, toggleSelected, visibleSelection } from "@/model/listItems";
+import { escapeStep, shortcutFor } from "@/model/keys";
+import {
+  cursorIndex,
+  dateGroup,
+  extendSelection,
+  listItems,
+  loadMoreDue,
+  selectRange,
+  toggleSelected,
+  visibleSelection,
+} from "@/model/listItems";
 import { threadRow } from "@/model/threads";
 
 const at = (y: number, m: number, d: number, h = 12) => new Date(y, m - 1, d, h).getTime();
@@ -86,6 +95,15 @@ describe("selection", () => {
     expect(visibleSelection(new Set(), rows)).toEqual([]);
   });
 
+  it("Escape: a selection that left the list does not swallow it (the open conversation closes)", () => {
+    const rows = [{ threadId: "a" }];
+    const selected = visibleSelection(new Set(["gone"]), rows).length;
+    expect(escapeStep({ inField: false, selected, thread: true })).toBe("close");
+    expect(escapeStep({ inField: false, selected: 1, thread: true })).toBe("clear");
+    expect(escapeStep({ inField: true, selected: 1, thread: true })).toBe("blur");
+    expect(escapeStep({ inField: false, selected: 0, thread: false })).toBeNull();
+  });
+
   it("keys: x selects, shift+j/k and shift+arrows extend, not in a field", () => {
     expect(shortcutFor({ key: "x" }, false)).toBe("select");
     expect(shortcutFor({ key: "J", shiftKey: true }, false)).toBe("extendNext");
@@ -162,5 +180,36 @@ describe("undo after archive", () => {
     expect(open.page.map((t: Thread) => t._id)).toEqual(["x"]);
     expect(waiting.page.map((t: Thread) => t._id)).toEqual(["y"]); // older than what the page holds
     expect(privacy.page).toEqual([]);
+  });
+});
+
+describe("scrolling", () => {
+  const row = (id: string, day: number) => threadRow(thread({ _id: id, lastMessageAt: at(2026, 11, day) }));
+  const items = listItems([row("a", 11), row("b", 10), row("c", 9)], { grouped: true, now: NOW, locale: "pt-BR" });
+
+  it("the cursor is followed when it moves, not when the list changes under it", () => {
+    const i = cursorIndex(items, "b", null);
+    expect(items[i]).toMatchObject({ kind: "row", row: { threadId: "b" } });
+    // Same cursor, a new list (a page loaded, new mail on top, the minute tick): no scroll back to it.
+    const more = listItems([row("new", 11), ...items.flatMap((x) => (x.kind === "row" ? [x.row] : []))], {
+      grouped: true,
+      now: NOW,
+      locale: "pt-BR",
+    });
+    expect(cursorIndex(more, "b", "b")).toBe(-1);
+    // Moved: followed again. Not loaded yet: waits.
+    expect(cursorIndex(more, "c", "b")).toBeGreaterThan(0);
+    expect(cursorIndex(items, "later", null)).toBe(-1);
+    expect(cursorIndex(items, null, "b")).toBe(-1);
+  });
+
+  it("the next page: once per length of each list, so another list of the same length still pages", () => {
+    const base = { place: "inbox", count: 31, lastIndex: 28, canLoadMore: true, loading: false, asked: null };
+    expect(loadMoreDue(base)).toBe(true);
+    expect(loadMoreDue({ ...base, asked: { place: "inbox", count: 31 } })).toBe(false);
+    expect(loadMoreDue({ ...base, place: "view:assigned", asked: { place: "inbox", count: 31 } })).toBe(true);
+    expect(loadMoreDue({ ...base, lastIndex: 20 })).toBe(false);
+    expect(loadMoreDue({ ...base, loading: true })).toBe(false);
+    expect(loadMoreDue({ ...base, canLoadMore: false })).toBe(false);
   });
 });

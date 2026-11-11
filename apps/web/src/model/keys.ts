@@ -104,3 +104,14 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["Esc"], action: "escape" },
   { keys: ["?"], action: "help" },
 ];
+
+/**
+ * What Escape does, first match: leave the field being typed in, clear the selection (only rows still in the list
+ * count: ids that left it are not a selection anyone sees), close the open conversation.
+ */
+export function escapeStep(s: { inField: boolean; selected: number; thread: boolean }): "blur" | "clear" | "close" | null {
+  if (s.inField) return "blur";
+  if (s.selected > 0) return "clear";
+  if (s.thread) return "close";
+  return null;
+}

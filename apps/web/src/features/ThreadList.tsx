@@ -34,7 +34,7 @@ import { useNow } from "@/lib/now";
 import { usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { toTarget, useThreadActions } from "@/model/actions";
-import { listItems, type ListItem } from "@/model/listItems";
+import { cursorIndex, listItems, loadMoreDue, type ListItem } from "@/model/listItems";
 import { rowDomId, STATUS_TABS, type ThreadFilter, type ThreadRow } from "@/model/threads";
 import { AssignItems } from "./AssignMenu";
 
@@ -72,6 +72,8 @@ export interface ThreadListProps {
   /** `range`: shift-click, from the last toggled row. */
   onSelect: (threadId: string, mode: "toggle" | "range") => void;
   onSelectAll: (all: boolean) => void;
+  /** Which list this is (view, mailbox, status, search): each pages on its own. */
+  place: string;
   canLoadMore: boolean;
   onLoadMore: () => void;
   searchRef: RefObject<HTMLInputElement | null>;
@@ -116,24 +118,26 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   });
   const virtual = virtualizer.getVirtualItems();
 
-  // Keep the keyboard cursor in view (no smooth scroll: j/k is repeated many times a minute).
+  // Keep the keyboard cursor in view when it moves (no smooth scroll: j/k is repeated many times a minute). Only then:
+  // the list changing under it (pages, new mail, the minute tick) must not pull the scroll back to it.
+  const followed = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (!p.cursorId) return;
-    const i = items.findIndex((it) => it.kind === "row" && it.row.threadId === p.cursorId);
-    if (i >= 0) virtualizer.scrollToIndex(i, { align: "auto" });
+    if (!p.cursorId) followed.current = null;
+    const i = cursorIndex(items, p.cursorId, followed.current);
+    if (i < 0) return;
+    followed.current = p.cursorId;
+    virtualizer.scrollToIndex(i, { align: "auto" });
   }, [p.cursorId, items, virtualizer]);
 
-  // Infinite scroll: the next page loads when the last rows come into view (once per page).
-  const asked = useRef(-1);
+  // Infinite scroll: the next page loads when the last rows come into view (once per page of each list).
+  const asked = useRef<{ place: string; count: number } | null>(null);
   const lastIndex = virtual.at(-1)?.index ?? -1;
-  const { canLoadMore, loading, onLoadMore } = p;
+  const { place, canLoadMore, loading, onLoadMore } = p;
   useEffect(() => {
-    if (!canLoadMore || loading || asked.current === items.length) return;
-    if (lastIndex >= items.length - 6) {
-      asked.current = items.length;
-      onLoadMore();
-    }
-  }, [lastIndex, items.length, canLoadMore, loading, onLoadMore]);
+    if (!loadMoreDue({ place, count: items.length, lastIndex, canLoadMore, loading, asked: asked.current })) return;
+    asked.current = { place, count: items.length };
+    onLoadMore();
+  }, [place, lastIndex, items.length, canLoadMore, loading, onLoadMore]);
 
   const selectedRows = useMemo(() => (p.selected.size ? p.rows.filter((r) => p.selected.has(r.threadId)) : []), [p.rows, p.selected]);
   const selecting = selectedRows.length > 0;
@@ -395,7 +399,7 @@ const Row = memo(function Row({
             </span>
             {mailboxName && <span className="max-w-[35%] shrink-0 truncate text-xs text-muted-foreground">{mailboxName}</span>}
           </span>
-          <span className="flex shrink-0 items-center gap-1.5 self-center group-focus-within/row:invisible group-hover/row:invisible">
+          <span className="flex shrink-0 items-center gap-1.5 self-center group-hover/row:invisible group-has-[:focus-visible]/row:invisible group-has-[[aria-expanded=true]]/row:invisible">
             {StatusIcon && (
               <span className={cn("inline-flex", STATUS_TONE[r.status!])} title={t(`status.${r.status!}`)}>
                 <StatusIcon className="size-3.5" aria-hidden="true" />
@@ -420,9 +424,12 @@ const Row = memo(function Row({
         {r.snippet && <span className="mt-0.5 line-clamp-1 text-ui text-muted-foreground compact:hidden">{r.snippet}</span>}
       </button>
       {/* Hover actions, in the time's place (none on a row the server has not confirmed yet). Snooze slots in first once
-          the API has it (plan E2). */}
+          the API has it (plan E2). A pointer affordance: hidden, they take no taps (a tap there opens the row), and they
+          show for a hovering pointer (`group-hover` only applies where the device can hover), keyboard focus in the row
+          (focus-visible, not the focus a tap leaves), or their open menu (`aria-expanded`: the tooltip around the trigger
+          overrides the menu's `data-state`). */}
       {!r.pending && (
-        <div className="absolute top-[calc(var(--row-y)-4px)] right-1.5 z-10 flex items-center opacity-0 transition-opacity duration-(--motion-hover) group-focus-within/row:opacity-100 group-hover/row:opacity-100 has-[[data-state=open]]:opacity-100">
+        <div className="pointer-events-none absolute top-[calc(var(--row-y)-4px)] right-1.5 z-10 flex items-center opacity-0 transition-opacity duration-(--motion-hover) group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-has-[:focus-visible]/row:pointer-events-auto group-has-[:focus-visible]/row:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100">
           <QuickAction label={archived ? t("thread.unarchive") : t("thread.archive")} onClick={() => actions.archive(target)}>
             {archived ? <ArchiveRestore /> : <Archive />}
           </QuickAction>
@@ -514,7 +521,15 @@ function BulkBar({
       <span className="min-w-0 flex-1 truncate text-sm font-medium tabular-nums" aria-live="polite">
         {t(plural(locale, "list.selected", rows.length), { count: new Intl.NumberFormat(locale).format(rows.length) })}
       </span>
-      <BarAction label={archived ? t("thread.unarchive") : t("thread.archive")} kbd="e" onClick={() => actions.archive(targets)}>
+      <BarAction
+        label={archived ? t("thread.unarchive") : t("thread.archive")}
+        kbd="e"
+        onClick={() => {
+          // Like `e`: the archived threads leave the selection (they may leave the list too).
+          actions.archive(targets);
+          onSelectAll(false);
+        }}
+      >
         {archived ? <ArchiveRestore /> : <Archive />}
       </BarAction>
       <BarAction label={unread ? t("thread.markRead") : t("thread.markUnread")} onClick={() => actions.toggleRead(targets)}>

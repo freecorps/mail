@@ -101,3 +101,31 @@ export function visibleSelection<T extends { threadId: string }>(selected: Reado
   if (!selected.size) return [];
   return rows.filter((r) => selected.has(r.threadId));
 }
+
+/**
+ * The index to scroll to so the keyboard cursor stays in view, or -1. Only when the cursor moved since the last scroll
+ * (`followed`: the id scrolled to then): the list changing under a cursor that scrolled away (a page loading, a new
+ * message, an archive) leaves the scroll where the reader put it. A cursor whose row has not loaded yet waits for it.
+ */
+export function cursorIndex(items: readonly ListItem[], cursorId: string | null, followed: string | null): number {
+  if (!cursorId || cursorId === followed) return -1;
+  return items.findIndex((it) => it.kind === "row" && it.row.threadId === cursorId);
+}
+
+/**
+ * Whether the next page should load: the last rows are in view (`lastIndex`, within 6 of the end), more can load, and
+ * this list has not asked at this length yet. `asked` is per list (`place`: view, mailbox, status, search), so a list
+ * that happens to have the length another one asked at still pages.
+ */
+export function loadMoreDue(o: {
+  place: string;
+  count: number;
+  lastIndex: number;
+  canLoadMore: boolean;
+  loading: boolean;
+  asked: { place: string; count: number } | null;
+}): boolean {
+  if (!o.canLoadMore || o.loading) return false;
+  if (o.asked && o.asked.place === o.place && o.asked.count === o.count) return false;
+  return o.lastIndex >= o.count - 6;
+}

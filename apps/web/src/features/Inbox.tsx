@@ -4,7 +4,7 @@
 // one pane at a time.
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Columns2, Columns3, LayoutList, PenSquare, Settings, WifiOff } from "lucide-react";
-import { useConnectionState, useMutation } from "@freecorps/ember-react";
+import { useConnectionState, useEmberClient, useMutation } from "@freecorps/ember-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -25,8 +25,8 @@ import { PANES, useMediaQuery, WIDE } from "@/lib/media";
 import { badge, useHasSpam, useViewCounts, viewTakesTabs, type ThreadRow } from "@/model/threads";
 import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
-import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
-import { toTarget, useThreadActions } from "@/model/actions";
+import { escapeStep, isTextField, moveSelection, shortcutFor } from "@/model/keys";
+import { cachedStatus, toTarget, useThreadActions } from "@/model/actions";
 import { extendSelection, selectRange, toggleSelected, visibleSelection } from "@/model/listItems";
 import { useRoute, useSearchBox } from "@/model/route";
 import { useMailboxes, useThreadList } from "@/model/threads";
@@ -89,6 +89,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const composer = useRef<ComposerHandle>(null);
   const search = useRef<HTMLInputElement>(null);
   const actions = useThreadActions();
+  const client = useEmberClient();
   const markUnread = useMutation(api.inbox.markUnread);
   const { online } = useConnectionState();
 
@@ -236,8 +237,9 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
             return;
           }
           if (!target) return;
+          // The open thread may not be in the list (another view, a search): its loaded conversation has the status.
           const row = s.rows.find((r) => r.threadId === target);
-          actions.archive([row ? toTarget(row) : { threadId: target, status: null, unread: false }]);
+          actions.archive([row ? toTarget(row) : { threadId: target, status: cachedStatus(client, target), unread: false }]);
           return;
         }
         case "select": {
@@ -277,9 +279,17 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           search.current?.select();
           return;
         case "escape":
-          if (inField) (document.activeElement as HTMLElement).blur();
-          else if (s.selected.size) setSelected(EMPTY_SET);
-          else if (s.thread) navigate({ thread: null }, { push: true });
+          switch (escapeStep({ inField, selected: visibleSelection(s.selected, s.rows).length, thread: !!s.thread })) {
+            case "blur":
+              (document.activeElement as HTMLElement).blur();
+              return;
+            case "clear":
+              setSelected(EMPTY_SET);
+              return;
+            case "close":
+              navigate({ thread: null }, { push: true });
+              return;
+          }
           return;
         case "help":
           setHelpOpen(true);
@@ -292,7 +302,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, open, actions, markUnread, toggleSidebar, setSelected]);
+  }, [navigate, open, actions, client, markUnread, toggleSidebar, setSelected]);
 
   // Where the list goes. A view or a mailbox starts on "all" (a status tab from elsewhere may not apply); search stays.
   const goView = useCallback(
@@ -471,6 +481,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       openId={route.thread}
       cursorId={cursor}
       onOpen={open}
+      place={listPlace}
       canLoadMore={list_.canLoadMore}
       onLoadMore={list_.loadMore}
       searchRef={search}
