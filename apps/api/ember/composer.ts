@@ -69,7 +69,9 @@ export type DraftKind = (typeof DRAFT_KINDS)[number];
 /** Drafts untouched this long are removed by the daily `inbox:pruneDrafts`. */
 export const DRAFT_TTL_MS = 30 * 24 * 3600 * 1000;
 
-export type DraftAttachment = { file: string; filename: string; contentType: string };
+/** A draft's file. `size` is set by the server from storage (clients read it to know, before sending, whether the
+ * files would go as links, which a scheduled send can't do); absent while the file was still uploading. */
+export type DraftAttachment = { file: string; filename: string; contentType: string; size?: number };
 export type DraftDoc = {
   _id: string;
   _creationTime: number;

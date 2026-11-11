@@ -159,8 +159,18 @@ export interface Thread {
   status: "open" | "waiting" | "closed" | "spam";
   messageCount: number;
   unreadCount: number;
+  /** `unreadCount > 0` (absent on threads from before Ember 0.7 until the server backfills it). */
+  hasUnread?: boolean;
+  /** The latest message, or the moment a snooze ended. */
   lastMessageAt: number;
   snippet: string;
+  assignee?: string;
+  assigneeName?: string;
+  /** Tag ids of the thread's mailbox. */
+  tags?: string[];
+  /** Snoozed until `snoozedUntil` (ms): out of the default `threads` list, listed with `snoozed: true`. */
+  snoozed?: boolean;
+  snoozedUntil?: number;
 }
 
 export interface ErrorResponse {
@@ -530,12 +540,20 @@ export class EmberMail {
   };
 
   readonly inbox = {
-    /** Every mailbox; a personal one (`owner` set) without its counts: only its owner reads it, in their inbox. */
-    mailboxes: () => this.request<{ data: Array<{ name: string; address: string; display_name: string | null; owner: string | null; catch_all: boolean; retention: MailboxRetention | null; unread?: number; threads?: number }> }>("GET", "/inbox/mailboxes"),
+    /**
+     * Every mailbox; a personal one (`owner` set) without its counts: only its owner reads it, in their inbox. The
+     * counts match `threads`: `threads` and `unread` (messages) leave the snoozed threads out, `snoozed` counts those.
+     */
+    mailboxes: () =>
+      this.request<{ data: Array<{ name: string; address: string; display_name: string | null; owner: string | null; catch_all: boolean; retention: MailboxRetention | null; unread?: number; threads?: number; snoozed?: number }> }>(
+        "GET",
+        "/inbox/mailboxes",
+      ),
     /** `owner`: personal to that user (no admin or key reads it); null: shared again; absent: as it was. `catch_all`: takes every address of its domain no mailbox has. `retention`: days closed and spam conversations are kept (then deleted with their messages and files); null: kept forever; absent: as it was. */
     upsertMailbox: (o: { name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null; catch_all?: boolean | null; retention?: MailboxRetention | null }) => this.request<{ id: string }>("POST", "/inbox/mailboxes", o),
-    threads: (o: { mailbox: string; status?: Thread["status"]; cursor?: string; limit?: number }) => {
-      const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.status ? { status: o.status } : {}), ...(o.cursor ? { cursor: o.cursor } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });
+    /** A mailbox's threads, newest first; snoozed ones are left out, and `snoozed: true` lists only them (soonest to wake first). */
+    threads: (o: { mailbox: string; status?: Thread["status"]; snoozed?: boolean; cursor?: string; limit?: number }) => {
+      const q = new URLSearchParams({ mailbox: o.mailbox, ...(o.status ? { status: o.status } : {}), ...(o.snoozed ? { snoozed: "true" } : {}), ...(o.cursor ? { cursor: o.cursor } : {}), ...(o.limit ? { limit: String(o.limit) } : {}) });
       return this.request<{ page: Thread[]; isDone: boolean; continueCursor: string }>("GET", `/inbox/threads?${q}`);
     },
     /** Members, and who signed in asking for access (`requests`: their email and name, to grant by `user_id`). */

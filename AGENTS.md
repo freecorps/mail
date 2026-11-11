@@ -52,7 +52,7 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 
 ## Ember dependency
 
-- `@freecorps/ember-*` come from npm (`^0.5.3`, dist via `exports`), declared in each app that uses them.
+- `@freecorps/ember-*` come from npm (`^0.7.2`, dist via `exports`), declared in each app that uses them.
 - The Ember CLI is `@freecorps/ember-cli` (bin `ember`, devDependency of `apps/api`): `bun run dev` / `bun run deploy`
   there call it.
 - Changes to Ember go to the Ember repo first (freecorps/ember), then a release, then a bump here.

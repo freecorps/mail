@@ -4,9 +4,11 @@
 // members-only reactive queries.
 import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { composeApp } from "@freecorps/ember-server";
 import { EmberMail, verifyWebhook } from "@freecorps/mail-sdk";
 import worker from "./worker.ts";
 import { addDomain, removeDomain, resolveAccountId } from "../src/operator.ts";
+import { app, functions, http, schema } from "../src/app.ts";
 
 const BASE = "http://mail.test";
 const f = ((url: string, init?: RequestInit) => SELF.fetch(url, init)) as typeof fetch;
@@ -378,7 +380,8 @@ describe("mail app", () => {
     expect(t).toMatchObject({ subject: "Lunch?", contact: "ana@user.test" });
     expect((await call("query", "inbox:thread", { threadId: t._id }, "user:heitor")).error.message).toMatch(/no access/);
     expect((await call("query", "inbox:search", { query: "lunch" }, "user:heitor")).value).toEqual([]);
-    expect((await call("query", "inbox:search", { query: "lunch" }, "user:wolf")).value).toMatchObject([{ threadId: t._id }]);
+    // Each hit carries its thread's state (Ember 0.7.1), so the clients act on it without loading the thread.
+    expect((await call("query", "inbox:search", { query: "lunch" }, "user:wolf")).value).toMatchObject([{ threadId: t._id, status: expect.any(String), unreadCount: expect.any(Number), tags: [] }]);
     expect((await call("query", "inbox:recent", {}, "user:heitor")).value.threads.some((x: any) => x._id === t._id)).toBe(false);
     // No assignment in a personal mailbox; its member list is its owner.
     expect((await call("mutation", "inbox:assign", { threadId: t._id, userId: "wolf" }, "user:wolf")).error.message).toMatch(/personal mailbox/);
@@ -832,12 +835,14 @@ describe("mail app", () => {
     expect(keys(await view("lia", { view: "waiting" }))).toEqual(["a1"]);
     expect(keys(await view("lia", { view: "all", status: "closed" }))).toEqual(["b1"]);
 
-    // The home screen's counts: `all` from the aggregate (every thread, unread messages), the rest by thread.
+    // The home screen's counts, exact (the component's aggregates): threads and their unread messages.
     expect((await call("query", "inbox:views", {}, "user:lia")).value).toEqual({
       all: { threads: 6, unread: 4, capped: false },
       assigned: { threads: 1, unread: 1, capped: false },
       unread: { threads: 3, unread: 3, capped: false },
       waiting: { threads: 1, unread: 1, capped: false },
+      snoozed: { threads: 0, unread: 0, capped: false },
+      tags: {},
     });
     expect((await call("query", "inbox:views", {}, "user:rui")).value).toMatchObject({ all: { threads: 4, unread: 3 }, assigned: { threads: 1, unread: 0 }, unread: { threads: 3 } });
 
@@ -963,13 +968,16 @@ describe("mail app", () => {
     const d1 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá", cc: ["fin@user.test"], attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "cia");
     expect(d1.error ?? null).toBeNull();
     // Saving again without the id (another device) replaces the same reply draft.
-    const d2 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "cia");
+    // The files are sent back as read (with their size), which the server ignores: sizes come from storage.
+    const d2 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain", size: 1 }] }, "cia");
     expect(d2.value.id).toBe(d1.value.id);
     const note = await mu("inbox:saveDraft", { kind: "note", threadId: t._id, text: "nota" }, "cia");
     expect(note.value.id).not.toBe(d1.value.id);
     const list = (await q("inbox:drafts", {}, "cia")).value as any[];
     expect(list.map((d) => d.kind)).toEqual(["note", "reply"]);
     expect(list[1]).toMatchObject({ _id: d1.value.id, userId: "cia", kind: "reply", threadId: t._id, mailbox: "cs", to: [], cc: [], bcc: [], subject: "", text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] });
+    // Each file carries its stored size, so a reopened draft knows whether a scheduled send would need links.
+    expect(list[1].attachments[0].size).toBe(8);
     expect((await q("inbox:drafts", { threadId: t._id }, "cia")).value).toHaveLength(2);
 
     // Another member of the mailbox sees none of them and cannot touch them; nor can an admin.
@@ -999,7 +1007,7 @@ describe("mail app", () => {
     // A failed send keeps the draft; a sent reply deletes it in the same transaction (and only it).
     expect((await mu("inbox:reply", { threadId: t._id, text: "x", cc: many, draftId: d1.value.id }, "cia")).error.message).toMatch(/at most 50/);
     expect(((await q("inbox:drafts", {}, "cia")).value as any[]).some((d) => d._id === d1.value.id)).toBe(true);
-    const sent = await mu("inbox:reply", { threadId: t._id, text: "Olá, Marina", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }], draftId: d1.value.id }, "cia");
+    const sent = await mu("inbox:reply", { threadId: t._id, text: "Olá, Marina", attachments: list[1].attachments, draftId: d1.value.id }, "cia");
     expect(sent.error ?? null).toBeNull();
     expect(((await q("inbox:drafts", {}, "cia")).value as any[]).map((d) => d._id)).toEqual([note.value.id]);
     // A draft already gone (sent on another device) does not stop the send.
@@ -1104,10 +1112,329 @@ describe("mail app", () => {
     const e = await sentEmail(r.value.emailId);
     expect(e.text).toMatch(/Arquivos para baixar \(links válidos até \d{4}-\d{2}-\d{2}\):\na&b\.bin \(10\.0 MB\): \S+/);
     expect(e.html).toMatch(/Arquivos para baixar[^<]*<br>\s*<a href="[^"]+">a&amp;b\.bin<\/a> \(10\.0 MB\)/);
+    // Sent now, the links work 7 days from now.
+    expect(e.text).toContain(`links válidos até ${new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)}`);
+    // Scheduled, they would have to work 7 days from the send, past what a signed URL lives (7 days from now): refused,
+    // with nothing sent. A scheduled send whose files all fit as attachments goes.
+    const later = Date.now() + 3_600_000;
+    const sched = await call("mutation", "inbox:reply", { threadId: t._id, text: "Amanhã.", sendAt: later, signature: false, attachments: [{ file: big, filename: "a&b.bin", contentType: "application/octet-stream" }] }, "user:cia");
+    expect(sched.error.code).toBe("ValidationError");
+    expect(sched.error.message).toMatch(/a scheduled send can't link files: past 10\.0 MB in all, files go as download links, which work at most 7 days from now and must work 7 days from the send/);
+    expect(await call("query", "inbox:scheduled", { threadId: t._id }, "user:cia")).toMatchObject({ value: [] });
+    const small = await upload("cia", new TextEncoder().encode("pequeno"), "text/plain");
+    const ok = await call("mutation", "inbox:reply", { threadId: t._id, text: "Amanhã.", sendAt: later, signature: false, attachments: [{ file: small, filename: "p.txt", contentType: "text/plain" }] }, "user:cia");
+    expect(ok.value).toMatchObject({ status: "scheduled" });
+    expect((await sentEmail(ok.value.emailId)).text).not.toContain("Arquivos para baixar");
+    expect((await call("mutation", "inbox:cancelScheduled", { emailId: ok.value.emailId }, "user:cia")).value).toMatchObject({ ok: true });
     // A text-only reply from an old client: the text becomes the HTML (no card), as before.
     const old = await call("mutation", "inbox:reply", { threadId: t._id, text: "Só texto." }, "user:caio");
     expect(old.error ?? null).toBeNull();
     expect((await sentEmail(old.value.emailId)).html).toContain("Só texto.");
     expect((await call("mutation", "inbox:reply", { threadId: t._id, text: "x", quoteHeader: "x".repeat(1001) }, "user:caio")).error.message).toMatch(/quoteHeader: at most 1k/);
+  });
+
+  // ------------------------------------------------------------------------------------------- conversation state
+  // Shared `ea` (Eva and Edu) and `eb` (Eva and Eli), and Eva's personal `eia`. Edu never sees `eb` or `eia`; Eli never
+  // sees `ea` or `eia`.
+  let stateReady = false;
+  const stateSetup = async () => {
+    if (stateReady) return;
+    stateReady = true;
+    for (const name of ["ea", "eb"]) expect((await admin.inbox.upsertMailbox({ name, address: `${name}@acme.test` })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "eva", name: "Eva", mailboxes: ["ea", "eb"] })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "edu", name: "Edu", mailboxes: ["ea"] })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "eli", name: "Eli", mailboxes: ["eb"] })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "eia", address: "eia@acme.test", owner: "eva" })).error).toBeNull();
+  };
+  const threadIn = async (to: string, subject: string) => {
+    const m = inbound("rita@user.test", `${to}@acme.test`, mime({ from: '"Rita Lima" <rita@user.test>', to: `${to}@acme.test`, subject, text: "Oi.", id: `${subject.replace(/\W/g, "-")}@user.test` }));
+    await worker.email(m.msg as never, env as never, createExecutionContext());
+    expect(m.out.rejected).toBeNull();
+    const t = ((await call("query", "inbox:threads", { mailbox: to }, "user:eva")).value.page as any[]).find((x) => x.subject === subject);
+    expect(t).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 5));
+    return t._id as string;
+  };
+  const q = async (fn: string, args: unknown, who: string) => {
+    const r = await call("query", fn, args, `user:${who}`);
+    if (r.error) throw new Error(r.error.message);
+    return r.value;
+  };
+  const mu = async (fn: string, args: unknown, who: string) => {
+    const r = await call("mutation", fn, args, `user:${who}`);
+    if (r.error) throw new Error(r.error.message);
+    return r.value;
+  };
+  const refused = async (kind: "query" | "mutation", fn: string, args: unknown, who: string) => (await call(kind, fn, args, `user:${who}`)).error?.message as string | undefined;
+  const subjects = (v: { page: any[] }) => v.page.map((t) => t.subject);
+
+  it("lib:maintain: the email component's own cron (hasUnread backfill, overdue snoozes) runs with the app's", async () => {
+    const crons = composeApp({ schema, functions, app, http }).crons;
+    expect(JSON.stringify(crons)).toContain("lib:maintain");
+  });
+
+  it("tags: per mailbox, managed and applied by who sees it; a view and the counts narrowed by tag", async () => {
+    await stateSetup();
+    const t1 = await threadIn("ea", "tag one");
+    const t2 = await threadIn("ea", "tag two");
+    const t3 = await threadIn("ea", "tag three");
+    const t4 = await threadIn("eb", "tag four");
+    const t5 = await threadIn("eia", "tag five");
+
+    const urgent = (await mu("inbox:createTag", { mailbox: "ea", name: "Urgente", color: "red" }, "edu")) as string;
+    const later = (await mu("inbox:createTag", { mailbox: "ea", name: "Depois" }, "eva")) as string;
+    const billing = (await mu("inbox:createTag", { mailbox: "eb", name: "Cobrança", color: "blue" }, "eli")) as string;
+    const mine = (await mu("inbox:createTag", { mailbox: "eia", name: "Pessoal", color: "purple" }, "eva")) as string;
+    expect(await q("inbox:tags", { mailbox: "ea" }, "edu")).toMatchObject([
+      { _id: urgent, mailbox: "ea", name: "Urgente", color: "red", order: 0 },
+      { _id: later, mailbox: "ea", name: "Depois", color: "gray", order: 1 },
+    ]);
+    // Without a mailbox: every tag of the mailboxes the member sees, never another's.
+    expect(((await q("inbox:tags", {}, "eva")) as any[]).map((t) => t.name).sort()).toEqual(["Cobrança", "Depois", "Pessoal", "Urgente"]);
+    expect(((await q("inbox:tags", {}, "edu")) as any[]).map((t) => t._id)).toEqual([urgent, later]);
+    expect(await refused("query", "inbox:tags", { mailbox: "eia" }, "edu")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:createTag", { mailbox: "eb", name: "x" }, "edu")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:createTag", { mailbox: "ea", name: "urgente" }, "eva")).toMatch(/already has a tag/);
+    expect(await refused("mutation", "inbox:createTag", { mailbox: "ea", name: "x", color: "neon" }, "eva")).toMatch(/tag color/);
+    // Rename and recolor; another mailbox's tag (an admin's personal one included) is not found.
+    expect(await mu("inbox:updateTag", { tagId: later, name: "Mais tarde", color: "teal" }, "edu")).toBe(later);
+    expect((await q("inbox:tags", { mailbox: "ea" }, "eva"))[1]).toMatchObject({ name: "Mais tarde", color: "teal" });
+    for (const tagId of [mine, billing]) {
+      expect(await refused("mutation", "inbox:updateTag", { tagId, name: "x" }, "edu")).toMatch(/tag not found/);
+      expect(await refused("mutation", "inbox:deleteTag", { tagId }, "edu")).toMatch(/tag not found/);
+    }
+
+    // On threads: add, set, remove; only a tag of the thread's mailbox, only on a thread the member sees.
+    expect(await mu("inbox:addTag", { threadId: t1, tag: urgent }, "edu")).toEqual([urgent]);
+    expect(await mu("inbox:setTags", { threadId: t2, tags: [urgent, later] }, "eva")).toEqual([urgent, later]);
+    expect(await mu("inbox:setTags", { threadId: t3, tags: [later] }, "eva")).toEqual([later]);
+    expect(await mu("inbox:removeTag", { threadId: t2, tag: later }, "edu")).toEqual([urgent]);
+    expect(await mu("inbox:addTag", { threadId: t5, tag: mine }, "eva")).toEqual([mine]);
+    expect(await refused("mutation", "inbox:addTag", { threadId: t1, tag: billing }, "eva")).toMatch(/not a tag of mailbox ea/);
+    expect(await refused("mutation", "inbox:addTag", { threadId: t4, tag: billing }, "edu")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:addTag", { threadId: t5, tag: mine }, "edu")).toMatch(/no access/);
+    expect((await q("inbox:thread", { threadId: t2 }, "eva")).thread.tags).toEqual([urgent]);
+
+    // Views by tag: exact, newest first, in the tag's mailbox; a tag the member can't see is not found.
+    expect(subjects(await q("inbox:view", { view: "all", tag: urgent }, "edu"))).toEqual(["tag two", "tag one"]);
+    expect(subjects(await q("inbox:view", { view: "all", tag: urgent, limit: 1 }, "edu"))).toEqual(["tag two"]);
+    expect(await q("inbox:view", { view: "all", tag: urgent, limit: 1 }, "edu")).toMatchObject({ isDone: false, partial: false });
+    expect(subjects(await q("inbox:view", { view: "all", tag: later }, "eva"))).toEqual(["tag three"]);
+    expect(subjects(await q("inbox:view", { view: "all", tag: mine }, "eva"))).toEqual(["tag five"]);
+    expect(await refused("query", "inbox:view", { view: "all", tag: mine }, "edu")).toMatch(/tag not found/);
+    expect(subjects((await q("inbox:threads", { mailbox: "ea", tag: urgent }, "edu")) as any)).toEqual(["tag two", "tag one"]);
+    await mu("inbox:markRead", { threadId: t1 }, "eva");
+    expect(subjects(await q("inbox:view", { view: "unread", tag: urgent }, "eva"))).toEqual(["tag two"]);
+    // Counts per tag, for the tags of the member's mailboxes only.
+    const counts = (await q("inbox:views", {}, "edu")) as any;
+    expect(counts.tags).toEqual({ [urgent]: { threads: 2, unread: 1, capped: false }, [later]: { threads: 1, unread: 1, capped: false } });
+    expect(Object.keys(((await q("inbox:views", {}, "eva")) as any).tags).sort()).toEqual([urgent, later, billing, mine].sort());
+
+    // Deleting a tag takes it off its threads.
+    expect(await mu("inbox:deleteTag", { tagId: later }, "edu")).toEqual({ deleted: true });
+    expect((await q("inbox:thread", { threadId: t3 }, "eva")).thread.tags ?? []).toEqual([]);
+    expect(await refused("query", "inbox:view", { view: "all", tag: later }, "eva")).toMatch(/tag not found/);
+  });
+
+  it("exact views: assigned, unread, waiting and snoozed across mailboxes, with the counts that match them", async () => {
+    await stateSetup();
+    const s1 = await threadIn("ea", "exact one");
+    const s2 = await threadIn("eb", "exact two");
+    const s3 = await threadIn("ea", "exact three");
+    const s4 = await threadIn("eia", "exact four");
+    // Only these four are open or waiting below: earlier threads of ea/eb/eia go to spam, out of the way.
+    for (const mailbox of ["ea", "eb", "eia"]) {
+      for (const t of (await q("inbox:threads", { mailbox }, "eva")).page as any[]) {
+        if (![s1, s2, s3, s4].includes(t._id)) await mu("inbox:setStatus", { threadId: t._id, status: "spam" }, "eva");
+      }
+    }
+    await mu("inbox:assign", { threadId: s1, userId: "edu" }, "eva");
+    await mu("inbox:assign", { threadId: s3, userId: "eva" }, "edu");
+    await mu("inbox:assign", { threadId: s2, userId: "eva" }, "eli");
+    await mu("inbox:setStatus", { threadId: s2, status: "waiting" }, "eva");
+    await mu("inbox:markRead", { threadId: s3 }, "eva");
+    expect(await refused("mutation", "inbox:assign", { threadId: s4, userId: "eva" }, "eva")).toMatch(/personal mailbox has no assignment/);
+
+    expect(subjects(await q("inbox:view", { view: "assigned" }, "eva"))).toEqual(["exact three", "exact two"]);
+    expect(subjects(await q("inbox:view", { view: "assigned" }, "edu"))).toEqual(["exact one"]);
+    expect(subjects(await q("inbox:view", { view: "assigned" }, "eli"))).toEqual([]);
+    expect(subjects(await q("inbox:view", { view: "unread" }, "eva"))).toEqual(["exact four", "exact two", "exact one"]);
+    expect(subjects(await q("inbox:view", { view: "unread" }, "edu"))).toEqual(["exact one"]);
+    expect(subjects(await q("inbox:view", { view: "waiting" }, "eva"))).toEqual(["exact two"]);
+    expect(subjects(await q("inbox:threads", { mailbox: "ea", assignee: "edu" }, "eva"))).toEqual(["exact one"]);
+    expect(subjects(await q("inbox:threads", { mailbox: "ea", unread: true, status: "open" }, "eva"))).toContain("exact one");
+
+    // The mailbox badges (`inbox:mailboxes`) leave snoozed threads out too.
+    const badge = async (who: string, name: string) => {
+      const b = ((await q("inbox:mailboxes", {}, who)) as any[]).find((x) => x.name === name);
+      return { threads: b.threads, unread: b.unread };
+    };
+    // Over HTTP (an API key: shared mailboxes only), the same counts, and `snoozed` apart.
+    const httpBadge = async (name: string) => (await admin.inbox.mailboxes()).data!.data.find((b) => b.name === name)!;
+    const ea0 = await badge("eva", "ea");
+    const eia0 = await badge("eva", "eia");
+    expect(await httpBadge("ea")).toMatchObject({ ...ea0, snoozed: 0 });
+    expect(await httpBadge("eia")).not.toHaveProperty("unread");
+    expect(await httpBadge("eia")).not.toHaveProperty("snoozed");
+
+    // Snoozed: out of every other view and count, listed soonest to wake first; Edu can't snooze in eb.
+    const now = Date.now();
+    expect(await mu("inbox:snooze", { threadId: s1, until: now + 7_200_000 }, "edu")).toBe(now + 7_200_000);
+    await mu("inbox:snooze", { threadId: s4, until: now + 3_600_000 }, "eva");
+    expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
+    expect(await badge("edu", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
+    expect(await badge("eva", "eia")).toEqual({ threads: eia0.threads - 1, unread: eia0.unread - 1 });
+    expect(((await q("inbox:mailboxes", {}, "eva")) as any[]).find((b) => b.name === "ea")).toMatchObject({ snoozed: 1 });
+    expect(await httpBadge("ea")).toMatchObject({ threads: ea0.threads - 1, unread: ea0.unread - 1, snoozed: 1 });
+    // The badge adds up with the default list.
+    const listed = (await admin.inbox.threads({ mailbox: "ea", limit: 100 })).data!.page;
+    expect({ threads: listed.length, unread: listed.reduce((n, t) => n + t.unreadCount, 0) }).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
+
+    // HTTP: `GET /inbox/threads` leaves them out too; `snoozed=true` lists only them. Never a personal mailbox.
+    const byKey = async (qs: string) => SELF.fetch(`${BASE}/inbox/threads?${qs}`, { headers: { authorization: "Bearer admin-secret" } });
+    expect(((await admin.inbox.threads({ mailbox: "ea", limit: 100 })).data!.page as any[]).map((t) => t._id)).not.toContain(s1);
+    expect(((await admin.inbox.threads({ mailbox: "ea", snoozed: true })).data!.page as any[]).map((t) => t._id)).toEqual([s1]);
+    expect(((await (await byKey("mailbox=ea&snoozed=true")).json()) as any).page[0]).toMatchObject({ _id: s1, snoozed: true, snoozedUntil: now + 7_200_000 });
+    expect((await byKey("mailbox=ea&snoozed=false")).status).toBe(200);
+    expect(await (await byKey("mailbox=ea&snoozed=yes")).json()).toMatchObject({ statusCode: 422, name: "validation_error" });
+    expect((await byKey("mailbox=eia&snoozed=true")).status).toBe(403);
+    expect(await refused("mutation", "inbox:snooze", { threadId: s2, until: now + 3_600_000 }, "edu")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:snooze", { threadId: s3, until: now - 1000 }, "eva")).toMatch(/in the future/);
+    expect(await refused("mutation", "inbox:snooze", { threadId: s3, until: now + 400 * 86_400_000 }, "eva")).toMatch(/366 days/);
+    expect(subjects(await q("inbox:view", { view: "snoozed" }, "eva"))).toEqual(["exact four", "exact one"]);
+    expect(subjects(await q("inbox:view", { view: "snoozed" }, "edu"))).toEqual(["exact one"]);
+    expect(subjects(await q("inbox:view", { view: "all" }, "eva"))).not.toContain("exact one");
+    expect(subjects(await q("inbox:view", { view: "unread" }, "eva"))).toEqual(["exact two"]);
+    expect(subjects(await q("inbox:view", { view: "assigned" }, "edu"))).toEqual([]);
+    const { tags: _, ...eva } = (await q("inbox:views", {}, "eva")) as any;
+    // `all` counts every status (the spam ones too), and matches its list.
+    const all = (await q("inbox:view", { view: "all", limit: 300 }, "eva")).page as any[];
+    expect(eva).toEqual({
+      all: { threads: all.length, unread: all.reduce((n, t) => n + t.unreadCount, 0), capped: false },
+      assigned: { threads: 2, unread: 1, capped: false },
+      unread: { threads: 1, unread: 1, capped: false },
+      waiting: { threads: 1, unread: 1, capped: false },
+      snoozed: { threads: 2, unread: 2, capped: false },
+    });
+    expect(await q("inbox:views", {}, "edu")).toMatchObject({ assigned: { threads: 0 }, unread: { threads: 0 }, snoozed: { threads: 1, unread: 1 } });
+
+    // Unsnoozed by hand: back where it was. Snoozed for a moment: it comes back on its own, open and unread, on top.
+    await mu("inbox:unsnooze", { threadId: s1 }, "edu");
+    expect(subjects(await q("inbox:view", { view: "assigned" }, "edu"))).toEqual(["exact one"]);
+    expect(await badge("eva", "ea")).toEqual(ea0);
+    await mu("inbox:setStatus", { threadId: s3, status: "closed" }, "eva");
+    await mu("inbox:snooze", { threadId: s3, until: Date.now() + 1200 }, "eva");
+    expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread });
+    const woke = await until(() => q("inbox:thread", { threadId: s3 }, "eva"), (x: any) => !x.thread.snoozed, 10_000);
+    expect(woke.thread).toMatchObject({ status: "open", unreadCount: 1, hasUnread: true });
+    // Woken (by time: back as new, unread), it counts again.
+    expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads, unread: ea0.unread + 1 });
+    expect(await httpBadge("ea")).toMatchObject({ threads: ea0.threads, unread: ea0.unread + 1, snoozed: 0 });
+    expect(subjects(await q("inbox:view", { view: "assigned" }, "eva"))[0]).toBe("exact three");
+    expect(subjects(await q("inbox:view", { view: "snoozed" }, "eva"))).toEqual(["exact four"]);
+
+    // Members only.
+    expect(await refused("query", "inbox:view", { view: "snoozed" }, "stranger")).toMatch(/not a member/);
+  });
+
+  it("activity: the thread's timeline with who did each change, for who sees the thread", async () => {
+    await stateSetup();
+    const t = await threadIn("ea", "timeline");
+    const tag = (await mu("inbox:createTag", { mailbox: "ea", name: "Linha" }, "eva")) as string;
+    await mu("inbox:addTag", { threadId: t, tag }, "eva");
+    await mu("inbox:assign", { threadId: t, userId: "edu" }, "eva");
+    await mu("inbox:setStatus", { threadId: t, status: "closed" }, "edu");
+    await mu("inbox:setStatus", { threadId: t, status: "open" }, "edu");
+    // A reply makes it waiting: its author is the name it was sent with, matched to the member.
+    await mu("inbox:reply", { threadId: t, text: "Resolvido." }, "edu");
+    await mu("inbox:snooze", { threadId: t, until: Date.now() + 3_600_000 }, "eva");
+    await mu("inbox:unsnooze", { threadId: t }, "eva");
+    const tl = (await q("inbox:activity", { threadId: t }, "edu")) as any[];
+    const brief = tl.filter((e) => e.kind !== "delivery").map((e) => [e.kind, e.actor?.userId ?? null]);
+    expect(brief).toEqual([
+      ["tag_added", "eva"],
+      ["assigned", "eva"],
+      ["status", "edu"],
+      ["status", "edu"],
+      ["status", "edu"],
+      ["snoozed", "eva"],
+      ["unsnoozed", "eva"],
+    ]);
+    expect(tl[0]).toMatchObject({ kind: "tag_added", data: { tag, name: "Linha" }, actor: { userId: "eva", name: "Eva" } });
+    expect(tl[1]).toMatchObject({ kind: "assigned", data: { from: null, to: "edu", toName: "Edu" } });
+    expect(tl[4]).toMatchObject({ kind: "status", data: { from: "open", to: "waiting" }, actor: { userId: "edu", name: "Edu" } });
+    expect(tl.find((e) => e.kind === "unsnoozed").data).toMatchObject({ reason: "manual" });
+    expect(tl.every((e, i) => i === 0 || e.at >= tl[i - 1].at)).toBe(true);
+    expect((await q("inbox:activity", { threadId: t, limit: 2 }, "eva")).length).toBe(2);
+    expect(await refused("query", "inbox:activity", { threadId: t }, "eli")).toMatch(/no access/);
+    const p = await threadIn("eia", "timeline personal");
+    await mu("inbox:setStatus", { threadId: p, status: "closed" }, "eva");
+    expect((await q("inbox:activity", { threadId: p }, "eva"))[0]).toMatchObject({ kind: "status", actor: { userId: "eva" } });
+    expect(await refused("query", "inbox:activity", { threadId: p }, "edu")).toMatch(/no access/);
+  });
+
+  it("scheduled sends and bcc: sendAt on reply, compose and forward; listed, canceled; blind copies kept off headers", async () => {
+    await stateSetup();
+    const t = await threadIn("ea", "agendado");
+    const at = Date.now() + 3_600_000;
+    const r = await mu("inbox:reply", { threadId: t, text: "Amanhã cedo.", sendAt: at, bcc: ["chefe@user.test"] }, "edu");
+    expect(r.status).toBe("scheduled");
+    const list = (await q("inbox:scheduled", { threadId: t }, "eva")) as any[];
+    expect(list).toMatchObject([{ emailId: r.emailId, sendAt: at, messageId: r.messageId, author: "Edu" }]);
+    const msg = ((await q("inbox:thread", { threadId: t }, "eva")).messages as any[]).find((m) => m._id === r.messageId);
+    expect(msg).toMatchObject({ scheduledFor: at, bcc: [{ email: "chefe@user.test" }] });
+    expect((await q("inbox:activity", { threadId: t }, "eva")).find((e: any) => e.kind === "scheduled")).toMatchObject({ data: { emailId: r.emailId, sendAt: at }, actor: { userId: "edu" } });
+    // Only who sees the thread lists or cancels it.
+    expect(await refused("query", "inbox:scheduled", { threadId: t }, "eli")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:cancelScheduled", { emailId: r.emailId }, "eli")).toMatch(/email not found/);
+    expect(await refused("mutation", "inbox:cancelScheduled", { emailId: "nope" }, "eva")).toMatch(/email not found/);
+    expect(await mu("inbox:cancelScheduled", { emailId: r.emailId }, "eva")).toMatchObject({ ok: true, status: "canceled", messageId: r.messageId });
+    expect(await q("inbox:scheduled", { threadId: t }, "eva")).toEqual([]);
+    expect(((await q("inbox:thread", { threadId: t }, "eva")).messages as any[]).some((m) => m._id === r.messageId)).toBe(false);
+    expect(await mu("inbox:cancelScheduled", { emailId: r.emailId }, "eva")).toEqual({ ok: false, status: "canceled" });
+    expect(await refused("mutation", "inbox:reply", { threadId: t, text: "x", sendAt: Date.now() + 400 * 86_400_000 }, "eva")).toMatch(/366 days/);
+    // A past sendAt sends now.
+    expect((await mu("inbox:reply", { threadId: t, text: "Agora.", sendAt: Date.now() - 60_000 }, "eva")).status).not.toBe("scheduled");
+
+    // A scheduled new conversation canceled: the conversation goes, with the drafts on it.
+    const c = await mu("inbox:compose", { mailbox: "ea", to: ["novo@user.test"], subject: "Mais tarde", text: "Oi!", sendAt: at }, "eva");
+    expect(c.status).toBe("scheduled");
+    await mu("inbox:saveDraft", { kind: "reply", threadId: c.threadId, text: "rascunho" }, "edu");
+    expect(await mu("inbox:cancelScheduled", { emailId: c.emailId }, "edu")).toMatchObject({ ok: true, threadDeleted: true });
+    expect(await q("inbox:thread", { threadId: c.threadId }, "eva").catch((e) => e.message)).toMatch(/thread not found/);
+    expect(await q("inbox:drafts", {}, "edu")).toEqual([]);
+
+    // Bcc: validated like cc; in the email row's envelope (never its headers), kept on the thread's message.
+    const b = await mu("inbox:compose", { mailbox: "ea", to: ["ana@user.test"], cc: ["bia@user.test"], bcc: ["oculto@user.test"], subject: "Cópia oculta", text: "Oi." }, "eva");
+    const row = (await call("query", "testing:email", { id: b.emailId })).value;
+    expect(row).toMatchObject({ bcc: [{ email: "oculto@user.test" }], cc: [{ email: "bia@user.test" }] });
+    expect(JSON.stringify(row.headers ?? {})).not.toContain("oculto");
+    expect((await q("inbox:thread", { threadId: b.threadId }, "eva")).thread.blind).toEqual(["oculto@user.test"]);
+    const many = Array.from({ length: 51 }, (_, i) => `b${i}@user.test`);
+    expect(await refused("mutation", "inbox:reply", { threadId: t, text: "x", bcc: many }, "eva")).toMatch(/at most 50 people in blind copy/);
+    expect(await refused("mutation", "inbox:compose", { mailbox: "ea", to: ["a@user.test"], cc: many, subject: "s", text: "x" }, "eva")).toMatch(/at most 50 people in copy/);
+    expect(await refused("mutation", "inbox:reply", { threadId: t, text: "x", bcc: ["not an address"] }, "eva")).toBeTruthy();
+    // Forward takes them too.
+    const msgId = ((await q("inbox:thread", { threadId: t }, "eva")).messages as any[]).find((m) => m.direction === "inbound")._id;
+    const fw = await mu("inbox:forward", { threadId: t, messageId: msgId, to: ["fin@user.test"], bcc: ["arquivo@user.test"], subject: "Fwd: agendado", text: "Veja.", sendAt: at }, "eva");
+    expect(fw.status).toBe("scheduled");
+    expect((await call("query", "testing:email", { id: fw.emailId })).value).toMatchObject({ bcc: [{ email: "arquivo@user.test" }] });
+  });
+
+  it("presence: who else is viewing or replying on a thread, for who sees it; never oneself", async () => {
+    await stateSetup();
+    const t = await threadIn("ea", "presença");
+    expect(await mu("inbox:setPresence", { threadId: t, state: "viewing" }, "eva")).toBeNull();
+    await mu("inbox:setPresence", { threadId: t, state: "replying" }, "edu");
+    expect(await q("inbox:presence", { threadId: t }, "eva")).toMatchObject([{ userId: "edu", name: "Edu", state: "replying" }]);
+    expect(await q("inbox:presence", { threadId: t }, "edu")).toMatchObject([{ userId: "eva", name: "Eva", state: "viewing" }]);
+    expect(await refused("query", "inbox:presence", { threadId: t }, "eli")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:setPresence", { threadId: t, state: "viewing" }, "eli")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:setPresence", { threadId: t, state: "typing" }, "eva")).toBeTruthy();
+    await mu("inbox:setPresence", { threadId: t, state: null }, "eva");
+    expect(await q("inbox:presence", { threadId: t }, "edu")).toEqual([]);
+    const p = await threadIn("eia", "presença pessoal");
+    await mu("inbox:setPresence", { threadId: p, state: "viewing" }, "eva");
+    expect(await refused("query", "inbox:presence", { threadId: p }, "edu")).toMatch(/no access/);
   });
 });

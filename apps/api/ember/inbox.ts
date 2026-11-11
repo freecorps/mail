@@ -1,8 +1,9 @@
 // The inbox for the dashboard and the mobile client (apps/mobile): reactive queries over the email component's
 // mailboxes, threads and search, for signed-in members only (identity from the app's auth provider: Ember auth
 // via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see every shared one; a personal mailbox
-// only its owner (ember/access.ts). Push devices register here.
-import { anyComponents as components, internalMutationGeneric as internalMutation, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
+// only its owner (ember/access.ts). Push devices register here. Lists, counts, tags, the activity timeline, snooze,
+// scheduled sends and presence are the email component's (Ember 0.7), behind the same rule.
+import { anyComponents as components, EmberError, internalMutationGeneric as internalMutation, internalQueryGeneric as internalQuery, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
 import { escapeHtml } from "@freecorps/ember-email";
 import { PushNotifications } from "@freecorps/ember-push";
 import { canSee, canSeeWith, ownerOf, owners, type Member } from "./access.ts";
@@ -66,10 +67,14 @@ function threadOf(ctx: Ctx, threadId: string) {
 export const ATTACH_LIMIT = 10 * 1024 * 1024;
 /** The largest file a member may upload. */
 export const MAX_UPLOAD = 2 * 1024 ** 3;
-/** How long a download link in an email works (Ember's signed URLs go up to 7 days). */
+/** How long a download link in an email works, counted from when the email goes out. */
 export const LINK_TTL_S = 7 * 24 * 3600;
+/** The longest a signed URL of Ember's lives (`ctx.storage.getUrl`: `expiresIn` at most 7 days, clamped above). */
+export const MAX_URL_TTL_S = 7 * 24 * 3600;
 
-const attachmentsArg = v.optional(v.array(v.object({ file: v.string(), filename: v.string(), contentType: v.string() })));
+// `size` is accepted so a client may send back a draft's files as it read them; the server never trusts it (sizes
+// come from storage).
+const attachmentsArg = v.optional(v.array(v.object({ file: v.string(), filename: v.string(), contentType: v.string(), size: v.optional(v.number()) })));
 type AttachmentArg = { file: string; filename: string; contentType: string };
 
 const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -78,9 +83,10 @@ const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n 
  * Splits the files into attachments and links (smallest attach first, up to ATTACH_LIMIT) and appends the links to
  * the text, and to the composer's HTML body when there is one. Every file must be uploaded (ready) already. `list`:
  * the member's own uploads; `trusted`: files already in a thread they can see (a forwarded message's attachments),
- * which need no upload of theirs.
+ * which need no upload of theirs. `sendAt`: a scheduled send's time; its links must work LINK_TTL_S from then, which
+ * the URL signer allows only up to MAX_URL_TTL_S from now, so a scheduled send past that with linked files is refused.
  */
-export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = [], bodyHtml?: string) {
+export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = [], bodyHtml?: string, sendAt?: number) {
   const own = list ?? [];
   if (!own.length && !trusted.length) return { text, bodyHtml, attachments: undefined };
   if (own.length + trusted.length > L.attachments) throw new Error(`at most ${L.attachments} attachments`);
@@ -100,9 +106,18 @@ export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: str
     else link.add(f.file);
   }
   if (!link.size) return { text, bodyHtml, attachments: files.map(({ size: _, ...a }) => a) };
-  const until = new Date(ctx.now + LINK_TTL_S * 1000).toISOString().slice(0, 10);
+  // Valid LINK_TTL_S from the send (now, or the scheduled time): signed now, so the URL has to live until then too.
+  const from = Math.max(ctx.now, sendAt ?? ctx.now);
+  const expiresIn = Math.ceil((from - ctx.now) / 1000) + LINK_TTL_S;
+  if (expiresIn > MAX_URL_TTL_S) {
+    throw new EmberError(
+      "ValidationError",
+      `a scheduled send can't link files: past ${mib(ATTACH_LIMIT)} in all, files go as download links, which work at most ${MAX_URL_TTL_S / 86_400} days from now and must work ${LINK_TTL_S / 86_400} days from the send. Send it now, or attach less`,
+    );
+  }
+  const until = new Date(from + LINK_TTL_S * 1000).toISOString().slice(0, 10);
   const head = `Arquivos para baixar (links válidos até ${until}):`;
-  const linked = files.filter((f) => link.has(f.file)).map((f) => ({ ...f, url: ctx.storage.getUrl(f.file, { download: f.filename, expiresIn: LINK_TTL_S }) as string }));
+  const linked = files.filter((f) => link.has(f.file)).map((f) => ({ ...f, url: ctx.storage.getUrl(f.file, { download: f.filename, expiresIn }) as string }));
   const html = linked.map((f) => `<a href="${escapeHtml(f.url)}">${escapeHtml(f.filename)}</a> (${mib(f.size)})`).join("<br>");
   return {
     text: `${text}\n\n—\n${head}\n${linked.map((f) => `${f.filename} (${mib(f.size)}): ${f.url}`).join("\n")}`,
@@ -124,20 +139,51 @@ export const generateUploadUrl = mutation({
   },
 });
 
-/** Mailboxes this member can see, with unread counts (aggregate); `personal`: their own mailbox, no one else's. */
+/** A mailbox's badge: `threads` and `unread` messages without its snoozed threads (they count again when they wake), and `snoozed` threads apart. */
+export type MailboxCount = { threads: number; unread: number; snoozed: number };
+
+/** Badges from the email component's `counts` aggregates (a few group reads per mailbox, no thread scan). */
+function mailboxCountsOf(ctx: Ctx, names: string[]): Record<string, MailboxCount> {
+  const out: Record<string, MailboxCount> = {};
+  for (const mailbox of names) {
+    const c = ctx.runQuery(email.counts, { mailbox }) as { all: { threads: number; unread: number }; snoozed: { threads: number } };
+    out[mailbox] = { threads: c.all.threads, unread: c.all.unread, snoozed: c.snoozed.threads };
+  }
+  return out;
+}
+
+/** The badges of `mailboxes`, in one transaction, for the HTTP API (`GET /inbox/mailboxes`, which never asks for a personal one). */
+export const mailboxCounts = internalQuery({
+  args: { mailboxes: v.array(v.string()) },
+  handler: (ctx, a) => mailboxCountsOf(ctx as unknown as Ctx, a.mailboxes),
+});
+
+/**
+ * Mailboxes this member can see, with their badges (`MailboxCount`: `threads`, `unread`, `snoozed`), the same
+ * rule as `views` and the lists: snoozed threads are out of `threads` and `unread`. `personal`: their own mailbox,
+ * no one else's.
+ */
 export const mailboxes = query({
   args: {},
   handler: (ctx) => {
     const m = member(ctx);
     const personal = owners(ctx.db);
     const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string; address: string; displayName?: string }>).filter((b) => canSeeWith(personal, m, b.name));
-    const unread = ctx.runQuery(email.unread, { mailboxes: all.map((b) => b.name) }) as Record<string, { unread: number; threads: number }>;
-    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), ...unread[b.name]! }));
+    const counts = mailboxCountsOf(ctx, all.map((b) => b.name));
+    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), ...counts[b.name]! }));
   },
 });
 
 export const threads = query({
-  args: { mailbox: v.string(), status: v.optional(v.string()), paginationOpts: v.optional(v.object({ numItems: v.number(), cursor: v.union(v.string(), v.null()) })) },
+  args: {
+    mailbox: v.string(),
+    status: v.optional(v.string()),
+    assignee: v.optional(v.union(v.string(), v.null())),
+    unread: v.optional(v.boolean()),
+    tag: v.optional(v.string()),
+    snoozed: v.optional(v.boolean()),
+    paginationOpts: v.optional(v.object({ numItems: v.number(), cursor: v.union(v.string(), v.null()) })),
+  },
   handler: (ctx, a) => {
     allowed(ctx, a.mailbox);
     return ctx.runQuery(email.threads, a);
@@ -151,115 +197,136 @@ export const threads = query({
 //   assigned  threads assigned to the member; open and waiting ones unless `status` says otherwise
 //   unread    threads with unread messages; open and waiting ones unless `status` says otherwise
 //   waiting   threads waiting on the contact
+//   snoozed   snoozed threads ("Adiadas"), soonest to wake first (`status` narrows it)
 //
-// Each mailbox is read through the email component's own index (`threads`: by mailbox, or by mailbox and status, newest
-// first) and the pages are merged, so `all` and `waiting` are exact. The component has no index by assignee or by
-// unread, so `assigned` and `unread` scan each mailbox's open and waiting threads (what is still being worked on: a new
-// message reopens a closed thread) up to VIEW_SCAN, and say `partial` when a mailbox had more than that.
+// Snoozed threads are only in `snoozed` (the email component leaves them out of its other lists). `tag` narrows any
+// view to the threads with that tag, in the tag's mailbox.
+//
+// Each range (mailbox × status) is one page read on the email component's own indexes (by mailbox, status, assignee,
+// unread, tag or snooze), and the pages are merged: every view is exact and reads at most `mailboxes × statuses ×
+// limit` threads.
 
-export const VIEWS = ["all", "assigned", "unread", "waiting"] as const;
+export const VIEWS = ["all", "assigned", "unread", "waiting", "snoozed"] as const;
 export type View = (typeof VIEWS)[number];
 /** Most threads one `view` read returns (the list grows its `limit` as it scrolls, up to here). */
 export const VIEW_MAX = 300;
-/** Most threads `assigned` and `unread` read per mailbox and status to find theirs (and `views` to count them). */
-export const VIEW_SCAN = 500;
+/** Most component pages one range reads to fill its part of a page (a filtered page can come back short). */
+const RANGE_READS = 10;
 const ACTIVE = ["open", "waiting"] as const;
 
 const statusArg = v.optional(v.union(v.literal("open"), v.literal("waiting"), v.literal("closed"), v.literal("spam")));
-type ThreadRow = { _id: string; mailbox: string; status: string; lastMessageAt: number; unreadCount: number; assignee?: string };
+type ThreadRow = { _id: string; mailbox: string; status: string; lastMessageAt: number; unreadCount: number; assignee?: string; snoozedUntil?: number };
 type Page = { page: ThreadRow[]; isDone: boolean; continueCursor: string };
 
-/** Which ranges (mailbox × status) a view reads, and which of their threads it keeps. */
-function planOf(view: View, status: string | undefined, m: Member, personal: Map<string, string>) {
+/** The component filters a view reads each mailbox with, one entry per range (status). */
+function rangesOf(view: View, status: string | undefined, m: Member, personal: boolean): Array<Record<string, unknown>> {
+  const active = status ? [status] : [...ACTIVE];
   switch (view) {
     case "all":
-      return { statuses: [status], keep: undefined };
+      return [{ status }];
     case "waiting":
-      return { statuses: ["waiting"], keep: undefined };
+      return [{ status: "waiting" }];
+    case "snoozed":
+      return [{ status, snoozed: true }];
     case "assigned":
       // A personal mailbox has no assignment: nothing to read there.
-      return { statuses: status ? [status] : [...ACTIVE], keep: (t: ThreadRow) => t.assignee === m.userId, skip: (mb: string) => personal.has(mb) };
+      return personal ? [] : active.map((s) => ({ status: s, assignee: m.userId }));
     case "unread":
-      return { statuses: status ? [status] : [...ACTIVE], keep: (t: ThreadRow) => t.unreadCount > 0 };
+      return active.map((s) => ({ status: s, unread: true }));
   }
 }
 
-/**
- * The newest `want` threads of one mailbox (and status) that `keep` accepts. `done`: no other thread of the range
- * matches; `partial`: the scan stopped at VIEW_SCAN threads before finding `want` or reaching the end.
- */
-function rangeOf(ctx: Ctx, mailbox: string, status: string | undefined, keep: ((t: ThreadRow) => boolean) | undefined, want: number) {
+/** The newest `want` threads of one range. `done`: the range has no more; `partial`: it stopped at RANGE_READS pages. */
+function rangeOf(ctx: Ctx, filters: Record<string, unknown>, want: number) {
+  const args = Object.fromEntries(Object.entries(filters).filter(([, x]) => x !== undefined));
   const rows: ThreadRow[] = [];
   let cursor: string | null = null;
-  let scanned = 0;
-  for (;;) {
-    const numItems = keep ? Math.min(100, VIEW_SCAN - scanned) : want;
-    const r = ctx.runQuery(email.threads, { mailbox, ...(status ? { status } : {}), paginationOpts: { numItems, cursor } }) as Page;
-    scanned += r.page.length;
-    rows.push(...(keep ? r.page.filter(keep) : r.page));
-    if (rows.length >= want) return { rows: rows.slice(0, want), done: r.isDone && rows.length === want, partial: false };
+  for (let reads = 0; reads < RANGE_READS; reads++) {
+    const r = ctx.runQuery(email.threads, { ...args, paginationOpts: { numItems: want - rows.length, cursor } }) as Page;
+    rows.push(...r.page);
     if (r.isDone) return { rows, done: true, partial: false };
-    if (scanned >= VIEW_SCAN) return { rows, done: false, partial: true };
+    if (rows.length >= want) return { rows, done: false, partial: false };
     cursor = r.continueCursor;
   }
+  return { rows, done: false, partial: true };
 }
 
-const newestFirst = (a: ThreadRow, b: ThreadRow) => b.lastMessageAt - a.lastMessageAt || (a._id < b._id ? 1 : a._id > b._id ? -1 : 0);
+const byId = (a: ThreadRow, b: ThreadRow) => (a._id < b._id ? 1 : a._id > b._id ? -1 : 0);
+const newestFirst = (a: ThreadRow, b: ThreadRow) => b.lastMessageAt - a.lastMessageAt || byId(a, b);
+const soonestFirst = (a: ThreadRow, b: ThreadRow) => (a.snoozedUntil ?? 0) - (b.snoozedUntil ?? 0) || byId(a, b);
+
+export type TagDoc = { _id: string; _creationTime: number; mailbox: string; name: string; nameKey: string; color: string; order: number; createdAt: number };
+
+/** The tags of the mailboxes `m` sees (each tag names its mailbox). */
+function tagsOf(ctx: Ctx, mailboxes: string[]): TagDoc[] {
+  return mailboxes.flatMap((mailbox) => ctx.runQuery(email.tags, { mailbox }) as TagDoc[]);
+}
+
+/** A tag of a mailbox the member sees: "tag not found" otherwise (another mailbox's tag is not theirs to know). */
+function tagOf(ctx: Ctx, m: Member, tagId: string): TagDoc {
+  const t = tagsOf(ctx, memberMailboxes(ctx, m)).find((x) => x._id === tagId);
+  if (!t) throw new Error("tag not found");
+  return t;
+}
 
 /**
- * A view across the member's mailboxes, newest first: `{ page, isDone, partial }`. `limit` grows as the list scrolls
- * (like `sent`), up to VIEW_MAX. `partial`: some mailbox had more open and waiting threads than `assigned`/`unread`
- * scan, so older matches may be missing.
+ * A view across the member's mailboxes: `{ page, isDone, partial }`, newest first (`snoozed`: soonest to wake first).
+ * `limit` grows as the list scrolls (like `sent`), up to VIEW_MAX. `tag`: only that tag's threads (one of a mailbox
+ * the member sees). `partial` is kept for older clients: the reads are exact, so it is only true if a range needed
+ * more than RANGE_READS pages.
  */
 export const view = query({
-  args: { view: v.union(...VIEWS.map((x) => v.literal(x))), status: statusArg, limit: v.optional(v.number()) },
+  args: { view: v.union(...VIEWS.map((x) => v.literal(x))), status: statusArg, tag: v.optional(v.string()), limit: v.optional(v.number()) },
   handler: (ctx, a) => {
     const m = member(ctx);
     const want = Math.min(Math.max(Math.trunc(a.limit ?? 30), 1), VIEW_MAX);
     const personal = owners(ctx.db);
-    const plan = planOf(a.view as View, a.status, m, personal);
-    const skip = "skip" in plan ? plan.skip : undefined;
-    const ranges = memberMailboxes(ctx, m)
-      .filter((mb) => !skip?.(mb))
-      .flatMap((mb) => plan.statuses.map((s) => rangeOf(ctx, mb, s, plan.keep, want)));
-    const rows = ranges.flatMap((r) => r.rows).sort(newestFirst);
+    const boxes = a.tag !== undefined ? [tagOf(ctx, m, a.tag).mailbox] : memberMailboxes(ctx, m);
+    const ranges = boxes.flatMap((mailbox) =>
+      rangesOf(a.view as View, a.status, m, personal.has(mailbox)).map((f) => rangeOf(ctx, { mailbox, ...f, ...(a.tag !== undefined ? { tag: a.tag } : {}) }, want)),
+    );
+    // The component lists a tag's snoozed threads newest first; one mailbox, so its order stands.
+    const order = a.view === "snoozed" && a.tag === undefined ? soonestFirst : newestFirst;
+    const rows = ranges.flatMap((r) => r.rows).sort(order);
     return { page: rows.slice(0, want), isDone: rows.length <= want && ranges.every((r) => r.done), partial: ranges.some((r) => r.partial) };
   },
 });
 
-/** A view's count: its threads, their unread messages, and `capped` when a mailbox had more than VIEW_SCAN to count. */
+/** A view's count: its threads and their unread messages. `capped` is kept for older clients: always false (exact). */
 export type ViewCount = { threads: number; unread: number; capped: boolean };
+type Block = { threads: number; unread: number; unreadThreads: number };
+type Counts = { all: Block; byStatus: Record<string, Block>; snoozed: Block; assignee?: { all: Block; byStatus: Record<string, Block>; snoozed: Block }; tags: Record<string, { all: Block }> };
 
 /**
- * The home screen's counts, one per view. `all` is the email component's aggregate (exact: every thread and unread
- * message of the member's mailboxes); the others count the open and waiting threads of each mailbox, up to VIEW_SCAN
- * per mailbox and status.
+ * The home screen's counts, one per view, plus one per tag of the member's mailboxes (`tags`, by tag id: its threads
+ * that are not snoozed). Exact: the email component's `counts` aggregates, a few group reads per mailbox.
  */
 export const views = query({
   args: {},
   handler: (ctx) => {
     const m = member(ctx);
     const personal = owners(ctx.db);
-    const boxes = memberMailboxes(ctx, m);
-    const agg = ctx.runQuery(email.unread, { mailboxes: boxes }) as Record<string, { unread: number; threads: number }>;
     const zero = (): ViewCount => ({ threads: 0, unread: 0, capped: false });
-    const out = { all: zero(), assigned: zero(), unread: zero(), waiting: zero() } satisfies Record<View, ViewCount>;
-    for (const mb of boxes) {
-      out.all.threads += agg[mb]?.threads ?? 0;
-      out.all.unread += agg[mb]?.unread ?? 0;
-      for (const status of ACTIVE) {
-        const r = rangeOf(ctx, mb, status, undefined, VIEW_SCAN);
-        const add = (c: ViewCount, list: ThreadRow[]) => {
-          c.threads += list.length;
-          c.unread += list.reduce((n, t) => n + t.unreadCount, 0);
-          c.capped ||= !r.done;
-        };
-        if (!personal.has(mb)) add(out.assigned, r.rows.filter((t) => t.assignee === m.userId));
-        add(out.unread, r.rows.filter((t) => t.unreadCount > 0));
-        if (status === "waiting") add(out.waiting, r.rows);
+    const out = { all: zero(), assigned: zero(), unread: zero(), waiting: zero(), snoozed: zero() } satisfies Record<View, ViewCount>;
+    const tags: Record<string, ViewCount> = {};
+    const add = (c: ViewCount, b: Block | undefined, unreadOnly = false) => {
+      c.threads += (unreadOnly ? b?.unreadThreads : b?.threads) ?? 0;
+      c.unread += b?.unread ?? 0;
+    };
+    for (const mailbox of memberMailboxes(ctx, m)) {
+      const own = !personal.has(mailbox);
+      const c = ctx.runQuery(email.counts, { mailbox, ...(own ? { assignee: m.userId } : {}) }) as Counts;
+      add(out.all, c.all);
+      add(out.snoozed, c.snoozed);
+      add(out.waiting, c.byStatus.waiting);
+      for (const s of ACTIVE) {
+        // Unread messages are only on unread threads: the status block's `unread` is theirs.
+        add(out.unread, c.byStatus[s], true);
+        if (c.assignee) add(out.assigned, c.assignee.byStatus[s]);
       }
+      for (const [id, t] of Object.entries(c.tags)) add((tags[id] = zero()), t.all);
     }
-    return out;
+    return { ...out, tags };
   },
 });
 
@@ -345,13 +412,25 @@ export const search = query({
   },
 });
 
-/** Most people a reply or a forward copies (`cc`), well past any real "reply all". */
+/** Most people a send copies (`cc`), and blind-copies (`bcc`), each: well past any real "reply all". */
 export const MAX_CC = 50;
+/** How far ahead a send may be scheduled (`sendAt`). */
+export const MAX_SEND_AHEAD_MS = 366 * 24 * 3600 * 1000;
 
 const ccArg = v.optional(v.array(v.string()));
-function ccOf(cc: string[] | undefined) {
-  if (cc && cc.length > MAX_CC) throw new Error(`at most ${MAX_CC} people in copy`);
-  return cc?.length ? { cc } : {};
+/** `cc` and `bcc` of a send, each at most MAX_CC (Ember validates the addresses and keeps `bcc` off every header). */
+function copiesOf(a: { cc?: string[]; bcc?: string[] }) {
+  if (a.cc && a.cc.length > MAX_CC) throw new Error(`at most ${MAX_CC} people in copy`);
+  if (a.bcc && a.bcc.length > MAX_CC) throw new Error(`at most ${MAX_CC} people in blind copy`);
+  return { ...(a.cc?.length ? { cc: a.cc } : {}), ...(a.bcc?.length ? { bcc: a.bcc } : {}) };
+}
+
+/** `sendAt` of a send: a time in ms up to MAX_SEND_AHEAD_MS ahead (a past one sends now). */
+function sendAtOf(ctx: { now: number }, sendAt: number | undefined): { sendAt?: number } {
+  if (sendAt === undefined) return {};
+  if (!Number.isFinite(sendAt)) throw new Error("sendAt: a time in ms");
+  if (sendAt > ctx.now + MAX_SEND_AHEAD_MS) throw new Error("sendAt: at most 366 days ahead");
+  return sendAt > ctx.now ? { sendAt } : {};
 }
 
 // What the composer adds to a send (reply, compose, forward), all optional, so text-only callers keep working:
@@ -360,7 +439,15 @@ function ccOf(cc: string[] | undefined) {
 //   signature    false: none; default (true): the member's signature for the mailbox (`inbox:signature`), if any
 //   quoteHeader  reply only: the localized attribution line above the quote ("Em 5 de nov. de 2026, Ana escreveu:")
 //   draftId      a draft of the member's (`inbox:saveDraft`), deleted in the same transaction once the send succeeds
-const composerArgs = { bodyHtml: v.optional(v.string()), signature: v.optional(v.boolean()), draftId: v.optional(v.string()) };
+//   bcc          blind copies (at most MAX_CC): in the envelope only, kept on the thread's message for the mailbox
+//   sendAt       send at this time (ms, at most 366 days ahead) instead of now: `inbox:scheduled`, `cancelScheduled`
+const composerArgs = {
+  bodyHtml: v.optional(v.string()),
+  signature: v.optional(v.boolean()),
+  draftId: v.optional(v.string()),
+  bcc: v.optional(v.array(v.string())),
+  sendAt: v.optional(v.number()),
+};
 
 /** The member's draft a send consumes: null when it is gone already (sent or deleted on another device). */
 function draftOf(ctx: Ctx, m: Member, draftId: string | undefined): string | null {
@@ -379,12 +466,14 @@ export const reply = mutation({
     const { t, m } = threadOf(ctx, a.threadId);
     const draft = draftOf(ctx, m, a.draftId);
     const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
-    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml);
+    const at = sendAtOf(ctx, a.sendAt);
+    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
     const sent = ctx.runMutation(email.reply, {
       threadId: a.threadId,
       text: w.text,
       author: displayName(m),
-      ...ccOf(a.cc),
+      ...copiesOf(a),
+      ...at,
       ...extras,
       ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
       ...(w.attachments ? { attachments: w.attachments } : {}),
@@ -410,11 +499,13 @@ export const forward = mutation({
     // Not the inline images of its HTML (signature logos): nothing in the forward shows them.
     const original = msg.attachments.filter((f) => !(f.inline && f.contentId)).map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
     const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
-    const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml);
+    const at = sendAtOf(ctx, a.sendAt);
+    const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml, at.sendAt);
     const sent = ctx.runMutation(email.compose, {
       mailbox: t.thread.mailbox,
       to: a.to,
-      ...ccOf(a.cc),
+      ...copiesOf(a),
+      ...at,
       subject: a.subject,
       text: w.text,
       author: displayName(m),
@@ -450,8 +541,8 @@ export const markRead = mutation({
 export const setStatus = mutation({
   args: { threadId: v.string(), status: v.union(v.literal("open"), v.literal("waiting"), v.literal("closed"), v.literal("spam")) },
   handler: (ctx, a) => {
-    threadOf(ctx, a.threadId);
-    return ctx.runMutation(email.setStatus, a);
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.setStatus, { ...a, author: m.userId });
   },
 });
 
@@ -483,27 +574,29 @@ export const markUnread = mutation({
 export const assign = mutation({
   args: { threadId: v.string(), userId: v.union(v.string(), v.null()) },
   handler: (ctx, a) => {
-    const { t } = threadOf(ctx, a.threadId);
+    const { t, m } = threadOf(ctx, a.threadId);
     if (ownerOf(ctx.db, t.thread.mailbox) !== null) throw new Error("a personal mailbox has no assignment");
-    if (a.userId === null) return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: null });
+    if (a.userId === null) return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: null, author: m.userId });
     const target = ctx.db.query("members").withIndex("by_user", (q) => q.eq("userId", a.userId!)).first() as Member | null;
     if (!target || !canSee(ctx.db, target, t.thread.mailbox)) throw new Error(`${a.userId} cannot see mailbox ${t.thread.mailbox}`);
-    return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: target.userId, assigneeName: displayName(target) });
+    return ctx.runMutation(email.assign, { threadId: a.threadId, assignee: target.userId, assigneeName: displayName(target), author: m.userId });
   },
 });
 
 /** A new conversation from a mailbox (answers join it through the thread token). */
 export const compose = mutation({
-  args: { mailbox: v.string(), to: v.array(v.string()), cc: v.optional(v.array(v.string())), subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
+  args: { mailbox: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const m = allowed(ctx, a.mailbox);
     const draft = draftOf(ctx, m, a.draftId);
     const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
-    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml);
+    const at = sendAtOf(ctx, a.sendAt);
+    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
     const sent = ctx.runMutation(email.compose, {
       mailbox: a.mailbox,
       to: a.to,
-      ...(a.cc ? { cc: a.cc } : {}),
+      ...copiesOf(a),
+      ...at,
       subject: a.subject,
       text: w.text,
       author: displayName(m),
@@ -751,7 +844,11 @@ export const saveDraft = mutation({
         if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
       } else if (a.messageId !== undefined) throw new Error(`a ${a.kind} draft has no messageId`);
     }
-    const attachments = (a.attachments ?? []) as DraftAttachment[];
+    // Each file's size is the stored one (the client's, if sent, is ignored); unknown while still uploading.
+    const attachments: DraftAttachment[] = (a.attachments ?? []).map(({ file, filename, contentType }) => {
+      const meta = ctx.storage.getMetadata(file) as { size: number | null } | null;
+      return { file, filename, contentType, ...(meta?.size ? { size: meta.size } : {}) };
+    });
     const doc = {
       userId: m.userId,
       kind: a.kind,
@@ -878,5 +975,197 @@ export const deleteSavedReply = mutation({
   handler: (ctx, a) => {
     ctx.db.delete(savedReplyOf(ctx, a.id)._id as any);
     return true;
+  },
+});
+
+// ---------------------------------------------------------------------------------------------- conversation state
+// Tags, the activity timeline, snooze, scheduled sends and presence: the email component's (Ember 0.7), behind the same
+// rule as everything else here (a member sees only their mailboxes; a personal one only its owner). Every change is
+// recorded on the thread's timeline with the member's user id as its author, so `activity` names who did it.
+
+/**
+ * The tags of `mailbox` (one the member sees), or with no `mailbox` those of every mailbox they see; each in its
+ * mailbox's order. Complete documents (`_id`, `mailbox`, `name`, `color`, `order`, ...), for offline replicas.
+ */
+export const tags = query({
+  args: { mailbox: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    if (a.mailbox !== undefined) {
+      allowed(ctx, a.mailbox);
+      return tagsOf(ctx, [a.mailbox]);
+    }
+    return tagsOf(ctx, memberMailboxes(ctx, member(ctx)));
+  },
+});
+
+/**
+ * A new tag of `mailbox` (any member who sees it): `name` 1..40 characters, unique in the mailbox ignoring case;
+ * `color` one of TAG_COLORS (`@freecorps/ember-email/schema`, gray by default); `order` last by default. At most 100
+ * per mailbox. Returns the tag's id.
+ */
+export const createTag = mutation({
+  args: { mailbox: v.string(), name: v.string(), color: v.optional(v.string()), order: v.optional(v.number()) },
+  handler: (ctx, a) => {
+    allowed(ctx, a.mailbox);
+    return ctx.runMutation(email.createTag, a) as string;
+  },
+});
+
+/** Renames, recolors or moves a tag of a mailbox the member sees (absent fields are kept). Returns its id. */
+export const updateTag = mutation({
+  args: { tagId: v.string(), name: v.optional(v.string()), color: v.optional(v.string()), order: v.optional(v.number()) },
+  handler: (ctx, a) => {
+    tagOf(ctx, member(ctx), a.tagId);
+    return ctx.runMutation(email.updateTag, a) as string;
+  },
+});
+
+/** Deletes a tag of a mailbox the member sees, and takes it off every thread. Returns `{ deleted: true }`. */
+export const deleteTag = mutation({
+  args: { tagId: v.string() },
+  handler: (ctx, a) => {
+    tagOf(ctx, member(ctx), a.tagId);
+    return ctx.runMutation(email.deleteTag, a) as { deleted: boolean };
+  },
+});
+
+/** Sets a thread's tags (ids of its mailbox's tags, at most 20). Returns the tag ids as written. */
+export const setTags = mutation({
+  args: { threadId: v.string(), tags: v.array(v.string()) },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.setTags, { ...a, author: m.userId }) as string[];
+  },
+});
+
+/** Adds a tag (of the thread's mailbox) to a thread. Returns the thread's tag ids. */
+export const addTag = mutation({
+  args: { threadId: v.string(), tag: v.string() },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.addTag, { ...a, author: m.userId }) as string[];
+  },
+});
+
+/** Takes a tag off a thread. Returns the thread's tag ids. */
+export const removeTag = mutation({
+  args: { threadId: v.string(), tag: v.string() },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.removeTag, { ...a, author: m.userId }) as string[];
+  },
+});
+
+/** Who did something on the timeline: a member (`userId`), a name with no member (`userId: null`), or null (the system). */
+export type Actor = { userId: string | null; name: string } | null;
+
+/**
+ * Resolves timeline authors to members. Changes made here carry the member's user id; a reply's or a new
+ * conversation's carry the name it was sent with (the message's `author`), matched to a member when exactly one has it.
+ */
+function actorsOf(ctx: Ctx) {
+  const all = ctx.db.query("members").collect() as Member[];
+  const byId = new Map(all.map((x) => [x.userId, x]));
+  const byName = new Map<string, Member | null>();
+  for (const x of all) byName.set(displayName(x), byName.has(displayName(x)) ? null : x);
+  return (author: string | undefined): Actor => {
+    if (!author) return null;
+    const x = byId.get(author) ?? byName.get(author);
+    return x ? { userId: x.userId, name: displayName(x) } : { userId: null, name: author };
+  };
+}
+
+/**
+ * A thread's activity timeline, oldest first (the latest `limit`, default 200, at most 1000): the component's entries
+ * `{ _id, kind, at, author?, data }` plus `actor` (who, resolved to the member). Kinds: `status` `{ from, to,
+ * messageId? }`, `assigned` `{ from, fromName?, to, toName? }`, `tag_added` / `tag_removed` `{ tag, name, color }`,
+ * `delivery` `{ emailId, status, previous, messageId?, recipient? }`, `snoozed` `{ until, previous? }`, `unsnoozed`
+ * `{ reason: "time" | "inbound" | "manual", until }`, `scheduled` `{ emailId, messageId, sendAt }`,
+ * `scheduled_canceled` `{ emailId, messageId? }`. Messages and notes are not in it: clients merge them by time.
+ */
+export const activity = query({
+  args: { threadId: v.string(), limit: v.optional(v.number()) },
+  handler: (ctx, a) => {
+    threadOf(ctx, a.threadId);
+    const actor = actorsOf(ctx);
+    const rows = ctx.runQuery(email.activity, a) as Array<{ author?: string } & Record<string, unknown>>;
+    return rows.map((r) => ({ ...r, actor: actor(r.author) }));
+  },
+});
+
+/**
+ * Snoozes a thread until `until` (ms, in the future, at most 366 days ahead), or wakes it now with `null`. Snoozed, it
+ * leaves every view but `snoozed` (and their counts); at `until` it comes back on top, unread and open; an answer from
+ * the contact wakes it at once. Returns `until`.
+ */
+export const snooze = mutation({
+  args: { threadId: v.string(), until: v.union(v.number(), v.null()) },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return ctx.runMutation(email.snooze, { ...a, author: m.userId }) as number | null;
+  },
+});
+
+/** Wakes a snoozed thread now (`snooze` with `until: null`); nothing when it is not snoozed. */
+export const unsnooze = mutation({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    ctx.runMutation(email.snooze, { threadId: a.threadId, until: null, author: m.userId });
+    return null;
+  },
+});
+
+/**
+ * A thread's sends still waiting for their `sendAt` (`reply` / `compose` / `forward` with `sendAt`), soonest first:
+ * `{ emailId, sendAt, subject, to, cc?, messageId?, author?, snippet? }`. The thread's message is there already, with
+ * `scheduledFor`.
+ */
+export const scheduled = query({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    threadOf(ctx, a.threadId);
+    return ctx.runQuery(email.scheduled, a) as Array<Record<string, unknown>>;
+  },
+});
+
+/**
+ * Cancels a scheduled send (or one still queued and not tried) of a thread the member sees, and removes its message
+ * from the thread: `{ ok: true, status: "canceled", messageId?, threadDeleted? }` (a new conversation left with no
+ * message is deleted, with every draft on it). An email already on its way: `{ ok: false, status }`.
+ */
+export const cancelScheduled = mutation({
+  args: { emailId: v.string() },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    const e = ctx.runQuery(email.get, { id: a.emailId }) as { threadId?: string } | null;
+    const t = e?.threadId ? ctx.runQuery(email.thread, { threadId: e.threadId }) : null;
+    // Only a thread's mail, of a mailbox the member sees (an API key's email, or another mailbox's, is not theirs).
+    if (!t || !canSee(ctx.db, m, t.thread.mailbox)) throw new Error("email not found");
+    const r = ctx.runMutation(email.cancelScheduled, { emailId: a.emailId, author: m.userId }) as { ok: boolean; status: string; messageId?: string; threadDeleted?: boolean };
+    if (r.threadDeleted) for (const d of ctx.db.query("drafts").withIndex("by_thread", (q) => q.eq("threadId", e!.threadId!)).collect()) ctx.db.delete(d._id);
+    return r;
+  },
+});
+
+/**
+ * The member's presence on a thread ("Bia está respondendo"): a heartbeat, about every 10 s, with `viewing` or
+ * `replying`; `null` leaves. It goes 30 s after the last heartbeat. Returns null.
+ */
+export const setPresence = mutation({
+  args: { threadId: v.string(), state: v.union(v.literal("viewing"), v.literal("replying"), v.null()) },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    ctx.runMutation(email.setPresence, { threadId: a.threadId, userId: m.userId, name: displayName(m), state: a.state });
+    return null;
+  },
+});
+
+/** Who else is on a thread now (never the member themselves): `{ userId, name, state, since }`, oldest first. */
+export const presence = query({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    const { m } = threadOf(ctx, a.threadId);
+    return (ctx.runQuery(email.presence, a) as Array<{ userId: string; name: string; state: "viewing" | "replying"; since: number }>).filter((p) => p.userId !== m.userId);
   },
 });

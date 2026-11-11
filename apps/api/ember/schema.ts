@@ -89,7 +89,8 @@ export default defineSchema({
       subject: v.string(),
       text: v.string(),
       bodyHtml: v.optional(v.string()),
-      attachments: v.array(v.object({ file: v.file(), filename: v.string(), contentType: v.string() })),
+      /** `size`: the file's bytes when saved, from storage (absent while it was still uploading). */
+      attachments: v.array(v.object({ file: v.file(), filename: v.string(), contentType: v.string(), size: v.optional(v.number()) })),
       updatedAt: v.number(),
     })
       .index("by_user", ["userId", "updatedAt"])

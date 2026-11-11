@@ -120,6 +120,11 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
      de `contato@` entrou em `geral@`. Inventário antes e depois: só as mudanças acima.
   - Para voltar ao Openship: recoloque o MX `10 mail.freecorps.com.br`, o SPF antigo e o A/AAAA de
     `mail.freecorps.com.br` (o IP está no snapshot `antes-mx`), e tire o custom domain do `ember-mail-web`.
+- **Ember 0.7 (#45):** no primeiro deploy, as conversas de antes do 0.7 ainda não têm `hasUnread`. Elas ficam fora da
+  visão "Não lidas" e das contagens de conversas não lidas até a primeira rodada do cron `lib:maintain` do componente
+  de email (até 10 min depois do deploy). As outras listas e contagens já saem certas. Desde então,
+  `GET /inbox/threads` deixa de fora as conversas adiadas (`snoozed=true` lista só elas), e as contagens de
+  `GET /inbox/mailboxes` também (`snoozed` conta as adiadas).
 - Logs: `bunx ember logs --env prod` (em `apps/api`).
 
 ## Domínios

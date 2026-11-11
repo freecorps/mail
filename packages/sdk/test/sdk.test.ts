@@ -39,6 +39,7 @@ describe("EmberMail", () => {
     await mail.batch.send([{ from: "a@acme.test", to: "b@x.test", subject: "s", text: "t" }]);
     await mail.domains.verify("d 1", { enable_routing: true });
     await mail.inbox.threads({ mailbox: "support", status: "open", limit: 10 });
+    await mail.inbox.threads({ mailbox: "support", snoozed: true });
     await mail.inbox.reply("t1", "thanks");
     await mail.apiKeys.remove("k1");
     expect(calls[0]!.headers.get("idempotency-key")).toMatch(/^[0-9a-f-]{32,36}$/); // made up for the batch
@@ -46,6 +47,7 @@ describe("EmberMail", () => {
       "POST /emails/batch",
       "POST /domains/d%201/verify",
       "GET /inbox/threads?mailbox=support&status=open&limit=10",
+      "GET /inbox/threads?mailbox=support&snoozed=true",
       "POST /inbox/threads/t1/reply",
       "DELETE /api-keys/k1",
     ]);

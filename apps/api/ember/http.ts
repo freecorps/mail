@@ -522,9 +522,11 @@ http.route({
   handler: route(async (ctx, _r, p) => {
     need(p, "inbox");
     const boxes = (await ctx.runQuery(email.mailboxes, {})) as any[];
-    const unread = await ctx.runQuery(email.unread, {});
     const personal = await personalMailboxes(ctx);
-    // A personal mailbox is listed (with its owner) but its counts are its owner's business.
+    // A personal mailbox is listed (with its owner) but its counts are its owner's business. The others' counts match
+    // GET /inbox/threads: `threads` and `unread` (messages) without the snoozed threads, `snoozed` those apart.
+    const shared = boxes.map((b) => b.name as string).filter((n) => !Object.hasOwn(personal, n));
+    const counts = (await ctx.runQuery("inbox:mailboxCounts" as any, { mailboxes: shared })) as Record<string, { threads: number; unread: number; snoozed: number }>;
     return json({
       data: boxes.map((b) => ({
         name: b.name,
@@ -533,7 +535,7 @@ http.route({
         owner: personal[b.name] ?? null,
         catch_all: !!b.catchAll,
         retention: b.retention ? { closed_days: b.retention.closedDays ?? null, spam_days: b.retention.spamDays ?? null } : null,
-        ...(Object.hasOwn(personal, b.name) ? {} : (unread as any)[b.name]),
+        ...(counts[b.name] ?? {}),
       })),
     });
   }),
@@ -581,7 +583,15 @@ http.route({
     if (!mailbox) throw new ApiError(422, "missing_required_field", "mailbox is required");
     notPersonal(await personalMailboxes(ctx), mailbox);
     const status = url.searchParams.get("status");
-    const r = await ctx.runQuery(email.threads, { mailbox, ...(status ? { status } : {}), paginationOpts: { numItems: pageLimit(url, 30), cursor: url.searchParams.get("cursor") } });
+    // Snoozed threads are out of the default list (Ember 0.7); `snoozed=true` lists only them, soonest to wake first.
+    const snoozed = url.searchParams.get("snoozed");
+    if (snoozed !== null && snoozed !== "true" && snoozed !== "false") throw new ApiError(422, "validation_error", "snoozed must be true or false");
+    const r = await ctx.runQuery(email.threads, {
+      mailbox,
+      ...(status ? { status } : {}),
+      ...(snoozed === "true" ? { snoozed: true } : {}),
+      paginationOpts: { numItems: pageLimit(url, 30), cursor: url.searchParams.get("cursor") },
+    });
     return json(r);
   }),
 });
