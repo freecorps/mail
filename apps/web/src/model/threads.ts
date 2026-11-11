@@ -90,6 +90,8 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       assigneeName: h.assigneeName ?? null,
       // Its tags too (Ember 0.7.2; none from an older server), so the tag menu on a hit toggles the right way.
       tags: h.tags ?? [],
+      // A hit carries its wake time only while snoozed: Desfazer and "Adiada até …" read it like a list row's.
+      snoozedUntil: h.snoozedUntil ?? null,
       pending: false,
     });
   }

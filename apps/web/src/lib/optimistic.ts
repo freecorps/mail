@@ -164,6 +164,7 @@ function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Threa
         assignee: h.assignee,
         assigneeName: h.assigneeName,
         ...(h.tags?.length ? { tags: h.tags } : {}),
+        ...(h.snoozedUntil ? { snoozed: true, snoozedUntil: h.snoozedUntil } : {}),
       } as unknown as Thread);
       return {
         ...h,
@@ -173,6 +174,8 @@ function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Threa
         assigneeName: t.assigneeName ?? undefined,
         // Tag chips and the tag menu on a search result follow add/remove/set at once, as list rows do.
         tags: t.tags ?? [],
+        // Snoozed or woken (snooze, unsnooze, an undo): the hit's wake time follows.
+        snoozedUntil: t.snoozed && t.snoozedUntil ? t.snoozedUntil : undefined,
       };
     });
     store.setQuery<any>("inbox:search", args, next);
