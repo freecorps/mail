@@ -224,10 +224,12 @@ export function Composer({
 
   if (p.disabled) return <p className="border-t px-6 py-4 text-sm text-muted-foreground">{t("thread.spamNoReply")}</p>;
 
-  const canSend = !body.empty && !uploads.busy;
+  // A note takes no files: uploads still running from the reply never hold it back.
+  const waitingFiles = mode === "reply" && uploads.busy;
+  const canSend = !body.empty && !waitingFiles;
   const send = () => {
     if (body.empty || sending.current) return;
-    if (uploads.busy) return void toast(t("composer.waitUploads"));
+    if (waitingFiles) return void toast(t("composer.waitUploads"));
     sending.current = true;
     const m = mode;
     const { html, text } = body;
@@ -269,6 +271,7 @@ export function Composer({
       if (!mounted.current) return;
       sending.current = false;
       setMode(m);
+      setAll(!!cc);
       setSignature(sig);
       uploads.restore(files);
       editor.current?.setContent(html);
@@ -356,14 +359,17 @@ export function Composer({
             {t("composer.drop")}
           </div>
         )}
-        <AttachmentTiles
-          items={uploads.items}
-          onRemove={(id) => {
-            armed.current = true;
-            uploads.remove(id);
-          }}
-          className="px-3 pb-2"
-        />
+        {/* A note takes no files: the reply's tiles hide (they stay for the reply, if the mode switches back). */}
+        {!isNote && (
+          <AttachmentTiles
+            items={uploads.items}
+            onRemove={(id) => {
+              armed.current = true;
+              uploads.remove(id);
+            }}
+            className="px-3 pb-2"
+          />
+        )}
         {!isNote && <SignatureLine mailbox={p.mailbox} on={signature} onToggle={setSignature} className="pb-2" />}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">
           <div className="flex items-center gap-1">
