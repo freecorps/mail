@@ -943,6 +943,17 @@ describe("mail app", () => {
     expect((await q("inbox:signature", { mailbox: "cs" }, "caio")).value).toMatchObject({ text: "Caio", from: "cs" });
   });
 
+  it("drafts: the cap counts only drafts the member can still reach", async () => {
+    const mu = (fn: string, args: unknown) => call("mutation", fn, args, "user:dora");
+    expect((await admin.inbox.addMember({ user_id: "dora", mailboxes: ["cs"] })).error).toBeNull();
+    for (let i = 0; i < 200; i++) expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", text: `d${i}` })).error ?? null).toBeNull();
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", text: "one more" })).error.message).toMatch(/at most 200 drafts/);
+    // Dora moves to privacy: her cs drafts are out of reach, so they make room instead of blocking her.
+    expect((await admin.inbox.addMember({ user_id: "dora", mailboxes: ["privacy"] })).error).toBeNull();
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "privacy", text: "novo" })).error ?? null).toBeNull();
+    expect((await call("query", "inbox:drafts", {}, "user:dora")).value).toHaveLength(1);
+  });
+
   it("drafts: private to the member, one per thread and kind, kept with their files, removed on send and after 30 days", async () => {
     const t = await inboundTo("cs", "Rascunhos", "draft-1@user.test");
     const q = (fn: string, args: unknown, who: string) => call("query", fn, args, `user:${who}`);

@@ -786,8 +786,14 @@ export const saveDraft = mutation({
       ctx.db.replace(prev._id as any, doc);
       return { id: prev._id, updatedAt: ctx.now };
     }
-    if (ctx.db.query("drafts").withIndex("by_user", (q) => q.eq("userId", m.userId)).take(L.draftsPerMember).length >= L.draftsPerMember) {
-      throw new Error(`at most ${L.draftsPerMember} drafts: send or delete some`);
+    const mine = ctx.db.query("drafts").withIndex("by_user", (q) => q.eq("userId", m.userId)).take(L.draftsPerMember) as DraftDoc[];
+    if (mine.length >= L.draftsPerMember) {
+      // Drafts in mailboxes the member no longer sees are unreachable (`inbox:drafts` hides them): they give their
+      // place back instead of counting against the cap.
+      const personal = owners(ctx.db);
+      const hidden = mine.filter((d) => !canSeeWith(personal, m, d.mailbox));
+      for (const d of hidden) ctx.db.delete(d._id as any);
+      if (mine.length - hidden.length >= L.draftsPerMember) throw new Error(`at most ${L.draftsPerMember} drafts: send or delete some`);
     }
     return { id: ctx.db.insert("drafts", doc) as string, updatedAt: ctx.now };
   },
