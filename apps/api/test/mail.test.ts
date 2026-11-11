@@ -435,6 +435,17 @@ describe("mail app", () => {
     expect(wolf.badge).toBe(await badge("wolf"));
     expect(wolf.data.badge).toBe(wolf.badge);
     expect(before.find((p) => p.userId === "heitor")!.message.badge).toBe(await badge("heitor"));
+    // A snoozed thread's unread messages are out of the push's badge, as they are out of the app's: the icon does not
+    // jump down when the app opens.
+    const other = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.find((x: any) => x.number === 2);
+    expect((await call("mutation", "inbox:markUnread", { threadId: other._id }, "user:wolf")).error ?? null).toBeNull();
+    const awake = (await pushes()).find((p) => p.userId === "wolf")!.message.badge;
+    expect(awake).toBe(await badge("wolf"));
+    expect((await call("mutation", "inbox:snooze", { threadId: other._id, until: Date.now() + 3600_000 }, "user:wolf")).error ?? null).toBeNull();
+    const asleep = (await pushes()).find((p) => p.userId === "wolf")!.message.badge;
+    expect(asleep).toBe(await badge("wolf"));
+    expect(asleep).toBeLessThan(awake);
+    expect((await call("mutation", "inbox:unsnooze", { threadId: other._id }, "user:wolf")).error ?? null).toBeNull();
 
     // Support off for Wolf: no push for him; preview off for Heitor: no subject or snippet, the rest the same.
     expect((await call("mutation", "inbox:setNotifications", { mailbox: "support", enabled: false }, "user:wolf")).value).toEqual({ muted: ["support"], preview: true });

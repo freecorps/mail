@@ -4,12 +4,13 @@
 // before that, the next launch handles the same response again (`getLastNotificationResponse`, or the Android task),
 // which the reply's requestId (derived from the response) makes safe: the server sends it once.
 import type { Locale } from "../i18n";
-import { actionCalls, actionOf, mailDataOf, requestIdOf, responseKey, type ActionCall, type MailPushData, type PushAction } from "./mail-push";
+import { actionCalls, actionOf, mailDataOf, messageOf, requestIdOf, responseKey, type ActionCall, type MailPushData, type PushAction } from "./mail-push";
 
 export interface ResponseLike {
   actionIdentifier: string;
   userText?: string | null;
-  notification: { date: number; request: { identifier: string; content: { data?: unknown } } };
+  /** `date`: null when the payload had none (the Android task; see `responseOf`). */
+  notification: { date: number | null; request: { identifier: string; content: { data?: unknown } } };
 }
 
 export type Target = { threadId: string; mailbox?: string };
@@ -22,7 +23,8 @@ export interface ResponseEffects {
   markHandled(key: string): Promise<void>;
   clearLast(): void;
   dismiss(threadId: string): Promise<void>;
-  route(target: Target): void;
+  /** Opens the conversation, now or once the inbox mounts; `onOpened` runs when it did. */
+  route(target: Target, onOpened: () => void): void;
   targetOf(data: unknown): Target | null;
   deliver(kind: PushAction, calls: ActionCall[]): Promise<Delivery>;
   locale(): Promise<Locale>;
@@ -31,22 +33,34 @@ export interface ResponseEffects {
 
 /** Responses being handled in this process (the listener and `getLastNotificationResponse` can both bring one). */
 const inFlight = new Set<string>();
+/** Taps already routed in this process (opened, or waiting for the inbox): a second copy does not open it again. */
+const routed = new Set<string>();
 
 export async function processResponse(r: ResponseLike, fx: ResponseEffects): Promise<void> {
   const kind = actionOf(r.actionIdentifier);
   if (!kind) return;
   const raw = r.notification.request.content.data;
-  const key = responseKey({ identifier: r.notification.request.identifier, date: r.notification.date, actionIdentifier: r.actionIdentifier, userText: r.userText ?? null });
+  const key = responseKey({
+    identifier: r.notification.request.identifier,
+    date: r.notification.date,
+    message: messageOf(raw),
+    actionIdentifier: r.actionIdentifier,
+    userText: r.userText ?? null,
+  });
   if (inFlight.has(key)) return;
   inFlight.add(key);
   try {
     if (await fx.isHandled(key)) return;
     if (kind === "open") {
       const target = fx.targetOf(raw);
-      if (!target) return;
-      await fx.markHandled(key);
-      fx.clearLast();
-      fx.route(target);
+      if (!target || routed.has(key)) return;
+      routed.add(key);
+      // Done once the conversation opened (maybe later, when the inbox mounts): until then nothing is marked, so a
+      // relaunch before it opened opens it again.
+      fx.route(target, () => {
+        void fx.markHandled(key).catch(() => {});
+        fx.clearLast();
+      });
       return;
     }
     const data = mailDataOf(raw);

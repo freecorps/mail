@@ -3,6 +3,7 @@ import { anyComponents as components, internalMutationGeneric as internalMutatio
 import { PushNotifications } from "@freecorps/ember-push";
 import { eventTypeOf } from "../src/webhooks.ts";
 import { owners, type Member } from "./access.ts";
+import { mailboxCountsOf } from "./inbox.ts";
 import { inboundPushes, prefsOf, type InboundEvent } from "./notifications.ts";
 import { emailEventData, emit } from "./webhooks.ts";
 
@@ -19,7 +20,9 @@ export function pushesFor(ctx: HookCtx, e: InboundEvent) {
   const personal = owners(ctx.db);
   const members = ctx.db.query("members").collect() as Member[];
   const boxes = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name);
-  const unread = ctx.runQuery(email.unread, { mailboxes: boxes }) as Record<string, { unread: number }>;
+  // The same counts as `inbox:mailboxes` (snoozed threads left out), so the badge a push sets is the one the app
+  // shows once it opens.
+  const unread = mailboxCountsOf(ctx, boxes);
   return inboundPushes({ e, members, personal, prefs: (u) => prefsOf(ctx.db, u), boxes, unread, at: ctx.now ?? Date.now() });
 }
 

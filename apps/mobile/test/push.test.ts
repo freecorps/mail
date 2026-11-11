@@ -11,6 +11,7 @@ import {
   DEFAULT_ACTION,
   mailboxChannels,
   mailDataOf,
+  messageOf,
   remember,
   requestIdOf,
   responseKey,
@@ -177,19 +178,24 @@ describe("response order: handled only once the action is sent or queued on disk
   function effects(deliver: (calls: unknown[]) => Promise<{ durable: boolean; settled: Promise<void> }>) {
     const log: string[] = [];
     const handled = new Set<string>();
+    const mounted = { now: true, waiting: [] as Array<() => void> };
     const sent: unknown[][] = [];
     const fx = {
       isHandled: async (k: string) => handled.has(k),
       markHandled: async (k: string) => void (handled.add(k), log.push("markHandled")),
       clearLast: () => void log.push("clearLast"),
       dismiss: async () => void log.push("dismiss"),
-      route: () => void log.push("route"),
+      route: (_t: unknown, onOpened: () => void) => {
+        log.push("route");
+        if (mounted.now) onOpened();
+        else mounted.waiting.push(onOpened);
+      },
       targetOf: () => ({ threadId: "t1" }),
       deliver: async (_kind: unknown, calls: unknown[]) => (log.push("deliver"), sent.push(calls), deliver(calls)),
       locale: async () => "pt-BR" as const,
       clock24: () => true,
     };
-    return { fx, log, sent, handled };
+    return { fx, log, sent, handled, mounted };
   }
 
   it("sent: delivered first, then marked, cleared and dismissed", async () => {
@@ -236,7 +242,63 @@ describe("response order: handled only once the action is sent or queued on disk
     expect(log).toEqual(["markHandled", "clearLast", "dismiss"]);
     const tap = effects(async () => ({ durable: true, settled: Promise.resolve() }));
     await processResponse({ ...response(), actionIdentifier: DEFAULT_ACTION }, tap.fx);
-    expect(tap.log).toEqual(["markHandled", "clearLast", "route"]);
+    await Promise.resolve();
+    expect(tap.log).toEqual(["route", "markHandled", "clearLast"]);
+  });
+
+  it("a tap before the inbox mounts is marked only once the conversation opened; a relaunch before that opens it again", async () => {
+    const tap = { ...response(), actionIdentifier: DEFAULT_ACTION, notification: { date: 1800, request: { identifier: "t9", content: { data } } } };
+    const cold = effects(async () => ({ durable: true, settled: Promise.resolve() }));
+    cold.mounted.now = false;
+    await processResponse(tap, cold.fx);
+    expect(cold.log).toEqual(["route"]);
+    expect(cold.handled.size).toBe(0);
+    // The same tap again (the listener and the last response) is not routed twice.
+    await processResponse(tap, cold.fx);
+    expect(cold.log).toEqual(["route"]);
+    // The tabs mount: the conversation opens, then the tap is done.
+    cold.mounted.waiting.forEach((f) => f());
+    await Promise.resolve();
+    expect(cold.log).toEqual(["route", "markHandled", "clearLast"]);
+    expect(cold.handled.size).toBe(1);
+  });
+
+  it("the pending route opens once the inbox mounts, the newest tap winning; onOpened runs only then", async () => {
+    const { createPendingRoute } = await import("../src/push/pending-route");
+    let mounted = false;
+    const opened: string[] = [];
+    const r = createPendingRoute((t) => (mounted ? (opened.push(t.threadId), true) : false));
+    const done: string[] = [];
+    r.route({ threadId: "a" }, () => done.push("a"));
+    r.route({ threadId: "b" }, () => done.push("b"));
+    r.route({ threadId: "b" }, () => done.push("b2"));
+    r.flush();
+    expect(opened).toEqual([]);
+    mounted = true;
+    r.flush();
+    expect(opened).toEqual(["b"]);
+    expect(done).toEqual(["b", "b2"]);
+    r.flush();
+    expect(opened).toEqual(["b"]);
+    r.route({ threadId: "c" }, () => done.push("c"));
+    expect(done).toEqual(["b", "b2", "c"]);
+  });
+
+  it("an action on a new message of the same conversation is not taken for the earlier one (Android: same identifier, no date)", async () => {
+    const { fx, sent } = effects(async () => ({ durable: true, settled: Promise.resolve() }));
+    const archive = (messageId: string) => ({
+      actionIdentifier: "archive",
+      notification: { date: 0, request: { identifier: "t1", content: { data: { ...data, messageId } } } },
+    });
+    await processResponse(archive("m1"), fx);
+    await processResponse(archive("m1"), fx);
+    await processResponse(archive("m2"), fx);
+    expect(sent).toHaveLength(2);
+    expect(responseKey({ identifier: "t1", date: 0, message: messageOf({ ...data, messageId: "m1" }), actionIdentifier: "read" })).not.toBe(
+      responseKey({ identifier: "t1", date: 0, message: messageOf({ ...data, messageId: "m2" }), actionIdentifier: "read" }),
+    );
+    // A push without a messageId falls back to its time.
+    expect(messageOf({ threadId: "t1", at: 5 })).toBe("5");
   });
 });
 
@@ -248,6 +310,14 @@ describe("Android task payload", () => {
     expect(responseOf({ notificationResponse: { ...flat, userText: "Oi" } })).toMatchObject({ actionIdentifier: "archive", userText: "Oi" });
     expect(responseOf({ actionIdentifier: "archive" })).toBeNull();
     expect(responseOf({ actionIdentifier: "archive", notification: { request: {} } })).toBeNull();
+    // No date: the push's own time, never a fixed 0 (two messages of one conversation keep different keys).
+    const undated = (at?: number) => ({ actionIdentifier: "read", notification: { request: { identifier: "t1", content: { data: { threadId: "t1", ...(at ? { at } : {}) } } } } });
+    expect(responseOf(undated(111))!.notification.date).toBe(111);
+    expect(responseOf(undated())!.notification.date).toBeNull();
+    expect(responseOf({ ...undated(111), notification: { ...undated(111).notification, date: "1700" } })!.notification.date).toBe(1700);
+    const keyOf = (r: ReturnType<typeof responseOf>) =>
+      responseKey({ identifier: r!.notification.request.identifier, date: r!.notification.date, message: messageOf(r!.notification.request.content.data), actionIdentifier: r!.actionIdentifier });
+    expect(keyOf(responseOf(undated(111)))).not.toBe(keyOf(responseOf(undated(222))));
     expect(responseOf(null)).toBeNull();
     expect(responseOf("x")).toBeNull();
   });

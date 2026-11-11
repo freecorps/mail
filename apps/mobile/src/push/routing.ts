@@ -1,14 +1,9 @@
-// Opening a conversation from a notification tap. A tap that arrives before the inbox is mounted (cold start, still
-// signed in or loading) waits here until the tabs mount (`flushNotificationTarget`).
+// Opening a conversation from a notification tap (pending-route.ts): at once when the inbox is mounted, else when the
+// tabs mount (`flushNotificationTarget`).
 import { openThread } from "../navigation";
-import type { NotificationTarget } from "./transport";
+import { createPendingRoute } from "./pending-route";
 
-let pendingTarget: NotificationTarget | null = null;
+const router = createPendingRoute((t) => openThread(t.threadId, t.mailbox));
 
-export function routeToThread(target: NotificationTarget): void {
-  if (!openThread(target.threadId, target.mailbox)) pendingTarget = target;
-}
-
-export function flushNotificationTarget(): void {
-  if (pendingTarget && openThread(pendingTarget.threadId, pendingTarget.mailbox)) pendingTarget = null;
-}
+export const routeToThread = router.route;
+export const flushNotificationTarget = router.flush;

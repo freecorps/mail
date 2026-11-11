@@ -72,9 +72,20 @@ export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: st
   ];
 }
 
-/** One response, once: the same tap can arrive by the listener, `getLastNotificationResponse` and the Android task. */
-export function responseKey(r: { identifier: string; date: number; actionIdentifier: string; userText?: string | null }): string {
-  return `${r.identifier}|${r.date}|${r.actionIdentifier}|${r.userText ?? ""}`;
+/**
+ * One response, once: the same tap can arrive by the listener, `getLastNotificationResponse` and the Android task.
+ * `message` tells one notification of a conversation from the next: the Android task shows a conversation under one
+ * identifier (its thread id), and its responses may come without a date, so identifier and date alone would make an
+ * action on a new message look handled already.
+ */
+export function responseKey(r: { identifier: string; date: number | null; message?: string; actionIdentifier: string; userText?: string | null }): string {
+  return `${r.identifier}|${r.date ?? ""}|${r.message ?? ""}|${r.actionIdentifier}|${r.userText ?? ""}`;
+}
+
+/** Which message a notification is about: its `messageId`, else the push's time (older pushes), else nothing. */
+export function messageOf(data: unknown): string {
+  const d = mailDataOf(data);
+  return d?.messageId ?? (d?.at !== undefined ? String(d.at) : "");
 }
 
 /**
@@ -151,11 +162,23 @@ export function androidNotification(
 }
 
 /**
+ * A response's date, never a made-up one: the notification's (a number, or a numeric string as some payloads carry
+ * it), else the push's own time (`data.at`, set by the server per message), else null. A fixed fallback would give
+ * every notification of a conversation (one identifier on Android) the same key, and an action on a new message would
+ * look handled already.
+ */
+function dateOf(date: unknown, data: unknown): number | null {
+  if (typeof date === "number" && Number.isFinite(date) && date > 0) return date;
+  if (typeof date === "string" && date.trim() && Number.isFinite(Number(date)) && Number(date) > 0) return Number(date);
+  return mailDataOf(data)?.at ?? null;
+}
+
+/**
  * A notification response from the Android push task's payload, checked: the task's payload is untyped, and a
  * response nested differently (under `notificationResponse`, or without its request) must not throw halfway. Null when
  * it is not a usable response (the task then shows nothing and handles nothing).
  */
-export function responseOf(payload: unknown): { actionIdentifier: string; userText?: string | null; notification: { date: number; request: { identifier: string; content: { data?: unknown } } } } | null {
+export function responseOf(payload: unknown): { actionIdentifier: string; userText?: string | null; notification: { date: number | null; request: { identifier: string; content: { data?: unknown } } } } | null {
   const o = payload as Record<string, any> | null;
   if (!o || typeof o !== "object") return null;
   const r = typeof o.actionIdentifier === "string" ? o : o.notificationResponse && typeof o.notificationResponse === "object" ? o.notificationResponse : null;
@@ -166,6 +189,6 @@ export function responseOf(payload: unknown): { actionIdentifier: string; userTe
   return {
     actionIdentifier: r.actionIdentifier,
     userText: typeof r.userText === "string" ? r.userText : null,
-    notification: { date: typeof n.date === "number" ? n.date : 0, request: { identifier: id, content: { data: n.request.content?.data } } },
+    notification: { date: dateOf(n.date, n.request.content?.data), request: { identifier: id, content: { data: n.request.content?.data } } },
   };
 }

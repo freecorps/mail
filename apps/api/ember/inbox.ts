@@ -143,8 +143,11 @@ export const generateUploadUrl = mutation({
 /** A mailbox's badge: `threads` and `unread` messages without its snoozed threads (they count again when they wake), and `snoozed` threads apart. */
 export type MailboxCount = { threads: number; unread: number; snoozed: number };
 
-/** Badges from the email component's `counts` aggregates (a few group reads per mailbox, no thread scan). */
-function mailboxCountsOf(ctx: Ctx, names: string[]): Record<string, MailboxCount> {
+/**
+ * Badges from the email component's `counts` aggregates (a few group reads per mailbox, no thread scan). The one
+ * source of the mailbox badges, the app icon's badge and the badge a push carries (ember/support.ts).
+ */
+export function mailboxCountsOf(ctx: Pick<Ctx, "runQuery">, names: string[]): Record<string, MailboxCount> {
   const out: Record<string, MailboxCount> = {};
   for (const mailbox of names) {
     const c = ctx.runQuery(email.counts, { mailbox }) as { all: { threads: number; unread: number }; snoozed: { threads: number } };
