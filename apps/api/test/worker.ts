@@ -28,6 +28,14 @@ export default createEmberWorker({
         },
       }),
       pruneDrafts: mutationGeneric({ args: {}, handler: (ctx: any) => ctx.runMutation("inbox:pruneDrafts", {}) }),
+      // Test-only: a member's send ids as if recorded at `at`, then the daily prune.
+      ageSendRequests: mutationGeneric({
+        args: { userId: v.string(), at: v.number() },
+        handler: (ctx: any, { userId, at }: { userId: string; at: number }) => {
+          for (const r of ctx.db.query("sendRequests").collect()) if (r.userId === userId) ctx.db.patch(r._id, { at });
+          return ctx.runMutation("inbox:pruneSendRequests", {});
+        },
+      }),
       // Test-only: the pushes `support:onInbound` would send for a message of `threadId` (who, and what each gets).
       inboundPushes: mutationGeneric({
         args: { threadId: v.string() },

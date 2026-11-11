@@ -442,13 +442,36 @@ function sendAtOf(ctx: { now: number }, sendAt: number | undefined): { sendAt?: 
 //   draftId      a draft of the member's (`inbox:saveDraft`), deleted in the same transaction once the send succeeds
 //   bcc          blind copies (at most MAX_CC): in the envelope only, kept on the thread's message for the mailbox
 //   sendAt       send at this time (ms, at most 366 days ahead) instead of now: `inbox:scheduled`, `cancelScheduled`
+//   requestId    the client's id for this send (a UUID, at most 64 characters): sent once, whatever the retries
 const composerArgs = {
   bodyHtml: v.optional(v.string()),
   signature: v.optional(v.boolean()),
   draftId: v.optional(v.string()),
   bcc: v.optional(v.array(v.string())),
   sendAt: v.optional(v.number()),
+  requestId: v.optional(v.string()),
 };
+
+/** How long a send's `requestId` is remembered (the client retries within minutes; its offline queue within days). */
+export const SEND_REQUEST_TTL_MS = 7 * 24 * 3600 * 1000;
+export const REQUEST_ID_MAX = 64;
+
+/**
+ * At most once per `requestId`: the earlier send's result when the member already sent with that id (nothing is sent
+ * again), else `send()`'s, recorded in the same transaction. Ids are per member, so two members' equal ids never meet.
+ */
+function sendOnce<T>(ctx: Ctx & { now: number }, m: Member, fn: string, requestId: string | undefined, send: () => T): T {
+  if (requestId === undefined) return send();
+  if (!requestId || requestId.length > REQUEST_ID_MAX) throw new Error(`requestId: 1 to ${REQUEST_ID_MAX} characters`);
+  const prior = ctx.db.query("sendRequests").withIndex("by_request", (q: any) => q.eq("userId", m.userId).eq("requestId", requestId)).first() as { fn: string; result: T } | null;
+  if (prior) {
+    if (prior.fn !== fn) throw new Error(`requestId already used for ${prior.fn}`);
+    return prior.result;
+  }
+  const result = send();
+  ctx.db.insert("sendRequests", { userId: m.userId, requestId, fn, result, at: ctx.now });
+  return result;
+}
 
 /** The member's draft a send consumes: null when it is gone already (sent or deleted on another device). */
 function draftOf(ctx: Ctx, m: Member, draftId: string | undefined): string | null {
@@ -465,22 +488,24 @@ export const reply = mutation({
   args: { threadId: v.string(), text: v.string(), cc: ccArg, attachments: attachmentsArg, quoteHeader: v.optional(v.string()), ...composerArgs },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
-    const draft = draftOf(ctx, m, a.draftId);
-    const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
-    const at = sendAtOf(ctx, a.sendAt);
-    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
-    const sent = ctx.runMutation(email.reply, {
-      threadId: a.threadId,
-      text: w.text,
-      author: displayName(m),
-      ...copiesOf(a),
-      ...at,
-      ...extras,
-      ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
-      ...(w.attachments ? { attachments: w.attachments } : {}),
+    return sendOnce(ctx, m, "reply", a.requestId, () => {
+      const draft = draftOf(ctx, m, a.draftId);
+      const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
+      const at = sendAtOf(ctx, a.sendAt);
+      const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
+      const sent = ctx.runMutation(email.reply, {
+        threadId: a.threadId,
+        text: w.text,
+        author: displayName(m),
+        ...copiesOf(a),
+        ...at,
+        ...extras,
+        ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
+        ...(w.attachments ? { attachments: w.attachments } : {}),
+      });
+      if (draft) ctx.db.delete(draft as any);
+      return sent;
     });
-    if (draft) ctx.db.delete(draft as any);
-    return sent;
   },
 });
 
@@ -494,28 +519,30 @@ export const forward = mutation({
   args: { threadId: v.string(), messageId: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
-    const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string; inline?: boolean; contentId?: string }> }>).find((x) => x._id === a.messageId);
-    if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
-    const draft = draftOf(ctx, m, a.draftId);
-    // Not the inline images of its HTML (signature logos): nothing in the forward shows them.
-    const original = msg.attachments.filter((f) => !(f.inline && f.contentId)).map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
-    const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
-    const at = sendAtOf(ctx, a.sendAt);
-    const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml, at.sendAt);
-    const sent = ctx.runMutation(email.compose, {
-      mailbox: t.thread.mailbox,
-      to: a.to,
-      ...copiesOf(a),
-      ...at,
-      subject: a.subject,
-      text: w.text,
-      author: displayName(m),
-      ...extras,
-      ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
-      ...(w.attachments ? { attachments: w.attachments } : {}),
+    return sendOnce(ctx, m, "forward", a.requestId, () => {
+      const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string; inline?: boolean; contentId?: string }> }>).find((x) => x._id === a.messageId);
+      if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
+      const draft = draftOf(ctx, m, a.draftId);
+      // Not the inline images of its HTML (signature logos): nothing in the forward shows them.
+      const original = msg.attachments.filter((f) => !(f.inline && f.contentId)).map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
+      const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
+      const at = sendAtOf(ctx, a.sendAt);
+      const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml, at.sendAt);
+      const sent = ctx.runMutation(email.compose, {
+        mailbox: t.thread.mailbox,
+        to: a.to,
+        ...copiesOf(a),
+        ...at,
+        subject: a.subject,
+        text: w.text,
+        author: displayName(m),
+        ...extras,
+        ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
+        ...(w.attachments ? { attachments: w.attachments } : {}),
+      });
+      if (draft) ctx.db.delete(draft as any);
+      return sent;
     });
-    if (draft) ctx.db.delete(draft as any);
-    return sent;
   },
 });
 
@@ -589,24 +616,26 @@ export const compose = mutation({
   args: { mailbox: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const m = allowed(ctx, a.mailbox);
-    const draft = draftOf(ctx, m, a.draftId);
-    const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
-    const at = sendAtOf(ctx, a.sendAt);
-    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
-    const sent = ctx.runMutation(email.compose, {
-      mailbox: a.mailbox,
-      to: a.to,
-      ...copiesOf(a),
-      ...at,
-      subject: a.subject,
-      text: w.text,
-      author: displayName(m),
-      ...extras,
-      ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
-      ...(w.attachments ? { attachments: w.attachments } : {}),
+    return sendOnce(ctx, m, "compose", a.requestId, () => {
+      const draft = draftOf(ctx, m, a.draftId);
+      const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
+      const at = sendAtOf(ctx, a.sendAt);
+      const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
+      const sent = ctx.runMutation(email.compose, {
+        mailbox: a.mailbox,
+        to: a.to,
+        ...copiesOf(a),
+        ...at,
+        subject: a.subject,
+        text: w.text,
+        author: displayName(m),
+        ...extras,
+        ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
+        ...(w.attachments ? { attachments: w.attachments } : {}),
+      });
+      if (draft) ctx.db.delete(draft as any);
+      return sent;
     });
-    if (draft) ctx.db.delete(draft as any);
-    return sent;
   },
 });
 
@@ -950,6 +979,17 @@ export const pruneDrafts = internalMutation({
     const old = ctx.db.query("drafts").withIndex("by_updated", (q) => q.lt("updatedAt", ctx.now - DRAFT_TTL_MS)).take(500) as DraftDoc[];
     for (const d of old) ctx.db.delete(d._id as any);
     if (old.length === 500) ctx.scheduler.runAfter(0, "inbox:pruneDrafts" as any, {});
+    return old.length;
+  },
+});
+
+/** Forgets send ids older than SEND_REQUEST_TTL_MS (daily, ember/crons.ts), 500 at a time. */
+export const pruneSendRequests = internalMutation({
+  args: {},
+  handler: (ctx) => {
+    const old = ctx.db.query("sendRequests").withIndex("by_at", (q) => q.lt("at", ctx.now - SEND_REQUEST_TTL_MS)).take(500) as Array<{ _id: string }>;
+    for (const r of old) ctx.db.delete(r._id as any);
+    if (old.length === 500) ctx.scheduler.runAfter(0, "inbox:pruneSendRequests" as any, {});
     return old.length;
   },
 });

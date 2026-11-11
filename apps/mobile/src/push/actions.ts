@@ -27,6 +27,7 @@ import {
   mailboxChannels,
   mailDataOf,
   remember,
+  requestIdOf,
   responseKey,
   staleChannels,
   type ActionCall,
@@ -160,7 +161,7 @@ async function respond(r: Notifications.NotificationResponse): Promise<void> {
   Notifications.clearLastNotificationResponseAsync().catch(() => {});
   if (kind === "open") return void routeToThread(data);
   const locale = await storedLocale();
-  const calls = actionCalls(kind, data as MailPushData, { text: r.userText, locale, clock24: deviceClock24() });
+  const calls = actionCalls(kind, data as MailPushData, { text: r.userText, locale, clock24: deviceClock24(), requestId: requestIdOf(key) });
   // Off the screen at once (Android shows a spinner on a text reply until the app acts). Android 15+ keeps a
   // notification answered by direct reply on screen, with the reply under it, until the user dismisses it
   // (LIFETIME_EXTENDED_BY_DIRECT_REPLY): the platform's way of showing the reply went out.

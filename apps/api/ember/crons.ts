@@ -12,5 +12,7 @@ const crons = cronJobs({ shard: "global:main" });
 crons.daily("webhook-deliveries", { hour: 4, minute: 30 }, "webhooks:prune" as any);
 // Drafts untouched for 30 days are removed (ember/composer.ts).
 crons.daily("drafts", { hour: 4, minute: 45 }, "inbox:pruneDrafts" as any);
+// Send ids (`requestId`) are remembered 7 days (ember/inbox.ts).
+crons.daily("send-requests", { hour: 5, minute: 0 }, "inbox:pruneSendRequests" as any);
 
 export default crons;

@@ -12,6 +12,7 @@ import {
   mailboxChannels,
   mailDataOf,
   remember,
+  requestIdOf,
   responseKey,
   staleChannels,
 } from "../src/push/mail-push";
@@ -55,6 +56,19 @@ describe("actions", () => {
     expect("signature" in calls[0]!.args).toBe(false);
     const en = actionCalls("reply", mailDataOf(data)!, { locale: "en", clock24: false, text: "Done" });
     expect(en[0]).toMatchObject({ args: { quoteHeader: expect.stringMatching(/^On .+ wrote:$/) } });
+  });
+
+  it("the reply carries one requestId per response: the HTTPS try and the queued fallback send it once", () => {
+    const key = responseKey({ identifier: "t1", date: 1, actionIdentifier: "reply", userText: "Oi" });
+    const id = requestIdOf(key);
+    expect(id).toMatch(/^push-[0-9a-f]{16}$/);
+    expect(id.length).toBeLessThanOrEqual(64);
+    expect(requestIdOf(key)).toBe(id);
+    expect(requestIdOf(responseKey({ identifier: "t1", date: 2, actionIdentifier: "reply", userText: "Oi" }))).not.toBe(id);
+    const calls = actionCalls("reply", mailDataOf(data)!, { ...o, text: "Oi", requestId: id });
+    expect(calls[0]).toMatchObject({ fn: "reply", args: { requestId: id } });
+    // Read is idempotent: no id.
+    expect(calls[1]).toEqual({ fn: "markRead", args: { threadId: "t1" } });
   });
 
   it("an empty reply does nothing; without the sender (old push) it goes without the quote line", () => {
@@ -141,5 +155,14 @@ describe("quick actions", () => {
       ["Assigned to Me", "shortcut_mine"],
       ["Search", "shortcut_search"],
     ]);
+  });
+});
+
+describe("send ids", () => {
+  it("newRequestId: a v4 UUID, different each time, within the server's 64 characters", async () => {
+    const { newRequestId } = await import("../src/lib/request-id");
+    const a = newRequestId();
+    expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(newRequestId()).not.toBe(a);
   });
 });

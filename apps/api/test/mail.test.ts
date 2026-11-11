@@ -454,6 +454,39 @@ describe("mail app", () => {
     await call("mutation", "inbox:setNotifications", { preview: true }, "user:heitor");
   });
 
+  it("a send with a requestId goes out once: retries return the first result; another member's equal id is theirs", async () => {
+    const t = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.find((x: any) => x.number === 1);
+    const outbound = async () => (await call("query", "inbox:thread", { threadId: t._id }, "user:wolf")).value.messages.filter((m: any) => m.direction === "outbound").length;
+    const before = await outbound();
+    const args = { threadId: t._id, text: "Once only.", requestId: "6f1c2a7e-0d4b-4b8a-9b1e-3c5d7e9f1a2b" };
+    const first = await call("mutation", "inbox:reply", args, "user:wolf");
+    expect(first.error ?? null).toBeNull();
+    // The retry (a lost answer, the offline queue, the notification action's fallback): same result, nothing sent.
+    const again = await call("mutation", "inbox:reply", args, "user:wolf");
+    expect(again.value).toEqual(first.value);
+    expect(await outbound()).toBe(before + 1);
+    // Another member with the same id sends their own.
+    const other = await call("mutation", "inbox:reply", { ...args, text: "Mine too." }, "user:heitor");
+    expect(other.error ?? null).toBeNull();
+    expect(other.value.emailId).not.toBe(first.value.emailId);
+    expect(await outbound()).toBe(before + 2);
+    // An id belongs to one kind of send; ids are 1 to 64 characters.
+    expect((await call("mutation", "inbox:compose", { mailbox: "support", to: ["x@user.test"], subject: "s", text: "t", requestId: args.requestId }, "user:wolf")).error.message).toMatch(/already used for reply/);
+    expect((await call("mutation", "inbox:reply", { ...args, requestId: "x".repeat(65) }, "user:wolf")).error.message).toMatch(/1 to 64/);
+    expect((await call("mutation", "inbox:reply", { ...args, requestId: "" }, "user:wolf")).error.message).toMatch(/1 to 64/);
+    // A new conversation sent twice is one conversation.
+    const c = { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Once", text: "One thread.", requestId: "compose-1" };
+    const c1 = await call("mutation", "inbox:compose", c, "user:wolf");
+    const c2 = await call("mutation", "inbox:compose", c, "user:wolf");
+    expect(c2.value).toEqual(c1.value);
+    const sent = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.filter((x: any) => x.subject === "Once");
+    expect(sent).toHaveLength(1);
+    // After 7 days the ids are forgotten (daily prune): the same id sends again.
+    expect((await call("mutation", "testing:ageSendRequests", { userId: "wolf", at: Date.now() - 8 * 24 * 3600 * 1000 })).value).toBeGreaterThanOrEqual(2);
+    expect((await call("mutation", "inbox:reply", args, "user:wolf")).value.emailId).not.toBe(first.value.emailId);
+    expect(await outbound()).toBe(before + 3);
+  });
+
   it("reply all copies the others; forward sends a message on, with its files, as a new conversation", async () => {
     const t = (await call("query", "inbox:threads", { mailbox: "support" }, "user:agent-1")).value.page.find((x: any) => x.number === 1);
     const full = (await call("query", "inbox:thread", { threadId: t._id }, "user:agent-1")).value;

@@ -143,6 +143,8 @@ export type ComposerArgs = {
   signature?: boolean;
   /** The member's draft of this message, deleted with the send. */
   draftId?: string;
+  /** This send's id (`newRequestId`): every retry of it carries the same one, so the server sends it once. */
+  requestId?: string;
 };
 
 export type DraftKind = "reply" | "note" | "compose" | "forward";

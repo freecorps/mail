@@ -50,7 +50,7 @@ export function actionOf(actionIdentifier: string): PushAction | "open" | null {
 
 /** The mutations an action runs, in order (`inbox:*`, as the app calls them; queued offline like every other). */
 export type ActionCall =
-  | { fn: "reply"; args: { threadId: string; text: string; quoteHeader?: string } }
+  | { fn: "reply"; args: { threadId: string; text: string; quoteHeader?: string; requestId?: string } }
   | { fn: "setStatus"; args: { threadId: string; status: "closed" } }
   | { fn: "markRead"; args: { threadId: string } };
 
@@ -59,7 +59,7 @@ export type ActionCall =
  * default signature (the server adds it) and the quote line in the app's language, then read: the member read the
  * notification and answered it. Arquivar: closed. Marcar como lida: read. An empty reply does nothing.
  */
-export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: string | null; locale: Locale; clock24: boolean }): ActionCall[] {
+export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: string | null; locale: Locale; clock24: boolean; requestId?: string }): ActionCall[] {
   const threadId = data.threadId;
   if (kind === "archive") return [{ fn: "setStatus", args: { threadId, status: "closed" } }];
   if (kind === "read") return [{ fn: "markRead", args: { threadId } }];
@@ -67,7 +67,7 @@ export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: st
   if (!text) return [];
   const header = data.from && data.at !== undefined ? quoteHeader({ from: data.from, at: data.at }, o.locale, o.clock24) : undefined;
   return [
-    { fn: "reply", args: { threadId, text, ...(header ? { quoteHeader: header } : {}) } },
+    { fn: "reply", args: { threadId, text, ...(header ? { quoteHeader: header } : {}), ...(o.requestId ? { requestId: o.requestId } : {}) } },
     { fn: "markRead", args: { threadId } },
   ];
 }
@@ -75,6 +75,22 @@ export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: st
 /** One response, once: the same tap can arrive by the listener, `getLastNotificationResponse` and the Android task. */
 export function responseKey(r: { identifier: string; date: number; actionIdentifier: string; userText?: string | null }): string {
   return `${r.identifier}|${r.date}|${r.actionIdentifier}|${r.userText ?? ""}`;
+}
+
+/**
+ * The reply's `requestId`, from the response itself: the HTTPS try, its queued fallback and any second handling of the
+ * same response (another process, a relaunch) all carry it, so the server sends the reply once. Two 32-bit FNV-1a
+ * hashes of the response key: unique enough per member for the week the server remembers ids.
+ */
+export function requestIdOf(responseKey: string): string {
+  let a = 0x811c9dc5;
+  let b = 0x01000193 ^ responseKey.length;
+  for (let i = 0; i < responseKey.length; i++) {
+    const c = responseKey.charCodeAt(i);
+    a = Math.imul(a ^ c, 0x01000193) >>> 0;
+    b = Math.imul(b ^ c ^ (i & 0xff), 0x01000193) >>> 0;
+  }
+  return `push-${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
 }
 
 /** Keeps the newest `max` keys (persisted, so a relaunch does not run an action again). */

@@ -28,6 +28,7 @@ import { isPersonal } from "../model/threads";
 import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "../model/forward";
 import type { AttachmentArg } from "../lib/uploads";
 import { keepUndoneCompose, takeUndoneCompose } from "../model/undone-compose";
+import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
 import { RECENT_THREADS } from "../offline/replica";
 import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
@@ -296,7 +297,8 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
     done.current = true;
     const text = body.trim();
     const files = uploads.attachments;
-    const extra = { ...(files.length ? { attachments: files } : {}), ...(withSignature ? {} : { signature: false }) };
+    // One id for this send, whatever its retries (the server sends it once).
+    const extra = { ...(files.length ? { attachments: files } : {}), ...(withSignature ? {} : { signature: false }), requestId: newRequestId() };
     const draftId = () => saver.id() ?? undefined;
     const reopen = (params: Record<string, string>) => () => router.push({ pathname: "/compose", params });
     if (note && init.threadId) {

@@ -90,6 +90,8 @@ app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outsi
     request. expo-notifications reports an action handled at once, so without that time the app is suspended within
     milliseconds. If the request fails, the mutation goes through the app's client: queued on the device and sent
     when the app next runs.
+  - A reply is sent once: every send (composer, reply bar, notification) carries a `requestId` that its retries
+    reuse, and `inbox:reply` / `compose` / `forward` return the first result for an id they have seen (kept 7 days).
   - Responses are handled from `index.ts`, so the one that launched or woke the app is not missed. On Android the
     push task (headless JS) handles them when the app is in the background or killed.
 - **Badge**: the unread total of the member's mailboxes. The server sends it with each push. The app sets it in the
