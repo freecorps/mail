@@ -13,6 +13,10 @@ export function createPendingRoute(open: (t: RouteTarget) => boolean) {
       // A newer tap wins (only the last response survives a relaunch anyway); the same one again just waits too.
       pending = { target, opened: pending && same(pending.target, target) ? [...pending.opened, onOpened] : [onOpened] };
     },
+    /** Sign-out: the waiting tap is dropped (it never opens for the next member). */
+    clear(): void {
+      pending = null;
+    },
     flush(): void {
       if (!pending || !open(pending.target)) return;
       const { opened } = pending;

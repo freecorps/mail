@@ -26,7 +26,8 @@ export interface ResponseEffects {
   /** Opens the conversation, now or once the inbox mounts; `onOpened` runs when it did. */
   route(target: Target, onOpened: () => void): void;
   targetOf(data: unknown): Target | null;
-  deliver(kind: PushAction, calls: ActionCall[]): Promise<Delivery>;
+  /** `live()`: false once the member signed out (resetResponseState): send nothing more then. */
+  deliver(kind: PushAction, calls: ActionCall[], live: () => boolean): Promise<Delivery>;
   locale(): Promise<Locale>;
   clock24(): boolean;
   /** The server refused the action (a validation error, a 4xx): say so on a notification of its own. */
@@ -37,6 +38,29 @@ export interface ResponseEffects {
 const inFlight = new Set<string>();
 /** Taps already routed in this process (opened, or waiting for the inbox): a second copy does not open it again. */
 const routed = new Set<string>();
+/** Which signed-in session a response belongs to: sign-out starts a new one (resetResponseState). */
+let session = 0;
+
+/**
+ * Sign-out: forget the responses of this process, and make the ones still running stop where they are (no mark, no
+ * clear, no dismissal, no conversation opened, no further send), so the next member on this device inherits none of it.
+ */
+export function resetResponseState(): void {
+  session++;
+  inFlight.clear();
+  routed.clear();
+}
+
+/**
+ * Everything push keeps for the signed-in member, cleared at sign-out (actions.ts passes the app's pieces; tested
+ * here): this process's responses, the tap waiting for the inbox to mount, the handled keys (memory and storage) and
+ * the last response.
+ */
+export async function resetPushStateWith(o: { clearPendingRoute(): void; clearHandled(): Promise<void>; clearLast(): Promise<void> }): Promise<void> {
+  resetResponseState();
+  o.clearPendingRoute();
+  await Promise.all([o.clearHandled().catch(() => {}), o.clearLast().catch(() => {})]);
+}
 
 export async function processResponse(r: ResponseLike, fx: ResponseEffects): Promise<void> {
   const kind = actionOf(r.actionIdentifier);
@@ -51,8 +75,10 @@ export async function processResponse(r: ResponseLike, fx: ResponseEffects): Pro
   });
   if (inFlight.has(key)) return;
   inFlight.add(key);
+  const mine = session;
+  const live = () => mine === session;
   try {
-    if (await fx.isHandled(key)) return;
+    if ((await fx.isHandled(key)) || !live()) return;
     if (kind === "open") {
       const target = fx.targetOf(raw);
       if (!target || routed.has(key)) return;
@@ -60,6 +86,7 @@ export async function processResponse(r: ResponseLike, fx: ResponseEffects): Pro
       // Done once the conversation opened (maybe later, when the inbox mounts): until then nothing is marked, so a
       // relaunch before it opened opens it again.
       fx.route(target, () => {
+        if (!live()) return;
         void fx.markHandled(key).catch(() => {});
         fx.clearLast();
       });
@@ -68,7 +95,10 @@ export async function processResponse(r: ResponseLike, fx: ResponseEffects): Pro
     const data = mailDataOf(raw);
     if (!data) return;
     const calls = actionCalls(kind, data as MailPushData, { text: r.userText, locale: await fx.locale(), clock24: fx.clock24(), requestId: requestIdOf(key) });
-    const delivery = calls.length ? await fx.deliver(kind, calls).catch((): Delivery => ({ durable: false, settled: Promise.resolve() })) : null;
+    if (!live()) return;
+    const delivery = calls.length ? await fx.deliver(kind, calls, live).catch((): Delivery => ({ durable: false, settled: Promise.resolve() })) : null;
+    // Signed out meanwhile: nothing of it is marked, cleared or shown for the next member.
+    if (!live()) return;
     // Not sent and not on disk: leave it for the next launch (handled again then, sent once by its requestId).
     if (delivery && !delivery.durable) return;
     // Refused by the server: trying again would be refused too. Handled, but never as done: the conversation is not

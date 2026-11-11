@@ -7,3 +7,4 @@ const router = createPendingRoute((t) => openThread(t.threadId, t.mailbox));
 
 export const routeToThread = router.route;
 export const flushNotificationTarget = router.flush;
+export const clearNotificationTarget = router.clear;

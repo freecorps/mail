@@ -31,8 +31,8 @@ import {
   type ActionCall,
   type PushAction,
 } from "./mail-push";
-import { processResponse, type Delivery, type ResponseEffects } from "./respond";
-import { routeToThread } from "./routing";
+import { processResponse, resetPushStateWith, type Delivery, type ResponseEffects } from "./respond";
+import { clearNotificationTarget, routeToThread } from "./routing";
 import { targetOf } from "./transport";
 
 const android = process.env.EXPO_OS === "android";
@@ -121,9 +121,11 @@ async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed" | "refu
  * (SQLite, sent on reconnect; optimistic in the lists meanwhile). `durable` once each one was answered or written to
  * the queue on disk; `settled` when the queued ones are done (or after QUEUE_WAIT_MS) and the badge is read again.
  */
-async function deliver(kind: PushAction, calls: ActionCall[]): Promise<Delivery> {
+async function deliver(kind: PushAction, calls: ActionCall[], live: () => boolean): Promise<Delivery> {
   const queued: Promise<unknown>[] = [];
   for (const x of calls) {
+    // Signed out meanwhile: nothing more goes (respond.ts then marks nothing either).
+    if (!live()) return { durable: false, settled: Promise.resolve() };
     if (!queued.length) {
       const r = await sendOverHttp(x);
       if (r === "sent") continue;
@@ -283,6 +285,22 @@ export async function syncMailboxChannels(boxes: ReadonlyArray<{ name: string; a
   } catch (e) {
     console.warn("[push] channels", e);
   }
+}
+
+/**
+ * Sign-out: push's process-wide state goes too (respond.ts `resetPushStateWith`): the responses still running stop, the
+ * tap waiting for the inbox is dropped, the handled keys are forgotten (memory and storage) and so is the last
+ * response, so the next member on this device inherits none of it.
+ */
+export function resetPushState(): Promise<void> {
+  return resetPushStateWith({
+    clearPendingRoute: clearNotificationTarget,
+    clearHandled: async () => {
+      handled = [];
+      await AsyncStorage.removeItem(HANDLED_KEY);
+    },
+    clearLast: () => Notifications.clearLastNotificationResponseAsync(),
+  });
 }
 
 /** Sign-out: no badge, no notifications of this account on screen, no channels named after its mailboxes. */

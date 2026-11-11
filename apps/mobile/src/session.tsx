@@ -6,7 +6,7 @@ import { PUSH_TRANSPORT } from "./config";
 import { authClient, clearReplica } from "./ember";
 import { setReplicaUser } from "./offline/replica";
 import type { LanguagePref } from "./prefs";
-import { resetNotificationSurface } from "./push/actions";
+import { resetNotificationSurface, resetPushState } from "./push/actions";
 import { pushTransport, type PushRegistration } from "./push/transport";
 import { clearQuickActions } from "./quick-actions";
 import { usePushRegistration } from "./push/usePush";
@@ -57,6 +57,8 @@ function Member({ auth, lang, children }: { auth: UseEmberAuthTokenResult; lang:
   const unregister = useMutation(api.inbox.unregisterDevice);
 
   const signOut = useCallback(async () => {
+    // Push's state of this member first: a response still running stops, a waiting tap never opens for the next one.
+    await resetPushState();
     if (push.token) await unregister({ token: push.token }).catch(() => {});
     await transport.forget();
     // No badge, notifications, mailbox channels or icon shortcuts of this account left behind.

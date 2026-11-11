@@ -18,7 +18,7 @@ import {
   staleChannels,
 } from "../src/push/mail-push";
 import { nextNotificationPrefs } from "../src/offline/optimistic";
-import { processResponse } from "../src/push/respond";
+import { processResponse, resetPushStateWith, resetResponseState } from "../src/push/respond";
 
 vi.mock("expo-quick-actions", () => ({ setItems: vi.fn(async () => {}), addListener: vi.fn(() => ({ remove() {} })), initial: undefined }));
 vi.mock("expo-router", () => ({ router: { navigate: vi.fn() } }));
@@ -333,5 +333,79 @@ describe("Android task payload", () => {
     expect(keyOf(responseOf(undated(111)))).not.toBe(keyOf(responseOf(undated(222))));
     expect(responseOf(null)).toBeNull();
     expect(responseOf("x")).toBeNull();
+  });
+});
+
+describe("sign-out clears push's process-wide state (resetPushState)", () => {
+  const base = (log: string[], handled = new Set<string>()) => ({
+    isHandled: async (k: string) => handled.has(k),
+    markHandled: async (k: string) => void (handled.add(k), log.push("markHandled")),
+    clearLast: () => void log.push("clearLast"),
+    dismiss: async () => void log.push("dismiss"),
+    targetOf: () => ({ threadId: "t1" }),
+    locale: async () => "pt-BR" as const,
+    clock24: () => true,
+  });
+  const reply = (identifier: string) => ({ actionIdentifier: "reply", userText: "Oi", notification: { date: 1, request: { identifier, content: { data } } } });
+
+  it("clears the waiting tap, the handled keys and the last response, and resets this process's responses", async () => {
+    const calls: string[] = [];
+    await resetPushStateWith({
+      clearPendingRoute: () => void calls.push("route"),
+      clearHandled: async () => void calls.push("handled"),
+      clearLast: async () => void calls.push("last"),
+    });
+    expect(calls.sort()).toEqual(["handled", "last", "route"]);
+    // A storage failure does not stop the rest.
+    await expect(resetPushStateWith({ clearPendingRoute: () => {}, clearHandled: () => Promise.reject(new Error("x")), clearLast: async () => {} })).resolves.toBeUndefined();
+  });
+
+  it("an action running at sign-out sends nothing more and marks, clears and dismisses nothing", async () => {
+    const log: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let liveAfter: boolean | null = null;
+    const fx = {
+      ...base(log),
+      route: () => {},
+      deliver: async (_k: unknown, _c: unknown, live: () => boolean) => {
+        log.push("deliver");
+        await gate;
+        liveAfter = live();
+        return { durable: true, settled: Promise.resolve() };
+      },
+    };
+    const running = processResponse(reply("signout-1"), fx);
+    await new Promise((r) => setTimeout(r, 0));
+    resetResponseState();
+    release();
+    await running;
+    expect(liveAfter).toBe(false);
+    expect(log).toEqual(["deliver"]);
+  });
+
+  it("a tap waiting for the inbox never opens or marks for the next member; the pending route is dropped", async () => {
+    const log: string[] = [];
+    const waiting: Array<() => void> = [];
+    const fx = { ...base(log), route: (_t: unknown, onOpened: () => void) => void (log.push("route"), waiting.push(onOpened)), deliver: async () => ({ durable: true, settled: Promise.resolve() }) };
+    const tap = { ...reply("signout-2"), actionIdentifier: DEFAULT_ACTION };
+    await processResponse(tap, fx);
+    resetResponseState();
+    waiting.forEach((f) => f());
+    await Promise.resolve();
+    expect(log).toEqual(["route"]);
+    // The next member's own copy of it is not taken as routed already.
+    await processResponse(tap, fx);
+    expect(log).toEqual(["route", "route"]);
+
+    const { createPendingRoute } = await import("../src/push/pending-route");
+    let mounted = false;
+    const opened: string[] = [];
+    const r = createPendingRoute((t) => (mounted ? (opened.push(t.threadId), true) : false));
+    r.route({ threadId: "old-member" });
+    r.clear();
+    mounted = true;
+    r.flush();
+    expect(opened).toEqual([]);
   });
 });
