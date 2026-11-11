@@ -25,6 +25,18 @@ export function formatWhen(at: number, now: number, locale: Locale): string {
 }
 
 /**
+ * A list row's time under its date header: the time for today and yesterday (the header already says which day), the
+ * weekday within the week, else the short date. Without headers (search results) it is `formatWhen`.
+ */
+export function formatRowTime(at: number, now: number, locale: Locale): string {
+  const today = startOfDay(now);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (at >= yesterday.getTime()) return new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }).format(at);
+  return formatWhen(at, now, locale);
+}
+
+/**
  * How long ago, in the largest whole unit ("agora", "há 26 h", "há 3 dias", "há 4 meses", "há 2 anos"): how long a
  * conversation has been waiting.
  */

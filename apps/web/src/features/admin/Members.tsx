@@ -47,7 +47,7 @@ export function Members() {
             {requests.map((r) => (
               <li key={r.userId}>
                 <Card className="flex flex-wrap items-center gap-3 px-4 py-3">
-                  <Avatar name={r.name ?? r.email ?? r.userId} seed={r.userId} className="size-8" />
+                  <Avatar name={r.name ?? r.email ?? r.userId} className="size-8" />
                   <div className="min-w-40 flex-1">
                     <p className="truncate text-sm font-medium">{r.name ?? r.email ?? r.userId}</p>
                     <p className="truncate text-xs text-muted-foreground">
@@ -92,7 +92,7 @@ export function Members() {
             const mine = m.userId === me;
             return (
               <li key={m.userId} className="flex flex-wrap items-center gap-3 px-4 py-3">
-                <Avatar name={label(m)} seed={m.userId} className="size-8" />
+                <Avatar name={label(m)} className="size-8" />
                 <div className="min-w-40 flex-1">
                   <p className="flex items-center gap-2 truncate text-sm font-medium">
                     {label(m)}

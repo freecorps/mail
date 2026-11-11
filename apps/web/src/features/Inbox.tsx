@@ -2,10 +2,9 @@
 // On wide windows the panes are resizable (widths and the sidebar's collapsed state are prefs) and the reading mode
 // decides where a conversation opens: its own pane (split), or over the list at full width (full, focus). Phones show
 // one pane at a time.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Columns2, Columns3, LayoutList, PenSquare, Settings, WifiOff } from "lucide-react";
 import { useConnectionState, useMutation } from "@freecorps/ember-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -23,14 +22,15 @@ import { useI18n } from "@/i18n/context";
 import { api, VIEWS, type Me, type View } from "@/lib/api";
 import { setOptimisticViewer } from "@/lib/optimistic";
 import { PANES, useMediaQuery, WIDE } from "@/lib/media";
-import { badge, useHasSpam, useViewCounts, viewTakesTabs } from "@/model/threads";
+import { badge, useHasSpam, useViewCounts, viewTakesTabs, type ThreadRow } from "@/model/threads";
 import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
+import { toTarget, useThreadActions } from "@/model/actions";
+import { extendSelection, selectRange, toggleSelected, visibleSelection } from "@/model/listItems";
 import { useRoute, useSearchBox } from "@/model/route";
 import { useMailboxes, useThreadList } from "@/model/threads";
 import { DataToggle } from "@/dev/DataToggle";
-import { CommandPalette } from "./CommandPalette";
 import { ComposeDialog } from "./ComposeDialog";
 import type { ComposerHandle } from "./Composer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
@@ -38,7 +38,20 @@ import { Sidebar, type Folder } from "./Sidebar";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
 import { Today } from "./Today";
-import { AdminView } from "./admin/AdminView";
+
+// Split out of the main bundle: the palette loads while the browser is idle after the inbox shows (it opens with no
+// animation, so it must be there by the first ⌘K), and the admin screen only for admins who open it.
+const loadPalette = () => import("./CommandPalette");
+const CommandPalette = lazy(() => loadPalette().then((m) => ({ default: m.CommandPalette })));
+const LazyAdminView = lazy(() => import("./admin/AdminView").then((m) => ({ default: m.AdminView })));
+const AdminView = (p: React.ComponentProps<typeof LazyAdminView>) => (
+  <Suspense fallback={null}>
+    <LazyAdminView {...p} />
+  </Suspense>
+);
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
+const NO_ROWS: ThreadRow[] = [];
 
 const MODE_ICON: Record<ReadingMode, typeof Columns3> = { split: Columns3, full: Columns2, focus: LayoutList };
 
@@ -62,16 +75,20 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const view = route.view;
   const folder: Folder | null = !view && (route.filter === "sent" || route.filter === "spam") ? route.filter : null;
   const list_ = useThreadList({ mailbox: mailbox ?? "", view, filter: route.filter, query: route.query });
-  const rows = mailbox || view ? list_.rows : [];
+  const rows = mailbox || view ? list_.rows : NO_ROWS;
   const counts = useViewCounts();
   const hasSpam = useHasSpam(view ? null : mailbox);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 1500));
+    idle(() => void loadPalette());
+  }, []);
   const [cursor, setCursor] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const composer = useRef<ComposerHandle>(null);
   const search = useRef<HTMLInputElement>(null);
-  const setStatus = useMutation(api.inbox.setStatus);
+  const actions = useThreadActions();
   const markUnread = useMutation(api.inbox.markUnread);
   const { online } = useConnectionState();
 
@@ -120,6 +137,38 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const mode: ReadingMode = roomy ? prefs.reading : "focus";
   // Where a conversation opens: its own pane, or over the list (full, focus, and always on phones).
   const overlay = !wide || mode !== "split";
+  const personal = useMemo(() => new Set(boxes.mailboxes.filter((b) => b.personal).map((b) => b.name)), [boxes.mailboxes]);
+
+  // Multi-select, per list: going to another view, mailbox, status or search starts with nothing selected.
+  const listPlace = `${view ?? ""}\u0000${mailbox ?? ""}\u0000${route.filter}\u0000${route.query}`;
+  const [selection, setSelection] = useState<{ place: string; ids: ReadonlySet<string> }>({ place: listPlace, ids: new Set() });
+  const selected = selection.place === listPlace ? selection.ids : EMPTY_SET;
+  const anchor = useRef<string | null>(null);
+  const setSelected = useCallback((ids: ReadonlySet<string>) => setSelection({ place: listPlace, ids }), [listPlace]);
+  const onSelect = useCallback(
+    (threadId: string, how: "toggle" | "range") => {
+      setSelected(
+        how === "range"
+          ? selectRange(
+              rows.map((r) => r.threadId),
+              selected,
+              anchor.current,
+              threadId,
+            )
+          : toggleSelected(selected, threadId),
+      );
+      anchor.current = threadId;
+    },
+    [rows, selected, setSelected],
+  );
+  const onSelectAll = useCallback(
+    (all: boolean) => {
+      setSelected(all ? new Set(rows.map((r) => r.threadId)) : EMPTY_SET);
+      if (!all) anchor.current = null;
+    },
+    [rows, setSelected],
+  );
+
   const mailboxNames = useMemo(() => Object.fromEntries(boxes.mailboxes.map((b) => [b.name, b.displayName ?? b.name])), [boxes.mailboxes]);
 
   const open = useCallback(
@@ -137,9 +186,9 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   }, [boxes.totalUnread, t, adminSection]);
 
   const modal = composeOpen || helpOpen || paletteOpen;
-  const state = useRef({ rows, cursor, thread: route.thread, modal, admin: !!adminSection });
+  const state = useRef({ rows, cursor, thread: route.thread, modal, admin: !!adminSection, selected });
   useLayoutEffect(() => {
-    state.current = { rows, cursor, thread: route.thread, modal, admin: !!adminSection };
+    state.current = { rows, cursor, thread: route.thread, modal, admin: !!adminSection, selected };
   });
 
   useEffect(() => {
@@ -179,11 +228,32 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           if (s.cursor) open(s.cursor);
           return;
         case "archive": {
-          const row = s.rows.find((r) => r.threadId === target);
+          // The selection when there is one, else the open thread (or the cursor's).
+          const picked = visibleSelection(s.selected, s.rows);
+          if (picked.length) {
+            actions.archive(picked.map(toTarget));
+            setSelected(EMPTY_SET);
+            return;
+          }
           if (!target) return;
-          const archived = row?.status === "closed";
-          void setStatus({ threadId: target, status: archived ? "open" : "closed" }).catch(() => {});
-          toast(archived ? t("thread.reopened") : t("thread.archived"));
+          const row = s.rows.find((r) => r.threadId === target);
+          actions.archive([row ? toTarget(row) : { threadId: target, status: null, unread: false }]);
+          return;
+        }
+        case "select": {
+          const id = s.cursor ?? s.thread;
+          if (!id) return;
+          setSelected(toggleSelected(s.selected, id));
+          anchor.current = id;
+          return;
+        }
+        case "extendNext":
+        case "extendPrev": {
+          e.preventDefault();
+          const r = extendSelection(ids, s.selected, s.cursor ?? s.thread, action === "extendNext" ? 1 : -1);
+          setSelected(r.selected);
+          setCursor(r.cursor);
+          anchor.current = r.cursor;
           return;
         }
         case "unread":
@@ -208,6 +278,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           return;
         case "escape":
           if (inField) (document.activeElement as HTMLElement).blur();
+          else if (s.selected.size) setSelected(EMPTY_SET);
           else if (s.thread) navigate({ thread: null }, { push: true });
           return;
         case "help":
@@ -221,7 +292,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, open, setStatus, markUnread, t, toggleSidebar]);
+  }, [navigate, open, actions, markUnread, toggleSidebar, setSelected]);
 
   // Where the list goes. A view or a mailbox starts on "all" (a status tab from elsewhere may not apply); search stays.
   const goView = useCallback(
@@ -379,9 +450,14 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       tabs={viewTakesTabs(view) && !folder}
       empty={empty}
       mailboxNames={view ? mailboxNames : undefined}
+      personal={personal}
       actions={layoutMenu}
       wide={roomy && mode === "focus"}
       rows={rows}
+      dated={list_.dated}
+      selected={selected}
+      onSelect={onSelect}
+      onSelectAll={onSelectAll}
       loading={list_.status === "loading" || boxes.status === "loading"}
       error={list_.error ? list_.error.message : null}
       searching={list_.searching}
@@ -520,32 +596,34 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       />
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
       {import.meta.env.DEV && <DataToggle />}
-      <CommandPalette
-        open={paletteOpen}
-        onOpenChange={setPaletteOpen}
-        admin={me.admin}
-        mailboxes={boxes.mailboxes}
-        mailbox={view ? null : mailbox}
-        hasSpam={hasSpam}
-        threadId={adminSection ? null : route.thread}
-        layouts={roomy}
-        onView={goView}
-        onMailbox={goMailbox}
-        onFolder={goFolder}
-        onOpenThread={(id) => navigate({ admin: null, thread: id }, { push: true })}
-        onSearch={(q) => {
-          navigate({ admin: null, thread: null });
-          setQuery(q);
-        }}
-        onCompose={() => {
-          // From Administração, compose belongs to the inbox (the sent conversation opens there).
-          if (adminSection) navigate({ admin: null, thread: null }, { push: true });
-          setComposeOpen(true);
-        }}
-        onShortcuts={() => setHelpOpen(true)}
-        onToggleSidebar={toggleSidebar}
-        onAdmin={(section) => navigate({ admin: section, thread: null }, { push: true })}
-      />
+      <Suspense fallback={null}>
+        <CommandPalette
+          open={paletteOpen}
+          onOpenChange={setPaletteOpen}
+          admin={me.admin}
+          mailboxes={boxes.mailboxes}
+          mailbox={view ? null : mailbox}
+          hasSpam={hasSpam}
+          threadId={adminSection ? null : route.thread}
+          layouts={roomy}
+          onView={goView}
+          onMailbox={goMailbox}
+          onFolder={goFolder}
+          onOpenThread={(id) => navigate({ admin: null, thread: id }, { push: true })}
+          onSearch={(q) => {
+            navigate({ admin: null, thread: null });
+            setQuery(q);
+          }}
+          onCompose={() => {
+            // From Administração, compose belongs to the inbox (the sent conversation opens there).
+            if (adminSection) navigate({ admin: null, thread: null }, { push: true });
+            setComposeOpen(true);
+          }}
+          onShortcuts={() => setHelpOpen(true)}
+          onToggleSidebar={toggleSidebar}
+          onAdmin={(section) => navigate({ admin: section, thread: null }, { push: true })}
+        />
+      </Suspense>
     </div>
   );
 }

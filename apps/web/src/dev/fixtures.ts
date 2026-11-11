@@ -80,6 +80,52 @@ export interface Fixture {
   /** The threads `inbox:view` returns for `assigned` (TODAY_ROWS + 1) and `waiting` (newest first). */
   view: (now: number) => { assigned: { page: Thread[]; isDone: boolean }; waiting: { page: Thread[]; isDone: boolean } };
   hasSpam: boolean;
+  /** The thread list (any mailbox, view or status: the list under test, not the filters). */
+  list: (now: number) => Thread[];
+}
+
+/** The list's worst case: every row breaks something different, newest first, across every date group. */
+function worstList(now: number): Thread[] {
+  const w = worstThreads(now);
+  const extra = [
+    thread(30, {
+      contactName: "Aleksandra Wiśniewska-Kowalczyk",
+      subject: "Re: Re: Fwd: RES: Atualização cadastral obrigatória para emissão de nota fiscal eletrônica",
+      snippet: "Bom dia! Segue em anexo a planilha atualizada com os 1.284 CNPJs, conforme combinamos na reunião de ontem.",
+      unreadCount: 12_483,
+      status: "waiting",
+      assignee: "u-aleksandra",
+      assigneeName: "Aleksandra Wiśniewska-Kowalczyk",
+      lastMessageAt: now - 2 * MIN,
+    }),
+    thread(31, {
+      contact: "bartholomew.fitzgerald@northwind-industries-holdings.example.com",
+      subject: "Invoice",
+      snippet: "https://northwind-industries-holdings.example.com/billing/invoices/2026/11/INV-0000482913-final-v2.pdf",
+      status: "closed",
+      assignee: "u-jo",
+      assigneeName: "Jo",
+      lastMessageAt: now - 30 * 60 * MIN,
+    }),
+    thread(32, {
+      contactName: "王秀英",
+      subject: "退款申请",
+      snippet: "您好，我的订单还没有到。",
+      status: "spam",
+      lastMessageAt: now - 3 * DAY,
+    }),
+    thread(33, {
+      contactName: "🦊🦊🦊",
+      subject: "🎉🎉🎉",
+      snippet: "👍",
+      unreadCount: 1,
+      assignee: "u-x",
+      assigneeName: "🦊 Fox",
+      lastMessageAt: now - 20 * DAY,
+    }),
+    thread(34, { contactName: "J", subject: "?", snippet: "", lastMessageAt: now - 40 * DAY }),
+  ];
+  return [...extra, ...w.mine, ...w.waiting.slice(0, 30)].sort((a, b) => b.lastMessageAt - a.lastMessageAt);
 }
 
 export const FIXTURES: Record<DevData, Fixture> = {
@@ -94,12 +140,14 @@ export const FIXTURES: Record<DevData, Fixture> = {
       };
     },
     hasSpam: true,
+    list: worstList,
   },
   empty: {
     mailboxes: [],
     counts: { all: count(0, 0), assigned: count(0, 0), unread: count(0, 0), waiting: count(0, 0) },
     view: () => ({ assigned: { page: [], isDone: true }, waiting: { page: [], isDone: true } }),
     hasSpam: false,
+    list: () => [],
   },
   one: {
     mailboxes: [box("support", "Atendimento", "support@example.com", 1)],
@@ -109,5 +157,22 @@ export const FIXTURES: Record<DevData, Fixture> = {
       waiting: { page: [thread(2, { contactName: "dana", status: "waiting", lastMessageAt: now - 25 * 60 * MIN })], isDone: true },
     }),
     hasSpam: false,
+    list: (now) => [thread(1, { contactName: "J", subject: "1", snippet: "1", unreadCount: 1, lastMessageAt: now - MIN })],
+  },
+  huge: {
+    mailboxes: [box("support", "Atendimento", "support@example.com", 1_000)],
+    counts: { all: count(1_000, 1_000), assigned: count(0, 0), unread: count(1_000, 1_000), waiting: count(0, 0) },
+    view: () => ({ assigned: { page: [], isDone: true }, waiting: { page: [], isDone: true } }),
+    hasSpam: false,
+    list: (now) =>
+      Array.from({ length: 1_000 }, (_, i) =>
+        thread(1_000 + i, {
+          contactName: `Cliente ${i + 1}`,
+          subject: `Pedido ${48_000 + i}`,
+          snippet: "Olá, gostaria de saber o prazo de entrega do meu pedido.",
+          unreadCount: i % 3 === 0 ? 1 : 0,
+          lastMessageAt: now - i * 97 * MIN,
+        }),
+      ),
   },
 };

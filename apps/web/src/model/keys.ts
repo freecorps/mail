@@ -12,13 +12,17 @@ export type ShortcutAction =
   | "escape"
   | "help"
   | "sidebar"
-  | "palette";
+  | "palette"
+  | "select"
+  | "extendNext"
+  | "extendPrev";
 
 export interface KeyLike {
   key: string;
   metaKey?: boolean;
   ctrlKey?: boolean;
   altKey?: boolean;
+  shiftKey?: boolean;
 }
 
 const KEYS: Record<string, ShortcutAction> = {
@@ -37,6 +41,9 @@ const KEYS: Record<string, ShortcutAction> = {
   Escape: "escape",
   "?": "help",
   "[": "sidebar",
+  x: "select",
+  J: "extendNext",
+  K: "extendPrev",
 };
 
 /**
@@ -47,6 +54,9 @@ export function shortcutFor(e: KeyLike, inField: boolean): ShortcutAction | null
   if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") return "palette";
   if (e.metaKey || e.ctrlKey || e.altKey) return null;
   if (inField) return e.key === "Escape" ? "escape" : null;
+  // shift+↓/↑ extend the selection as shift+j/k do.
+  if (e.shiftKey && e.key === "ArrowDown") return "extendNext";
+  if (e.shiftKey && e.key === "ArrowUp") return "extendPrev";
   return KEYS[e.key] ?? null;
 }
 
@@ -81,6 +91,9 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["j", "↓"], action: "next" },
   { keys: ["k", "↑"], action: "prev" },
   { keys: ["Enter", "o"], action: "open" },
+  { keys: ["x"], action: "select" },
+  { keys: ["⇧ j"], action: "extendNext" },
+  { keys: ["⇧ k"], action: "extendPrev" },
   { keys: ["e"], action: "archive" },
   { keys: ["u"], action: "unread" },
   { keys: ["r"], action: "reply" },

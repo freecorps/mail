@@ -223,7 +223,7 @@ Release e bump.
 
 | Tarefa | Status |
 |---|---|
-| W4 lista web | todo |
+| W4 lista web | doing |
 | M5 ajustes + login mobile | todo |
 | E2 tags, atividade, soneca, agendamento, presença (Ember) | done (ember#62, ember#63, v0.7.0) |
 | api/03 Ember 0.7 + wrappers | review (#45) |

@@ -27,6 +27,7 @@ export interface ThreadRow {
   at: number;
   unread: boolean;
   status: ThreadStatus | null;
+  assignee: string | null;
   assigneeName: string | null;
   /** Created offline / not confirmed by the server yet. */
   pending: boolean;
@@ -50,6 +51,7 @@ export function threadRow(t: Thread): ThreadRow {
     at: t.lastMessageAt,
     unread: t.unreadCount > 0,
     status: t.status,
+    assignee: t.assignee ?? null,
     assigneeName: t.assigneeName ?? null,
     pending: isOptimisticId(t._id),
   };
@@ -76,6 +78,7 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       at: h.at,
       unread: false,
       status: null,
+      assignee: null,
       assigneeName: null,
       pending: false,
     });
@@ -164,15 +167,21 @@ export function useThreadList(o: { mailbox: string; view?: View | null; filter: 
   const listKey = `${key}\u0000${searching ? q : ""}`;
   // Derived state, updated during render (React re-renders at once with it).
   if (fresh && (last.rows !== fresh || last.key !== listKey)) setLast({ key: listKey, rows: fresh });
-  const rows = fresh ?? (last.key.startsWith(`${key}\u0000`) ? last.rows : []);
+  const kept = fresh ?? (last.key.startsWith(`${key}\u0000`) ? last.rows : []);
+  const dev = useDevData();
+  const [devNow] = useState(() => Date.now());
+  const devRows = useMemo(() => (import.meta.env.DEV && dev ? FIXTURES[dev].list(devNow).map(threadRow) : null), [dev, devNow]);
+  const rows = devRows ?? kept;
   return {
     rows,
+    /** Rows in date order (lists), not by relevance (search): the list groups them by day. */
+    dated: !searching,
     searching,
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,
     source: sourceOf(s),
     optimistic: s.optimistic,
-    canLoadMore: !searching && !!list.value && !list.value.isDone && (!view || n < VIEW_MAX),
+    canLoadMore: !devRows && !searching && !!list.value && !list.value.isDone && (!view || n < VIEW_MAX),
     loadMore: () => setLimit({ key, n: n + PAGE }),
   };
 }
