@@ -1108,6 +1108,20 @@ describe("mail app", () => {
     const e = await sentEmail(r.value.emailId);
     expect(e.text).toMatch(/Arquivos para baixar \(links válidos até \d{4}-\d{2}-\d{2}\):\na&b\.bin \(10\.0 MB\): \S+/);
     expect(e.html).toMatch(/Arquivos para baixar[^<]*<br>\s*<a href="[^"]+">a&amp;b\.bin<\/a> \(10\.0 MB\)/);
+    // Sent now, the links work 7 days from now.
+    expect(e.text).toContain(`links válidos até ${new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)}`);
+    // Scheduled, they would have to work 7 days from the send, past what a signed URL lives (7 days from now): refused,
+    // with nothing sent. A scheduled send whose files all fit as attachments goes.
+    const later = Date.now() + 3_600_000;
+    const sched = await call("mutation", "inbox:reply", { threadId: t._id, text: "Amanhã.", sendAt: later, signature: false, attachments: [{ file: big, filename: "a&b.bin", contentType: "application/octet-stream" }] }, "user:cia");
+    expect(sched.error.code).toBe("ValidationError");
+    expect(sched.error.message).toMatch(/a scheduled send can't link files: past 10\.0 MB in all, files go as download links, which work at most 7 days from now and must work 7 days from the send/);
+    expect(await call("query", "inbox:scheduled", { threadId: t._id }, "user:cia")).toMatchObject({ value: [] });
+    const small = await upload("cia", new TextEncoder().encode("pequeno"), "text/plain");
+    const ok = await call("mutation", "inbox:reply", { threadId: t._id, text: "Amanhã.", sendAt: later, signature: false, attachments: [{ file: small, filename: "p.txt", contentType: "text/plain" }] }, "user:cia");
+    expect(ok.value).toMatchObject({ status: "scheduled" });
+    expect((await sentEmail(ok.value.emailId)).text).not.toContain("Arquivos para baixar");
+    expect((await call("mutation", "inbox:cancelScheduled", { emailId: ok.value.emailId }, "user:cia")).value).toMatchObject({ ok: true });
     // A text-only reply from an old client: the text becomes the HTML (no card), as before.
     const old = await call("mutation", "inbox:reply", { threadId: t._id, text: "Só texto." }, "user:caio");
     expect(old.error ?? null).toBeNull();

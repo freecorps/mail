@@ -3,7 +3,7 @@
 // via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see every shared one; a personal mailbox
 // only its owner (ember/access.ts). Push devices register here. Lists, counts, tags, the activity timeline, snooze,
 // scheduled sends and presence are the email component's (Ember 0.7), behind the same rule.
-import { anyComponents as components, internalMutationGeneric as internalMutation, internalQueryGeneric as internalQuery, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
+import { anyComponents as components, EmberError, internalMutationGeneric as internalMutation, internalQueryGeneric as internalQuery, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
 import { escapeHtml } from "@freecorps/ember-email";
 import { PushNotifications } from "@freecorps/ember-push";
 import { canSee, canSeeWith, ownerOf, owners, type Member } from "./access.ts";
@@ -67,8 +67,10 @@ function threadOf(ctx: Ctx, threadId: string) {
 export const ATTACH_LIMIT = 10 * 1024 * 1024;
 /** The largest file a member may upload. */
 export const MAX_UPLOAD = 2 * 1024 ** 3;
-/** How long a download link in an email works (Ember's signed URLs go up to 7 days). */
+/** How long a download link in an email works, counted from when the email goes out. */
 export const LINK_TTL_S = 7 * 24 * 3600;
+/** The longest a signed URL of Ember's lives (`ctx.storage.getUrl`: `expiresIn` at most 7 days, clamped above). */
+export const MAX_URL_TTL_S = 7 * 24 * 3600;
 
 const attachmentsArg = v.optional(v.array(v.object({ file: v.string(), filename: v.string(), contentType: v.string() })));
 type AttachmentArg = { file: string; filename: string; contentType: string };
@@ -79,9 +81,10 @@ const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n 
  * Splits the files into attachments and links (smallest attach first, up to ATTACH_LIMIT) and appends the links to
  * the text, and to the composer's HTML body when there is one. Every file must be uploaded (ready) already. `list`:
  * the member's own uploads; `trusted`: files already in a thread they can see (a forwarded message's attachments),
- * which need no upload of theirs.
+ * which need no upload of theirs. `sendAt`: a scheduled send's time; its links must work LINK_TTL_S from then, which
+ * the URL signer allows only up to MAX_URL_TTL_S from now, so a scheduled send past that with linked files is refused.
  */
-export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = [], bodyHtml?: string) {
+export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = [], bodyHtml?: string, sendAt?: number) {
   const own = list ?? [];
   if (!own.length && !trusted.length) return { text, bodyHtml, attachments: undefined };
   if (own.length + trusted.length > L.attachments) throw new Error(`at most ${L.attachments} attachments`);
@@ -101,9 +104,18 @@ export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: str
     else link.add(f.file);
   }
   if (!link.size) return { text, bodyHtml, attachments: files.map(({ size: _, ...a }) => a) };
-  const until = new Date(ctx.now + LINK_TTL_S * 1000).toISOString().slice(0, 10);
+  // Valid LINK_TTL_S from the send (now, or the scheduled time): signed now, so the URL has to live until then too.
+  const from = Math.max(ctx.now, sendAt ?? ctx.now);
+  const expiresIn = Math.ceil((from - ctx.now) / 1000) + LINK_TTL_S;
+  if (expiresIn > MAX_URL_TTL_S) {
+    throw new EmberError(
+      "ValidationError",
+      `a scheduled send can't link files: past ${mib(ATTACH_LIMIT)} in all, files go as download links, which work at most ${MAX_URL_TTL_S / 86_400} days from now and must work ${LINK_TTL_S / 86_400} days from the send. Send it now, or attach less`,
+    );
+  }
+  const until = new Date(from + LINK_TTL_S * 1000).toISOString().slice(0, 10);
   const head = `Arquivos para baixar (links válidos até ${until}):`;
-  const linked = files.filter((f) => link.has(f.file)).map((f) => ({ ...f, url: ctx.storage.getUrl(f.file, { download: f.filename, expiresIn: LINK_TTL_S }) as string }));
+  const linked = files.filter((f) => link.has(f.file)).map((f) => ({ ...f, url: ctx.storage.getUrl(f.file, { download: f.filename, expiresIn }) as string }));
   const html = linked.map((f) => `<a href="${escapeHtml(f.url)}">${escapeHtml(f.filename)}</a> (${mib(f.size)})`).join("<br>");
   return {
     text: `${text}\n\n—\n${head}\n${linked.map((f) => `${f.filename} (${mib(f.size)}): ${f.url}`).join("\n")}`,
@@ -412,7 +424,7 @@ function copiesOf(a: { cc?: string[]; bcc?: string[] }) {
 }
 
 /** `sendAt` of a send: a time in ms up to MAX_SEND_AHEAD_MS ahead (a past one sends now). */
-function sendAtOf(ctx: { now: number }, sendAt: number | undefined) {
+function sendAtOf(ctx: { now: number }, sendAt: number | undefined): { sendAt?: number } {
   if (sendAt === undefined) return {};
   if (!Number.isFinite(sendAt)) throw new Error("sendAt: a time in ms");
   if (sendAt > ctx.now + MAX_SEND_AHEAD_MS) throw new Error("sendAt: at most 366 days ahead");
@@ -452,13 +464,14 @@ export const reply = mutation({
     const { t, m } = threadOf(ctx, a.threadId);
     const draft = draftOf(ctx, m, a.draftId);
     const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
-    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml);
+    const at = sendAtOf(ctx, a.sendAt);
+    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
     const sent = ctx.runMutation(email.reply, {
       threadId: a.threadId,
       text: w.text,
       author: displayName(m),
       ...copiesOf(a),
-      ...sendAtOf(ctx, a.sendAt),
+      ...at,
       ...extras,
       ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
       ...(w.attachments ? { attachments: w.attachments } : {}),
@@ -484,12 +497,13 @@ export const forward = mutation({
     // Not the inline images of its HTML (signature logos): nothing in the forward shows them.
     const original = msg.attachments.filter((f) => !(f.inline && f.contentId)).map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
     const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
-    const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml);
+    const at = sendAtOf(ctx, a.sendAt);
+    const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml, at.sendAt);
     const sent = ctx.runMutation(email.compose, {
       mailbox: t.thread.mailbox,
       to: a.to,
       ...copiesOf(a),
-      ...sendAtOf(ctx, a.sendAt),
+      ...at,
       subject: a.subject,
       text: w.text,
       author: displayName(m),
@@ -574,12 +588,13 @@ export const compose = mutation({
     const m = allowed(ctx, a.mailbox);
     const draft = draftOf(ctx, m, a.draftId);
     const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
-    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml);
+    const at = sendAtOf(ctx, a.sendAt);
+    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
     const sent = ctx.runMutation(email.compose, {
       mailbox: a.mailbox,
       to: a.to,
       ...copiesOf(a),
-      ...sendAtOf(ctx, a.sendAt),
+      ...at,
       subject: a.subject,
       text: w.text,
       author: displayName(m),
