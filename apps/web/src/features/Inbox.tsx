@@ -520,7 +520,8 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       onNext={nextId ? () => open(nextId) : undefined}
       showBack={overlay}
       composerRef={composer}
-      onOpenThread={(id) => navigate({ thread: id }, { push: true })}
+      // From the context panel (an earlier conversation): the list cursor follows, so j/k continue from it.
+      onOpenThread={open}
       admin={me.admin}
     />
   ) : null;

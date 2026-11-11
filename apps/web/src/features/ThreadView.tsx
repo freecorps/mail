@@ -127,6 +127,11 @@ export function ThreadView({
     return () => ro.disconnect();
     // The pane exists once the thread has loaded (the skeleton has none).
   }, [loaded]);
+  // The overlay is for a narrow pane only: widening past the side column closes it, so narrowing again does not bring
+  // it back on its own.
+  useEffect(() => {
+    if (roomy) setOverlay(false);
+  }, [roomy]);
   const contextShown = roomy === null ? false : roomy ? prefs.contextPanel : overlay;
   const { contextPanel, setContextPanel } = prefs;
   const toggleContext = useCallback(() => {
