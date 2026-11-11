@@ -34,7 +34,7 @@ import { useNow } from "@/lib/now";
 import { usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { toTarget, useThreadActions } from "@/model/actions";
-import { cursorIndex, listItems, loadMoreDue, type ListItem } from "@/model/listItems";
+import { cursorIndex, listItems, loadMoreDue, selectable, visibleSelection, type ListItem } from "@/model/listItems";
 import { rowDomId, STATUS_TABS, type ThreadFilter, type ThreadRow } from "@/model/threads";
 import { AssignItems } from "./AssignMenu";
 
@@ -139,7 +139,9 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
     onLoadMore();
   }, [place, lastIndex, items.length, canLoadMore, loading, onLoadMore]);
 
-  const selectedRows = useMemo(() => (p.selected.size ? p.rows.filter((r) => p.selected.has(r.threadId)) : []), [p.rows, p.selected]);
+  // Pending rows are never part of it (nor of "all"): their checkbox is disabled and nothing may act on them yet.
+  const selectedRows = useMemo(() => visibleSelection(p.selected, p.rows), [p.rows, p.selected]);
+  const selectableCount = useMemo(() => selectable(p.rows).length, [p.rows]);
   const selecting = selectedRows.length > 0;
 
   // The filters are tabs over the list: the list is the active tab's panel (Radix links them with aria-controls).
@@ -192,7 +194,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
                       dated={p.dated}
                       open={it.row.threadId === p.openId}
                       cursor={it.row.threadId === p.cursorId}
-                      checked={p.selected.has(it.row.threadId)}
+                      checked={!it.row.pending && p.selected.has(it.row.threadId)}
                       selecting={selecting}
                       showStatus={statusShown(it.row.status)}
                       mailboxName={p.mailboxNames ? (p.mailboxNames[it.row.mailbox] ?? it.row.mailbox) : null}
@@ -217,7 +219,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
     </div>
   );
 
-  const allChecked = selecting && selectedRows.length === p.rows.length;
+  const allChecked = selecting && selectedRows.length === selectableCount;
   return (
     <Tabs asChild value={p.filter} onValueChange={(v) => p.onFilter(v as ThreadFilter)} activationMode="manual">
       <section aria-label={t("threads.list")} className={cn("flex min-w-0 flex-col bg-background", p.className)}>

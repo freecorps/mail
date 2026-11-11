@@ -27,7 +27,7 @@ import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/pr
 import { cn } from "@/lib/utils";
 import { escapeStep, isTextField, moveSelection, shortcutFor } from "@/model/keys";
 import { cachedStatus, toTarget, useThreadActions } from "@/model/actions";
-import { extendSelection, selectRange, toggleSelected, visibleSelection } from "@/model/listItems";
+import { extendSelection, selectable, selectRange, toggleSelected, visibleSelection } from "@/model/listItems";
 import { useRoute, useSearchBox } from "@/model/route";
 import { useMailboxes, useThreadList } from "@/model/threads";
 import { DataToggle } from "@/dev/DataToggle";
@@ -151,7 +151,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       setSelected(
         how === "range"
           ? selectRange(
-              rows.map((r) => r.threadId),
+              selectable(rows).map((r) => r.threadId),
               selected,
               anchor.current,
               threadId,
@@ -164,7 +164,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   );
   const onSelectAll = useCallback(
     (all: boolean) => {
-      setSelected(all ? new Set(rows.map((r) => r.threadId)) : EMPTY_SET);
+      setSelected(all ? new Set(selectable(rows).map((r) => r.threadId)) : EMPTY_SET);
       if (!all) anchor.current = null;
     },
     [rows, setSelected],

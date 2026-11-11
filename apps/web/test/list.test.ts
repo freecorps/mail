@@ -11,6 +11,7 @@ import {
   extendSelection,
   listItems,
   loadMoreDue,
+  selectable,
   selectRange,
   toggleSelected,
   visibleSelection,
@@ -93,6 +94,23 @@ describe("selection", () => {
     const rows = [{ threadId: "a" }, { threadId: "c" }];
     expect(visibleSelection(new Set(["a", "b"]), rows)).toEqual([{ threadId: "a" }]);
     expect(visibleSelection(new Set(), rows)).toEqual([]);
+  });
+
+  it("pending rows (not confirmed by the server) are never selected nor acted on", () => {
+    const rows = [{ threadId: "a" }, { threadId: "optimistic:1", pending: true }, { threadId: "c", pending: false }];
+    // Select all, shift-click and the bulk bar all go through these.
+    expect(selectable(rows).map((r) => r.threadId)).toEqual(["a", "c"]);
+    expect(
+      [
+        ...selectRange(
+          selectable(rows).map((r) => r.threadId),
+          new Set(),
+          "a",
+          "c",
+        ),
+      ].sort(),
+    ).toEqual(["a", "c"]);
+    expect(visibleSelection(new Set(["a", "optimistic:1"]), rows).map((r) => r.threadId)).toEqual(["a"]);
   });
 
   it("Escape: a selection that left the list does not swallow it (the open conversation closes)", () => {

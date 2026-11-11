@@ -96,10 +96,19 @@ export function extendSelection(
   return { selected: next, cursor: ids[to]! };
 }
 
-/** The selection as the list has it now: threads that left the list (archived away, another page) drop out. */
-export function visibleSelection<T extends { threadId: string }>(selected: ReadonlySet<string>, rows: readonly T[]): T[] {
+/** Rows that can be selected: not ones the server has not confirmed yet (their checkbox is disabled, no actions). */
+export const selectable = <T extends { pending?: boolean }>(rows: readonly T[]): T[] => rows.filter((r) => !r.pending);
+
+/**
+ * The selection as the list has it now: threads that left the list (archived away, another page) drop out, and so do
+ * pending rows (shift+j/k can step over one; no action may target an id the server has not confirmed).
+ */
+export function visibleSelection<T extends { threadId: string; pending?: boolean }>(
+  selected: ReadonlySet<string>,
+  rows: readonly T[],
+): T[] {
   if (!selected.size) return [];
-  return rows.filter((r) => selected.has(r.threadId));
+  return rows.filter((r) => !r.pending && selected.has(r.threadId));
 }
 
 /**
