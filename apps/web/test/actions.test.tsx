@@ -1,16 +1,23 @@
 // Archive and its "Desfazer" against the real mail service: each thread goes back to the status it had, also when the
 // row does not carry one (search hits; the open thread when the list does not have it).
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { EmberProvider } from "@freecorps/ember-react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { api } from "@/lib/api";
 import { createMailClient } from "@/lib/ember";
 import { useThreadActions } from "@/model/actions";
+import { useThreadList } from "@/model/threads";
 import { mailServer } from "./mailServer";
 
-const toasts = vi.hoisted(() => [] as Array<{ action?: { onClick: () => void } }>);
-vi.mock("sonner", () => ({ toast: (_: string, o: (typeof toasts)[number]) => void toasts.push(o) }));
+const toasts = vi.hoisted(() => [] as Array<{ id?: number; action?: { onClick: () => void } }>);
+// Like sonner: a new toast gets an id; a call with an id updates that toast (recorded too).
+vi.mock("sonner", () => ({
+  toast: (_: string, o: (typeof toasts)[number]) => {
+    toasts.push(o);
+    return o.id ?? toasts.length;
+  },
+}));
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -37,7 +44,8 @@ function setup() {
   return { srv, a, client, wrapper, status };
 }
 
-const undo = () => toasts.at(-1)!.action!.onClick();
+/** Desfazer on the toast as first shown. */
+const undo = () => toasts[0]!.action!.onClick();
 
 describe("archive undo", () => {
   it("a search hit (no status on the row) that was waiting goes back to waiting", async () => {
@@ -50,15 +58,32 @@ describe("archive undo", () => {
     await waitFor(async () => expect(await status()).toBe("waiting"));
   });
 
-  it("a search hit already archived stays archived after Desfazer", async () => {
+  it("a search hit already archived: Desfazer is withdrawn, and pressing it anyway keeps it archived", async () => {
     const { srv, a, wrapper, status } = setup();
     srv.m("@email/lib:setStatus", { threadId: a.threadId, status: "closed" });
     const { result } = renderHook(() => useThreadActions(), { wrapper });
     result.current.archive([{ threadId: a.threadId, status: null, unread: false }]);
-    await waitFor(() => expect(toasts).toHaveLength(1));
+    expect(toasts[0]!.action).toBeDefined();
+    // Once the read says there is nothing to undo, the same toast is updated without Desfazer.
+    await waitFor(() => expect(toasts).toHaveLength(2));
+    expect(toasts[1]).toMatchObject({ id: 1, action: undefined });
     undo();
     await new Promise((r) => setTimeout(r, 50));
     expect(await status()).toBe("closed");
+  });
+
+  it("the archive applies at once: it does not wait for the status read", async () => {
+    const { a, wrapper } = setup();
+    const { result } = renderHook(
+      () => ({ list: useThreadList({ mailbox: "support", filter: "open", query: "" }), actions: useThreadActions() }),
+      {
+        wrapper,
+      },
+    );
+    await waitFor(() => expect(result.current.list.rows.map((r) => r.threadId)).toContain(a.threadId));
+    act(() => result.current.actions.archive([{ threadId: a.threadId, status: null, unread: false }]));
+    // Same tick: the optimistic patch already took it out of the open list.
+    expect(result.current.list.rows.map((r) => r.threadId)).not.toContain(a.threadId);
   });
 
   it("a row that carries its status (spam) goes back to it", async () => {

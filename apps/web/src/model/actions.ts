@@ -31,8 +31,9 @@ export const cachedStatus = (client: EmberClient, threadId: string): ThreadStatu
   client.localQueryResult(api.inbox.thread, { threadId }).value?.thread.status ?? null;
 
 /**
- * The status a thread has before an action changes it: the target's, else the loaded conversation's (both at once),
- * else the server's (one read). Null when it cannot be known (that thread then has nothing to undo).
+ * The status a thread has before an action changes it, for undo only: the target's, else the loaded conversation's
+ * (both known at once; read before the optimistic patch), else the server's, from one read sent before the write (same
+ * connection, so it sees the thread as it was). Null when it cannot be known: that thread has nothing to undo.
  */
 export function statusBefore(client: EmberClient, x: ActionTarget): ThreadStatus | null | Promise<ThreadStatus | null> {
   const known = x.status ?? cachedStatus(client, x.threadId);
@@ -55,24 +56,21 @@ export function useThreadActions() {
   const assignTo = useMutation(api.inbox.assign);
 
   /**
-   * Archives the threads, or reopens them when every one is archived already (the `e` toggle). The toast says what
-   * happened and undoes it: each thread goes back to the status it had before (read first when the target does not
-   * carry it, so a search hit that was waiting goes back to waiting, and one already archived stays archived).
+   * Archives the threads, or reopens them when every one is archived already (the `e` toggle), at once (optimistic).
+   * The toast says what happened and undoes it: each thread goes back to the status it had before. Rows without one
+   * (search hits) have it read alongside the write; Desfazer waits for that read, and the toast drops Desfazer when
+   * nothing turns out to be undoable (statuses unknown, or already what the action set).
    */
   const archive = useCallback(
     (targets: readonly ActionTarget[]) => {
       if (!targets.length) return;
       const reopen = targets.every((x) => x.status === "closed");
       const status: ThreadStatus = reopen ? "open" : "closed";
-      // Each write waits for its thread's status to be known (no wait when the row or the cache has it).
-      const before = targets.map((x) => {
-        const was = statusBefore(client, x);
-        const write = (s: ThreadStatus | null) => {
-          quiet(setStatus({ threadId: x.threadId, status }));
-          return { threadId: x.threadId, status: s };
-        };
-        return was instanceof Promise ? was.then(write) : write(was);
-      });
+      // Read first (the cache before the optimistic patch, the server read before the write), never waited on here.
+      const before = targets.map((x) => statusBefore(client, x));
+      for (const x of targets) quiet(setStatus({ threadId: x.threadId, status }));
+      const restore = (was: ReadonlyArray<ThreadStatus | null>) =>
+        targets.flatMap((x, i) => (was[i] && was[i] !== status ? [{ threadId: x.threadId, status: was[i]! }] : []));
       const n = targets.length;
       const message =
         n === 1
@@ -80,17 +78,22 @@ export function useThreadActions() {
             ? t("thread.reopened")
             : t("thread.archived")
           : t(plural(locale, reopen ? "list.reopenedMany" : "list.archivedMany", n), { count: n });
-      toast(message, {
+      const id = toast(message, {
         duration: UNDO_MS,
         action: {
           label: t("common.undo"),
           onClick: () => {
             void Promise.all(before).then((was) => {
-              for (const x of was) if (x.status && x.status !== status) quiet(setStatus({ threadId: x.threadId, status: x.status }));
+              for (const x of restore(was)) quiet(setStatus(x));
             });
           },
         },
       });
+      if (before.some((b) => b instanceof Promise)) {
+        void Promise.all(before).then((was) => {
+          if (!restore(was).length) toast(message, { id, duration: UNDO_MS, action: undefined });
+        });
+      }
     },
     [client, setStatus, t, locale],
   );

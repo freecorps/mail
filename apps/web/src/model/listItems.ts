@@ -61,21 +61,31 @@ export function listItems(rows: readonly ThreadRow[], o: { grouped: boolean; now
   return out;
 }
 
+/** Which ids may join a selection (`can`): the selection helpers never add another (pending rows, in the inbox). */
+export type CanSelect = (id: string) => boolean;
+const anyRow: CanSelect = () => true;
+
 /** `x` / ⌘-click: one thread in or out of the selection. */
-export function toggleSelected(selected: ReadonlySet<string>, id: string): Set<string> {
+export function toggleSelected(selected: ReadonlySet<string>, id: string, can: CanSelect = anyRow): Set<string> {
   const next = new Set(selected);
-  if (!next.delete(id)) next.add(id);
+  if (!next.delete(id) && can(id)) next.add(id);
   return next;
 }
 
 /** Shift-click: everything between the anchor (the last thread toggled) and `id` joins the selection. */
-export function selectRange(ids: readonly string[], selected: ReadonlySet<string>, anchor: string | null, id: string): Set<string> {
+export function selectRange(
+  ids: readonly string[],
+  selected: ReadonlySet<string>,
+  anchor: string | null,
+  id: string,
+  can: CanSelect = anyRow,
+): Set<string> {
   const next = new Set(selected);
   const a = anchor === null ? -1 : ids.indexOf(anchor);
   const b = ids.indexOf(id);
   if (b < 0) return next;
-  if (a < 0) return next.add(id);
-  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) next.add(ids[i]!);
+  if (a < 0) return can(id) ? next.add(id) : next;
+  for (let i = Math.min(a, b); i <= Math.max(a, b); i++) if (can(ids[i]!)) next.add(ids[i]!);
   return next;
 }
 
@@ -85,14 +95,15 @@ export function extendSelection(
   selected: ReadonlySet<string>,
   cursor: string | null,
   delta: 1 | -1,
+  can: CanSelect = anyRow,
 ): { selected: Set<string>; cursor: string | null } {
   if (!ids.length) return { selected: new Set(selected), cursor: null };
   const i = cursor === null ? -1 : ids.indexOf(cursor);
   const from = i < 0 ? (delta > 0 ? 0 : ids.length - 1) : i;
   const to = i < 0 ? from : Math.min(ids.length - 1, Math.max(0, from + delta));
   const next = new Set(selected);
-  next.add(ids[from]!);
-  next.add(ids[to]!);
+  // The cursor still moves over a row that cannot be selected; the row just does not join.
+  for (const x of [ids[from]!, ids[to]!]) if (can(x)) next.add(x);
   return { selected: next, cursor: ids[to]! };
 }
 

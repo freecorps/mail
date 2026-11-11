@@ -113,6 +113,19 @@ describe("selection", () => {
     expect(visibleSelection(new Set(["a", "optimistic:1"]), rows).map((r) => r.threadId)).toEqual(["a"]);
   });
 
+  it("pending ids never enter the selection: x, shift-click, shift+j/k", () => {
+    const ids = ["a", "p", "c"];
+    const can = (id: string) => id !== "p";
+    expect([...toggleSelected(new Set(), "p", can)]).toEqual([]);
+    expect([...toggleSelected(new Set(["a"]), "a", can)]).toEqual([]);
+    expect([...selectRange(ids, new Set(), "a", "c", can)].sort()).toEqual(["a", "c"]);
+    expect([...selectRange(ids, new Set(), null, "p", can)]).toEqual([]);
+    // The cursor still moves onto (and past) the pending row; only the confirmed rows join.
+    const down = extendSelection(ids, new Set(), "a", 1, can);
+    expect(down).toEqual({ selected: new Set(["a"]), cursor: "p" });
+    expect(extendSelection(ids, down.selected, down.cursor, 1, can)).toEqual({ selected: new Set(["a", "c"]), cursor: "c" });
+  });
+
   it("Escape: a selection that left the list does not swallow it (the open conversation closes)", () => {
     const rows = [{ threadId: "a" }];
     const selected = visibleSelection(new Set(["gone"]), rows).length;

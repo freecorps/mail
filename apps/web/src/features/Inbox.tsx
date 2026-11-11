@@ -27,7 +27,7 @@ import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/pr
 import { cn } from "@/lib/utils";
 import { escapeStep, isTextField, moveSelection, shortcutFor } from "@/model/keys";
 import { cachedStatus, toTarget, useThreadActions } from "@/model/actions";
-import { extendSelection, selectable, selectRange, toggleSelected, visibleSelection } from "@/model/listItems";
+import { extendSelection, selectable, selectRange, toggleSelected, visibleSelection, type CanSelect } from "@/model/listItems";
 import { useRoute, useSearchBox } from "@/model/route";
 import { useMailboxes, useThreadList } from "@/model/threads";
 import { DataToggle } from "@/dev/DataToggle";
@@ -51,6 +51,12 @@ const AdminView = (p: React.ComponentProps<typeof LazyAdminView>) => (
 );
 
 const EMPTY_SET: ReadonlySet<string> = new Set();
+
+/** Rows the server has not confirmed yet never join a selection (their checkbox is disabled, nothing acts on them). */
+const confirmed = (rows: readonly ThreadRow[]): CanSelect => {
+  const pending = new Set(rows.filter((r) => r.pending).map((r) => r.threadId));
+  return (id) => !pending.has(id);
+};
 const NO_ROWS: ThreadRow[] = [];
 
 const MODE_ICON: Record<ReadingMode, typeof Columns3> = { split: Columns3, full: Columns2, focus: LayoutList };
@@ -151,12 +157,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       setSelected(
         how === "range"
           ? selectRange(
-              selectable(rows).map((r) => r.threadId),
+              rows.map((r) => r.threadId),
               selected,
               anchor.current,
               threadId,
+              confirmed(rows),
             )
-          : toggleSelected(selected, threadId),
+          : toggleSelected(selected, threadId, confirmed(rows)),
       );
       anchor.current = threadId;
     },
@@ -238,21 +245,23 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           }
           if (!target) return;
           // The open thread may not be in the list (another view, a search): its loaded conversation has the status.
+          // A row the server has not confirmed yet is not acted on.
           const row = s.rows.find((r) => r.threadId === target);
+          if (row?.pending) return;
           actions.archive([row ? toTarget(row) : { threadId: target, status: cachedStatus(client, target), unread: false }]);
           return;
         }
         case "select": {
           const id = s.cursor ?? s.thread;
           if (!id) return;
-          setSelected(toggleSelected(s.selected, id));
+          setSelected(toggleSelected(s.selected, id, confirmed(s.rows)));
           anchor.current = id;
           return;
         }
         case "extendNext":
         case "extendPrev": {
           e.preventDefault();
-          const r = extendSelection(ids, s.selected, s.cursor ?? s.thread, action === "extendNext" ? 1 : -1);
+          const r = extendSelection(ids, s.selected, s.cursor ?? s.thread, action === "extendNext" ? 1 : -1, confirmed(s.rows));
           setSelected(r.selected);
           setCursor(r.cursor);
           anchor.current = r.cursor;
