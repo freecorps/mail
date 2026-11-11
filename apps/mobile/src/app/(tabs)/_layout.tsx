@@ -1,9 +1,11 @@
-// Native tabs (UITabBarController / Material 3 navigation bar): Inbox and Settings, each with its own native stack.
+// Native tabs (UITabBarController / Material 3 navigation bar): Caixas (views and mailboxes), Minhas (assigned to me),
+// Ajustes, and search (role "search": a separate button on iOS 26), each with its own native stack. A thread opens on
+// the root stack, above the tabs (no tab bar in a conversation, like Mail.app).
 import { NativeTabs } from "expo-router/native-tabs";
 import { useEffect } from "react";
 import { Icons } from "../../components/icons";
 import { useI18n } from "../../i18n";
-import { useMailboxes } from "../../model/threads";
+import { badge, useMailboxes, useViewCounts } from "../../model/threads";
 import { setInboxMounted } from "../../navigation";
 import { flushNotificationTarget, useNotificationRouting } from "../../push/usePush";
 import { useColors } from "../../theme";
@@ -12,6 +14,8 @@ export default function TabsLayout() {
   const c = useColors();
   const { t } = useI18n();
   const { totalUnread } = useMailboxes();
+  // Minhas: how many of my conversations have unread messages (my to-do with something new in it).
+  const mineUnread = useViewCounts()?.assigned.unread ?? 0;
   useNotificationRouting();
   useEffect(() => {
     setInboxMounted(true);
@@ -20,15 +24,24 @@ export default function TabsLayout() {
   }, []);
 
   return (
-    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown">
-      <NativeTabs.Trigger name="(inbox)">
-        <NativeTabs.Trigger.Icon sf={{ default: Icons.inbox.ios, selected: Icons.inboxSelected.ios }} md={Icons.inbox.android} />
-        <NativeTabs.Trigger.Label>{t("mailboxes.title")}</NativeTabs.Trigger.Label>
-        {totalUnread > 0 ? <NativeTabs.Trigger.Badge>{totalUnread > 99 ? "99+" : String(totalUnread)}</NativeTabs.Trigger.Badge> : null}
+    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown" labelVisibilityMode="labeled">
+      <NativeTabs.Trigger name="(mailboxes)">
+        <NativeTabs.Trigger.Icon sf={{ default: Icons.mailboxes.ios, selected: Icons.mailboxesSelected.ios }} md={Icons.mailboxes.android} />
+        <NativeTabs.Trigger.Label>{t("tabs.mailboxes")}</NativeTabs.Trigger.Label>
+        {totalUnread > 0 ? <NativeTabs.Trigger.Badge>{badge(totalUnread)}</NativeTabs.Trigger.Badge> : null}
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="(mine)">
+        <NativeTabs.Trigger.Icon sf={{ default: Icons.mine.ios, selected: Icons.mineSelected.ios }} md={Icons.mine.android} />
+        <NativeTabs.Trigger.Label>{t("tabs.mine")}</NativeTabs.Trigger.Label>
+        {mineUnread > 0 ? <NativeTabs.Trigger.Badge>{badge(mineUnread)}</NativeTabs.Trigger.Badge> : null}
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="(settings)">
         <NativeTabs.Trigger.Icon sf={{ default: Icons.settings.ios, selected: Icons.settingsSelected.ios }} md={Icons.settings.android} />
-        <NativeTabs.Trigger.Label>{t("settings.title")}</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label>{t("tabs.settings")}</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="(search)" role="search">
+        <NativeTabs.Trigger.Icon sf={Icons.search.ios} md={Icons.search.android} />
+        <NativeTabs.Trigger.Label>{t("tabs.search")}</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );

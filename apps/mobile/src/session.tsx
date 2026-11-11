@@ -4,6 +4,7 @@ import { createContext, use, useCallback, useMemo, type ReactNode } from "react"
 import { api } from "./api";
 import { PUSH_TRANSPORT } from "./config";
 import { authClient, clearReplica } from "./ember";
+import { setReplicaUser } from "./offline/replica";
 import type { LanguagePref } from "./prefs";
 import { pushTransport, type PushRegistration } from "./push/transport";
 import { usePushRegistration } from "./push/usePush";
@@ -47,6 +48,9 @@ export function SessionProvider({ lang, children }: { lang: Lang; children: Reac
 function Member({ auth, lang, children }: { auth: UseEmberAuthTokenResult; lang: Lang; children: ReactNode }) {
   const me = useQuerySnapshot(api.inbox.me, {});
   const member = me.value?.member ? me.value.userId : null;
+  // The offline twin of "assigned to me" needs to know who "me" is (local queries carry no identity). Set before the
+  // children render (idempotent), so their first local answer already has it.
+  setReplicaUser(member);
   const push = usePushRegistration(member, transport);
   const unregister = useMutation(api.inbox.unregisterDevice);
 

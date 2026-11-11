@@ -1,7 +1,8 @@
 // View models of the mailbox and thread-list screens (hooks over live queries; the row builders are pure).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuerySnapshot } from "@freecorps/ember-react-native";
-import { api, type Mailbox, type SearchHit, type SentThread, type Thread, type ThreadStatus } from "../api";
+import { api, type InboxView, type Mailbox, type SearchHit, type SentThread, type Thread, type ThreadStatus, type ViewCounts } from "../api";
+import type { StringKey } from "../i18n";
 import { contactOf, displayAddress } from "../lib/format";
 import { isOptimisticId } from "../offline/optimistic";
 
@@ -9,6 +10,21 @@ import { isOptimisticId } from "../offline/optimistic";
 export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent";
 export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed", "sent"];
 export const PAGE = 30;
+
+/** What a list shows: one mailbox, or a view across the member's mailboxes (apps/api `inbox:view`). */
+export type ListSource = { mailbox: string; view?: undefined } | { view: InboxView; mailbox?: undefined };
+
+/** The filters a list offers: a mailbox has a Sent view; "waiting" is already a status; views have no Sent. */
+export function filtersFor(source: ListSource): ThreadFilter[] {
+  if (source.mailbox !== undefined) return THREAD_FILTERS;
+  return source.view === "waiting" ? [] : ["all", "open", "waiting", "closed"];
+}
+
+/** A filter's label: in "assigned" and "unread", no status means the open and waiting ones (the server's default). */
+export function filterLabelKey(source: ListSource, f: ThreadFilter): StringKey {
+  if (f === "all" && (source.view === "assigned" || source.view === "unread")) return "threads.filter.active";
+  return `threads.filter.${f}`;
+}
 
 export interface ThreadRow {
   key: string;
@@ -99,26 +115,33 @@ export function useMailboxes() {
 
 export const MIN_QUERY = 2;
 
-export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query: string }) {
+/** `mailbox`: one mailbox's list (with Sent); `view`: a view across the member's mailboxes (search covers them all). */
+export function useThreadList(o: ListSource & { filter: ThreadFilter; query: string; searchOnly?: boolean }) {
   const [limit, setLimit] = useState({ key: "", n: PAGE });
-  const key = `${o.mailbox}\u0000${o.filter}`;
+  const key = `${o.mailbox ?? `view:${o.view}`}\u0000${o.filter}`;
   const n = limit.key === key ? limit.n : PAGE;
   const q = o.query.trim();
   const searching = q.length >= MIN_QUERY;
-  const sentView = o.filter === "sent";
-  const inbox = useQuerySnapshot(
-    api.inbox.threads,
-    searching || sentView
-      ? "skip"
-      : { mailbox: o.mailbox, ...(o.filter === "all" ? {} : { status: o.filter }), paginationOpts: { numItems: n, cursor: null } },
-  );
-  const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox: o.mailbox, limit: n } : "skip");
-  const list = sentView ? sent : inbox;
-  const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, mailbox: o.mailbox } : "skip");
+  const mailbox = o.mailbox;
+  const sentView = mailbox !== undefined && o.filter === "sent";
+  const status = o.filter === "all" || o.filter === "sent" ? {} : { status: o.filter };
+  const inbox = useQuerySnapshot(api.inbox.threads, searching || sentView || mailbox === undefined ? "skip" : { mailbox, ...status, paginationOpts: { numItems: n, cursor: null } });
+  // The search tab lists nothing until there is a query: no view read (or paged) behind it.
+  const view = useQuerySnapshot(api.inbox.view, searching || o.searchOnly || o.view === undefined ? "skip" : { view: o.view, ...(o.view === "waiting" ? {} : status), limit: n });
+  const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox, limit: n } : "skip");
+  const list = sentView ? sent : mailbox === undefined ? view : inbox;
+  const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, ...(mailbox ? { mailbox } : {}) } : "skip");
   const s = searching ? search : list;
   const fresh = useMemo(
-    () => (s.value === undefined ? null : searching ? searchRows(search.value ?? []) : sentView ? (sent.value?.page ?? []).map(sentRow) : (inbox.value?.page ?? []).map(threadRow)),
-    [searching, sentView, s.value, search.value, sent.value, inbox.value],
+    () =>
+      s.value === undefined
+        ? null
+        : searching
+          ? searchRows(search.value ?? [])
+          : sentView
+            ? (sent.value?.page ?? []).map(sentRow)
+            : ((mailbox === undefined ? view.value?.page : inbox.value?.page) ?? []).map(threadRow),
+    [searching, sentView, mailbox, s.value, search.value, sent.value, inbox.value, view.value],
   );
   // While a bigger page (or a new search) loads, keep showing the previous rows of the same list.
   const last = useRef<{ key: string; rows: ThreadRow[] }>({ key: "", rows: [] });
@@ -133,8 +156,21 @@ export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query:
     source: sourceOf(s),
     optimistic: s.optimistic,
     canLoadMore: !searching && !!list.value && !list.value.isDone,
+    /** A view that may miss older matches (the server scans a bounded window per mailbox). */
+    partial: !searching && !!view.value?.partial && mailbox === undefined,
     loadMore: () => setLimit({ key, n: n + PAGE }),
   };
+}
+
+/** The home screen's counts per view (`inbox:views`); zeros until they load. */
+export function useViewCounts(): ViewCounts | null {
+  const s = useQuerySnapshot(api.inbox.views, {});
+  return s.value ?? null;
+}
+
+/** A count as a badge: "99+" past 99, "+" when the server's count is a lower bound. */
+export function badge(n: number, capped = false): string {
+  return n > 99 ? "99+" : `${n}${capped ? "+" : ""}`;
 }
 
 /** Your own mailbox first, then the shared ones as the server lists them (stable). */

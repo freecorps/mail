@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { api } from "../src/api";
 import { createMailClient } from "../src/client";
 import { useMembers, useThread } from "../src/model/thread";
-import { useMailboxes, useThreadList, type ThreadFilter } from "../src/model/threads";
+import { useMailboxes, useThreadList, useViewCounts, type ThreadFilter } from "../src/model/threads";
 import { mailServer, tempDir } from "./mailServer";
 
 const cleanups: Array<() => void> = [];
@@ -46,6 +46,30 @@ describe("view models", () => {
     expect(result.current.totalUnread).toBe(2);
     await client.mutation(api.inbox.markRead, { threadId: a.threadId });
     await waitFor(() => expect(result.current.totalUnread).toBe(1));
+  });
+
+  it("views: all, assigned to me and waiting across the member's mailboxes, a status filter, and the home counts", async () => {
+    const { wrapper, client, a, b } = setup();
+    await client.mutation(api.inbox.assign, { threadId: a.threadId, userId: "agent-1" });
+    await client.mutation(api.inbox.setStatus, { threadId: b.threadId, status: "waiting" });
+    const { result } = renderHook(
+      () => ({
+        all: useThreadList({ view: "all", filter: "all", query: "" }),
+        waitingOnly: useThreadList({ view: "all", filter: "waiting", query: "" }),
+        mine: useThreadList({ view: "assigned", filter: "all", query: "" }),
+        waiting: useThreadList({ view: "waiting", filter: "all", query: "" }),
+        counts: useViewCounts(),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.all.rows.map((r) => r.title)).toEqual(["lia@user.test", "Ana"]));
+    await waitFor(() => expect(result.current.mine.rows.map((r) => r.title)).toEqual(["Ana"]));
+    await waitFor(() => expect(result.current.waiting.rows.map((r) => r.title)).toEqual(["lia@user.test"]));
+    await waitFor(() => expect(result.current.waitingOnly.rows.map((r) => r.title)).toEqual(["lia@user.test"]));
+    await waitFor(() => expect(result.current.counts).toMatchObject({ all: { threads: 2, unread: 2 }, assigned: { threads: 1 }, waiting: { threads: 1 }, unread: { threads: 2 } }));
+    // Read: it leaves "unread" (optimistically and on the server) and the counts follow.
+    await act(() => client.mutation(api.inbox.markRead, { threadId: a.threadId }));
+    await waitFor(() => expect(result.current.counts?.unread.threads).toBe(1));
   });
 
   it("thread list: filters, load more, server search", async () => {

@@ -1,10 +1,12 @@
 // iOS: SwiftUI ContentUnavailableView (the system "no content" layout used by Mail, Files, etc.).
 import { Host } from "@expo/ui";
 import { Button, ContentUnavailableView, VStack } from "@expo/ui/swift-ui";
-import { buttonStyle, controlSize } from "@expo/ui/swift-ui/modifiers";
+import { buttonStyle, controlSize, tint } from "@expo/ui/swift-ui/modifiers";
+import { useColors } from "../../theme";
 import type { EmptyStateProps } from "./types";
 
 export function EmptyState({ icon, title, body, actions }: EmptyStateProps) {
+  const c = useColors();
   return (
     <Host style={{ flex: 1, minHeight: 320 }}>
       <ContentUnavailableView
@@ -13,7 +15,7 @@ export function EmptyState({ icon, title, body, actions }: EmptyStateProps) {
         {...(body ? { description: body } : {})}
         actions={
           actions?.length ? (
-            <VStack spacing={8}>
+            <VStack spacing={8} modifiers={[tint(c.tint)]}>
               {actions.map((a) => (
                 <Button
                   key={a.label}

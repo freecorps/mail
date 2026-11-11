@@ -10,6 +10,7 @@ import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freeco
 import { buildEmailDocument, contentSecurityPolicy, hasRemoteImages, HEIGHT_PROBE, isExternalLink, isInitialLoad, resolveCid, sanitizeEmailHtml } from "../src/lib/emailHtml";
 import { fileSize, formatWhen, initials, parseRecipients } from "../src/lib/format";
 import { inboxOptimisticUpdates, isOptimisticId } from "../src/offline/optimistic";
+import { setReplicaUser } from "../src/offline/replica";
 import { pushTransport, registrationArgs, targetOf } from "../src/push/transport";
 import { searchRows, sentRow, threadRow } from "../src/model/threads";
 import { cidMap, deliveryState } from "../src/model/thread";
@@ -200,6 +201,24 @@ describe("optimistic updates", () => {
     up["inbox:markUnread"]!(s.store, { threadId: "email$threads_1" }, rec);
     expect(s.get("inbox:threads", all).page[0].unreadCount).toBe(1);
     expect(s.get("inbox:mailboxes", {})[0].unread).toBe(4);
+  });
+
+  it("the home's view counts follow read, archive and assignment (badges move at once)", () => {
+    setReplicaUser("u2");
+    const zero = { threads: 0, unread: 0, capped: false };
+    const t = thread({ unreadCount: 2, status: "open" });
+    const s = fakeStore([
+      ["inbox:threads", all, page([t])],
+      ["inbox:views", {}, { all: { ...zero, threads: 1, unread: 2 }, assigned: zero, unread: { ...zero, threads: 1, unread: 2 }, waiting: zero }],
+      ["inbox:members", { mailbox: "support" }, [{ userId: "u2", name: "Caio" }]],
+    ]);
+    up["inbox:assign"]!(s.store, { threadId: t._id, userId: "u2" }, rec);
+    expect(s.get("inbox:views", {}).assigned).toMatchObject({ threads: 1, unread: 2 });
+    up["inbox:markRead"]!(s.store, { threadId: t._id }, rec);
+    expect(s.get("inbox:views", {})).toMatchObject({ all: { threads: 1, unread: 0 }, assigned: { threads: 1, unread: 0 }, unread: { threads: 0, unread: 0 } });
+    up["inbox:setStatus"]!(s.store, { threadId: t._id, status: "closed" }, rec);
+    expect(s.get("inbox:views", {})).toMatchObject({ all: { threads: 1 }, assigned: { threads: 0 }, waiting: { threads: 0 } });
+    setReplicaUser(null);
   });
 
   it("archive, assign (name from the loaded member list), compose", () => {

@@ -78,12 +78,13 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 | `PrimaryButton`, `TextButton`, `IconButton` | `@expo/ui` `Button`s, `native/icon-button.*` (SwiftUI icon button / Compose `FilledIconButton`), header items via `Stack.Toolbar` |
 | `@expo/vector-icons` Ionicons | `src/components/icons.tsx`: SF Symbols (iOS) / Material Symbols (Android) through `expo-symbols`; Android toolbar/Compose icons via `unstable_getMaterialSymbolSourceAsync` |
 | Settings, sign-in, compose, assign, mailboxes rows | `@expo/ui` `FieldGroup` / `ListItem` / `TextInput` (SwiftUI `Form`, Compose Material 3 list) |
-| One stack, mailbox list as home, settings modal | expo-router (`src/app`): `NativeTabs` (Inbox / Settings, unread badge), a native stack per tab with large titles, `Stack.SearchBar`, `Stack.Protected` for sign-in / not-member / member |
+| One stack, mailbox list as home, settings modal | expo-router (`src/app`): `NativeTabs` (Caixas / Minhas / Ajustes + search tab with `role="search"`, unread badges), a native stack per tab with large titles, `Stack.SearchBar`, the conversation on the root stack (no tab bar), `Stack.Protected` for sign-in / not-member / member |
+| Segmented thread filter | iOS: a `Stack.Toolbar.Menu` (UIMenu) in the navigation bar; Android: Compose `FilterChip`s in the list header, compose as a `FloatingActionButton` (`native/list-chrome.*`) |
 | Long-press ActionSheet/Alert | `native/row-menu.*`: `Link.Menu` (UIContextMenu) on iOS, Compose `DropdownMenu` on Android; also exposed as accessibility actions |
 | `EmptyState` | `native/empty-state.*`: SwiftUI `ContentUnavailableView`; Material layout on Android (Compose has no equivalent) |
 
 Kept custom on purpose (no native control on either platform): `Avatar`, `UnreadDot`, `StatusPill`/`Chip` (small
 tinted labels inside virtualized `FlatList` rows), `ConnectionBanner` in list headers (the mailbox list shows the
 same state as a native list row), attachment tiles and the message cards. The thread list stays a `FlatList`
-(`@expo/ui` `List` is for short fixed lists). Not run on a simulator yet (device tooling unavailable in the
-migration session): take the screenshots in `apps/mobile/docs/screenshots/` on the next run.
+(`@expo/ui` `List` is for short fixed lists). Screenshots: `apps/mobile/docs/screenshots/`. Theme tokens live in
+`src/theme/` (no hex, font size or spacing literal outside it).

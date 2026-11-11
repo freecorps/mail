@@ -8,6 +8,7 @@ export function NativeIcon({ icon, size = 22, color }: { icon: IconSpec; size?: 
   const c = useColors();
   // The Material Symbol is rasterized in one color (a string); a platform color falls back to the label color.
   const source = useMaterialSource(icon, size, typeof color === "string" ? color : c.labelText);
-  if (process.env.EXPO_OS === "ios") return <Icon name={icon.ios} size={size} {...(color ? { color } : {})} />;
+  // A fixed-width column (SF Symbols differ in width), so the titles of the rows beside it line up, as in Settings.
+  if (process.env.EXPO_OS === "ios") return <Icon name={icon.ios} size={size} style={{ width: Math.round(size * 1.4) }} {...(color ? { color } : {})} />;
   return source ? <Icon name={source} size={size} {...(color ? { color } : {})} /> : null;
 }

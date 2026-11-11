@@ -5,4 +5,4 @@ export { corner, radius } from "./radius";
 export { emphasized, mono, tabular, type, type TextVariant } from "./typography";
 export { motion } from "./motion";
 export { paper } from "./paper";
-export { useHeaderColors } from "./header";
+export { useHeaderColors, useListStackOptions } from "./header";

@@ -1,5 +1,5 @@
 // Android: Material 3 single-choice segmented button row (Jetpack Compose).
-import { Host } from "@expo/ui";
+import { BrandHost as Host } from "./brand-host";
 import { SegmentedButton, SingleChoiceSegmentedButtonRow, Text } from "@expo/ui/jetpack-compose";
 import { fillMaxWidth, semantics } from "@expo/ui/jetpack-compose/modifiers";
 import { screenEdge, spacing } from "../../theme";
