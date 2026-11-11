@@ -78,14 +78,18 @@ function withAttribution(html: string, cut: number): number {
   if (last < 0) return cut;
   // The opening div/p/span (or a <br>) before the "…wrote:" text whose text starts the attribution; the closest first
   // (`<div>On Tue, <span>Ana</span> wrote:</div>` walks back past the span to the div). The walk stays inside the
-  // attribution's own line: it stops at a block that closes (`</p>`, `</div>`) or a `<br>` on the way, so an earlier
-  // paragraph that happens to start with "On"/"Em" is never swallowed.
+  // attribution's own line, so an earlier paragraph that happens to start with "On"/"Em" is never swallowed: it stops
+  // at a block that closes (`</p>`, `</div>`) on the way, and crosses at most one `<br>` (an attribution wrapped over
+  // two lines, "On Wed, Nov 5, 2026, Ana<br>wrote:"), and only when what it reaches holds a date (a digit).
   const opens = [...before.slice(0, last).matchAll(/<(?:div|p|span|br)\b/gi)].map((m) => m.index);
   for (let i = opens.length - 1; i >= 0; i--) {
     const at = opens[i]!;
-    if (/<\/(?:p|div)\s*>|<br\b/i.test(before.slice(at + 1, last))) break;
+    const between = before.slice(at + 1, last);
+    if (/<\/(?:p|div)\s*>/i.test(between)) break;
+    const breaks = between.match(/<br\b/gi)?.length ?? 0;
+    if (breaks > 1) break;
     const line = visibleText(before.slice(at));
-    if (line.length <= 400 && ATTRIBUTION_START.test(line)) return from + at;
+    if (line.length <= 400 && ATTRIBUTION_START.test(line) && (!breaks || /\d/.test(line))) return from + at;
   }
   return cut;
 }

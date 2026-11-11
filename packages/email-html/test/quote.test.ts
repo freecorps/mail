@@ -39,6 +39,12 @@ describe("HTML quotes", () => {
     expect(text(splitQuotedHtml(earlier)!.body)).toBe("On my side it works. Thanks, Bia wrote:");
     const br = `<div>Em anexo.<br>Em 5 de nov. de 2026, Acme escreveu:<br></div><blockquote type="cite">Pode mandar?</blockquote>`;
     expect(text(splitQuotedHtml(br)!.body)).toBe("Em anexo.");
+    // Wrapped over two lines with a <br>: still one attribution (it holds a date); a dateless "On …" line before a
+    // "wrote:" line is body.
+    const wrapped = `<div>Thanks!</div><div>On Wed, Nov 5, 2026 at 10:12 AM Acme &lt;s@acme.test&gt;<br>wrote:</div><blockquote type="cite">Fixed?</blockquote>`;
+    expect(text(splitQuotedHtml(wrapped)!.body)).toBe("Thanks!");
+    const dateless = `<div>On my side it works.<br>Bia wrote:</div><blockquote type="cite">Still broken?</blockquote>`;
+    expect(text(splitQuotedHtml(dateless)!.body)).toBe("On my side it works. Bia wrote:");
   });
 
   it("the quote keeps the message's styles (it renders in a frame of its own)", () => {
