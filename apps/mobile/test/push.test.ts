@@ -17,6 +17,7 @@ import {
   staleChannels,
 } from "../src/push/mail-push";
 import { nextNotificationPrefs } from "../src/offline/optimistic";
+import { processResponse } from "../src/push/respond";
 
 vi.mock("expo-quick-actions", () => ({ setItems: vi.fn(async () => {}), addListener: vi.fn(() => ({ remove() {} })), initial: undefined }));
 vi.mock("expo-router", () => ({ router: { navigate: vi.fn() } }));
@@ -164,5 +165,77 @@ describe("send ids", () => {
     const a = newRequestId();
     expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(newRequestId()).not.toBe(a);
+  });
+});
+
+describe("response order: handled only once the action is sent or queued on disk", () => {
+  const response = (text = "Já resolvi.") => ({
+    actionIdentifier: "reply",
+    userText: text,
+    notification: { date: 1700, request: { identifier: "t1", content: { data } } },
+  });
+  function effects(deliver: (calls: unknown[]) => Promise<{ durable: boolean; settled: Promise<void> }>) {
+    const log: string[] = [];
+    const handled = new Set<string>();
+    const sent: unknown[][] = [];
+    const fx = {
+      isHandled: async (k: string) => handled.has(k),
+      markHandled: async (k: string) => void (handled.add(k), log.push("markHandled")),
+      clearLast: () => void log.push("clearLast"),
+      dismiss: async () => void log.push("dismiss"),
+      route: () => void log.push("route"),
+      targetOf: () => ({ threadId: "t1" }),
+      deliver: async (_kind: unknown, calls: unknown[]) => (log.push("deliver"), sent.push(calls), deliver(calls)),
+      locale: async () => "pt-BR" as const,
+      clock24: () => true,
+    };
+    return { fx, log, sent, handled };
+  }
+
+  it("sent: delivered first, then marked, cleared and dismissed", async () => {
+    const { fx, log } = effects(async () => ({ durable: true, settled: Promise.resolve() }));
+    await processResponse(response(), fx);
+    expect(log).toEqual(["deliver", "markHandled", "clearLast", "dismiss"]);
+  });
+
+  it("not durable (or the delivery throws): not marked, not cleared, still on screen; the next launch sends it again with the same requestId", async () => {
+    let durable = false;
+    const { fx, log, sent, handled } = effects(async () => ({ durable, settled: Promise.resolve() }));
+    await processResponse(response(), fx);
+    expect(log).toEqual(["deliver"]);
+    expect(handled.size).toBe(0);
+    const throwing = { ...fx, deliver: async () => Promise.reject(new Error("killed")) };
+    await processResponse(response(), throwing);
+    expect(handled.size).toBe(0);
+    // Next launch: the same response comes back (getLastNotificationResponse / the Android task) and goes out.
+    durable = true;
+    await processResponse(response(), fx);
+    expect(log).toEqual(["deliver", "deliver", "markHandled", "clearLast", "dismiss"]);
+    const ids = sent.map((calls) => (calls[0] as { args: { requestId: string } }).args.requestId);
+    expect(ids[0]).toMatch(/^push-/);
+    expect(ids[1]).toBe(ids[0]);
+    // Handled now: a later copy of it does nothing.
+    await processResponse(response(), fx);
+    expect(sent).toHaveLength(2);
+  });
+
+  it("the same response twice at once (listener and last response) is delivered once", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { fx, sent } = effects(async () => (await gate, { durable: true, settled: Promise.resolve() }));
+    const a = processResponse(response(), fx);
+    const b = processResponse(response(), fx);
+    release();
+    await Promise.all([a, b]);
+    expect(sent).toHaveLength(1);
+  });
+
+  it("an empty reply has nothing to send: marked and dismissed; a tap opens the conversation", async () => {
+    const { fx, log } = effects(async () => ({ durable: true, settled: Promise.resolve() }));
+    await processResponse(response("   "), fx);
+    expect(log).toEqual(["markHandled", "clearLast", "dismiss"]);
+    const tap = effects(async () => ({ durable: true, settled: Promise.resolve() }));
+    await processResponse({ ...response(), actionIdentifier: DEFAULT_ACTION }, tap.fx);
+    expect(tap.log).toEqual(["markHandled", "clearLast", "route"]);
   });
 });

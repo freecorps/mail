@@ -17,7 +17,6 @@ import { translate, type Locale } from "../i18n";
 import { withBackgroundTime } from "../lib/system";
 import { deviceClock24, storedLocale } from "../prefs";
 import {
-  actionCalls,
   actionOf,
   androidNotification,
   badgeOf,
@@ -27,13 +26,11 @@ import {
   mailboxChannels,
   mailDataOf,
   remember,
-  requestIdOf,
-  responseKey,
   staleChannels,
   type ActionCall,
-  type MailPushData,
   type PushAction,
 } from "./mail-push";
+import { processResponse, type Delivery, type ResponseEffects } from "./respond";
 import { routeToThread } from "./routing";
 import { targetOf } from "./transport";
 
@@ -59,24 +56,22 @@ export async function registerMailCategory(locale: Locale): Promise<void> {
 
 const HANDLED_KEY = "ember-mail:push-handled";
 let handled: string[] | null = null;
-const running = new Set<string>();
 
-async function firstTime(key: string): Promise<boolean> {
-  if (running.has(key)) return false;
-  running.add(key);
-  if (!handled) {
-    const raw = await AsyncStorage.getItem(HANDLED_KEY).catch(() => null);
-    try {
-      const v: unknown = raw ? JSON.parse(raw) : [];
-      handled = Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
-    } catch {
-      handled = [];
-    }
+async function handledKeys(): Promise<string[]> {
+  if (handled) return handled;
+  const raw = await AsyncStorage.getItem(HANDLED_KEY).catch(() => null);
+  try {
+    const v: unknown = raw ? JSON.parse(raw) : [];
+    handled = Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    handled = [];
   }
-  if (handled.includes(key)) return false;
-  handled = remember(handled, key);
+  return handled;
+}
+
+async function markHandled(key: string): Promise<void> {
+  handled = remember(await handledKeys(), key);
   await AsyncStorage.setItem(HANDLED_KEY, JSON.stringify(handled)).catch(() => {});
-  return true;
 }
 
 const HTTP_TIMEOUT_MS = 8000;
@@ -115,9 +110,12 @@ async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed"> {
   }
 }
 
-async function run(kind: PushAction, calls: ActionCall[]): Promise<void> {
-  // In order (a reply, then read): each over HTTP, or else through the client's queue (SQLite, sent on reconnect;
-  // optimistic in the lists meanwhile).
+/**
+ * Sends an action's mutations, in order (a reply, then read): each over HTTPS, or else through the client's queue
+ * (SQLite, sent on reconnect; optimistic in the lists meanwhile). `durable` once each one was answered or written to
+ * the queue on disk; `settled` when the queued ones are done (or after QUEUE_WAIT_MS) and the badge is read again.
+ */
+async function deliver(kind: PushAction, calls: ActionCall[]): Promise<Delivery> {
   const queued: Promise<unknown>[] = [];
   for (const x of calls) {
     if (!queued.length && (await sendOverHttp(x)) === "sent") continue;
@@ -126,12 +124,12 @@ async function run(kind: PushAction, calls: ActionCall[]): Promise<void> {
       x.fn === "reply" ? c.mutation(api.inbox.reply, x.args) : x.fn === "setStatus" ? c.mutation(api.inbox.setStatus, x.args) : c.mutation(api.inbox.markRead, x.args);
     queued.push(p.catch((e: unknown) => console.warn(`[push] ${kind}`, e instanceof Error ? e.message : e)));
   }
-  if (queued.length) {
-    const c = (await ember()).emberClient;
-    await c.flushStorage().catch(() => {});
-    await Promise.race([Promise.all(queued), new Promise((r) => setTimeout(r, QUEUE_WAIT_MS))]);
-  }
-  await refreshBadge();
+  const durable = queued.length ? await (await ember()).emberClient.flushStorage().then(() => true, () => false) : true;
+  const settled = (async () => {
+    if (queued.length) await Promise.race([Promise.all(queued), new Promise((r) => setTimeout(r, QUEUE_WAIT_MS))]);
+    await refreshBadge();
+  })();
+  return { durable, settled };
 }
 
 /** Takes a conversation's notifications off the screen (after an action on it; Android shows a spinner until then). */
@@ -151,22 +149,21 @@ export function handleResponse(r: Notifications.NotificationResponse): Promise<v
   return kind && kind !== "open" ? withBackgroundTime("ember-mail.notification-action", () => respond(r)) : respond(r);
 }
 
-async function respond(r: Notifications.NotificationResponse): Promise<void> {
-  const kind = actionOf(r.actionIdentifier);
-  const raw = r.notification.request.content.data;
-  const data = kind === "open" ? targetOf(raw) : mailDataOf(raw);
-  if (!kind || !data) return;
-  const key = responseKey({ identifier: r.notification.request.identifier, date: r.notification.date, actionIdentifier: r.actionIdentifier, userText: r.userText });
-  if (!(await firstTime(key))) return;
-  Notifications.clearLastNotificationResponseAsync().catch(() => {});
-  if (kind === "open") return void routeToThread(data);
-  const locale = await storedLocale();
-  const calls = actionCalls(kind, data as MailPushData, { text: r.userText, locale, clock24: deviceClock24(), requestId: requestIdOf(key) });
-  // Off the screen at once (Android shows a spinner on a text reply until the app acts). Android 15+ keeps a
-  // notification answered by direct reply on screen, with the reply under it, until the user dismisses it
-  // (LIFETIME_EXTENDED_BY_DIRECT_REPLY): the platform's way of showing the reply went out.
-  await dismissThread(data.threadId);
-  if (calls.length) await run(kind, calls);
+const effects: ResponseEffects = {
+  isHandled: async (key) => (await handledKeys()).includes(key),
+  markHandled,
+  clearLast: () => void Notifications.clearLastNotificationResponseAsync().catch(() => {}),
+  dismiss: dismissThread,
+  route: routeToThread,
+  targetOf,
+  deliver,
+  locale: storedLocale,
+  clock24: deviceClock24,
+};
+
+/** The order (respond.ts): marked handled, cleared and dismissed only once the action is sent or queued on disk. */
+function respond(r: Notifications.NotificationResponse): Promise<void> {
+  return processResponse(r, effects);
 }
 
 /**
