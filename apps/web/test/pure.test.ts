@@ -385,6 +385,28 @@ describe("optimistic updates", () => {
     expect(s.dump("inbox:threads").map((p: Page<Thread>) => p.page.length)).toEqual([1, 0]);
   });
 
+  it("a new conversation shows on top of the views it belongs to, and their counts grow", () => {
+    const zero = { threads: 0, unread: 0, capped: false };
+    const s = store({
+      "inbox:view": [
+        {
+          args: { view: "waiting", limit: 30 },
+          value: { page: [thread({ _id: "old", status: "waiting" })], isDone: true, partial: false },
+        },
+        { args: { view: "unread", limit: 30 }, value: { page: [], isDone: true, partial: false } },
+      ],
+      "inbox:views": [
+        { args: {}, value: { all: { ...zero, threads: 1 }, assigned: zero, unread: zero, waiting: { ...zero, threads: 1 } } },
+      ],
+    });
+    u["inbox:compose"]!(s, { mailbox: "support", to: ["ana@user.test"], subject: "Oi", text: "Olá" }, rec);
+    const [waiting, unread] = s.dump("inbox:view") as Array<{ page: Thread[] }>;
+    expect(waiting!.page).toHaveLength(2);
+    expect(isOptimisticId(waiting!.page[0]!._id)).toBe(true);
+    expect(unread!.page).toEqual([]);
+    expect(s.dump("inbox:views")[0]).toMatchObject({ all: { threads: 2 }, waiting: { threads: 2 }, unread: { threads: 0 } });
+  });
+
   it("the cross-mailbox views and their counts follow read, assign and archive", () => {
     setOptimisticViewer("u2");
     const zero = { threads: 0, unread: 0, capped: false };

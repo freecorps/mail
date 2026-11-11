@@ -213,14 +213,6 @@
   [role="tab"] {
     touch-action: manipulation;
   }
-  /* iOS zooms into fields under 16px and stays zoomed: 16px wherever the pointer is a finger. */
-  @media (pointer: coarse) {
-    input,
-    textarea,
-    select {
-      font-size: 16px;
-    }
-  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";
@@ -269,5 +261,17 @@
   .pressable:active,
   [data-slot="button"]:active {
     transform: none !important;
+  }
+}
+
+/*
+ * iOS zooms into fields under 16px and stays zoomed: 16px wherever the pointer is a finger. Unlayered on purpose: it
+ * must beat Tailwind's size utilities (`text-sm` on the search boxes), which live in a cascade layer.
+ */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
   }
 }

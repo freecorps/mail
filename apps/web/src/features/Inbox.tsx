@@ -537,7 +537,11 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           navigate({ admin: null, thread: null });
           setQuery(q);
         }}
-        onCompose={() => setComposeOpen(true)}
+        onCompose={() => {
+          // From Administração, compose belongs to the inbox (the sent conversation opens there).
+          if (adminSection) navigate({ admin: null, thread: null }, { push: true });
+          setComposeOpen(true);
+        }}
         onShortcuts={() => setHelpOpen(true)}
         onToggleSidebar={toggleSidebar}
         onAdmin={(section) => navigate({ admin: section, thread: null }, { push: true })}

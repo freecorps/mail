@@ -255,6 +255,17 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         if (!value || qa.mailbox !== args.mailbox || (qa.status !== undefined && qa.status !== "waiting")) continue;
         store.setQuery<any>("inbox:threads", qa, { ...value, page: [thread, ...value.page] });
       }
+      // The cross-mailbox views it belongs to (all, waiting) show it on top too, and their counts grow.
+      for (const { args: va, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
+        if (!value || !viewKeeps(va.view, va.status)(thread)) continue;
+        store.setQuery<any>("inbox:view", va, { ...value, page: [thread, ...value.page] });
+      }
+      const counts = store.getQuery<any>("inbox:views", {}) as Record<View, ViewCount> | undefined;
+      if (counts) {
+        const next = { ...counts };
+        for (const v of VIEWS) if (viewKeeps(v, undefined)(thread)) next[v] = { ...counts[v], threads: counts[v].threads + 1 };
+        store.setQuery<any>("inbox:views", {}, next);
+      }
       sentNow(store, thread, at);
     },
   };
