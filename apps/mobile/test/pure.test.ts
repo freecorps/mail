@@ -101,7 +101,14 @@ describe("format and i18n", () => {
   it("initials, sizes, recipients", () => {
     expect(initials("Ana Souza")).toBe("AS");
     expect(initials("caio.lima@user.test")).toBe("CL");
-    expect(initials("")).toBe("?");
+    expect(initials("")).toBe("");
+    // break-ui: emoji, punctuation, one letter, CJK, an address with no name.
+    expect(initials("🔥 Equipe Fogo")).toBe("EF");
+    expect(initials("🎉")).toBe("");
+    expect(initials("\"Ana\" (Suporte)")).toBe("AS");
+    expect(initials("x")).toBe("X");
+    expect(initials("李小龙")).toBe("李");
+    expect(initials("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test")).toBe("A");
     expect(fileSize(1536, "en")).toBe("1.5 KB");
     expect(fileSize(1536, "pt-BR")).toBe("1,5 KB");
     expect(parseRecipients("a@b.test, Bia <bia@x.test>; nope, ")).toEqual({ valid: ["a@b.test", "Bia <bia@x.test>"], invalid: ["nope"] });

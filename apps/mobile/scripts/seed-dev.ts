@@ -8,6 +8,8 @@
 //   bun scripts/seed-dev.ts                                            # terminal 2 (apps/mobile)
 //
 // Env: EMBER_URL (default http://127.0.0.1:8787), EMBER_ADMIN_TOKEN (dev-admin), SEED_EMAIL / SEED_PASSWORD.
+// SEED_WORST=1 adds break-ui worst cases for the thread list: a huge name, an unbreakable address with no name, a
+// one-letter name, emoji, CJK and Arabic names, an empty subject, an unbreakable subject.
 const URL_ = (process.env.EMBER_URL ?? "http://127.0.0.1:8787").replace(/\/$/, "");
 const ADMIN = process.env.EMBER_ADMIN_TOKEN ?? "dev-admin";
 const EMAIL = process.env.SEED_EMAIL ?? "bia@acme.test";
@@ -143,6 +145,26 @@ const MAILS: Array<Parameters<typeof mime>[0] & { envelope: string; rcpt: string
   },
 ];
 
+const worst = (i: number, from: string, envelope: string, subject: string, text: string) => ({
+  envelope,
+  rcpt: `support@${DOMAIN}`,
+  from,
+  to: `support@${DOMAIN}`,
+  subject,
+  text,
+  id: `seed-worst-${i}@worst.test`,
+  date: new Date(),
+  agoMin: 60 * 24 * (8 + i),
+});
+const WORST = [
+  worst(1, '"Maximiliano Bartholomeu de Albuquerque Cavalcanti Figueiredo Sobrinho Júnior" <max@worst.test>', "max@worst.test", "Assunto muito longo que não cabe em uma linha de jeito nenhum, nem com a tela deitada, nem no iPad Pro de 13 polegadas", "Prévia longa ".repeat(30)),
+  worst(2, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbb@subdominio-muito-longo-mesmo.worst.test", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbb@subdominio-muito-longo-mesmo.worst.test", "Reembolso_" + "x".repeat(120), "https://worst.test/" + "a".repeat(200)),
+  worst(3, '"X" <x@worst.test>', "x@worst.test", "Oi", "."),
+  worst(4, '"🔥🔥 Equipe Fogo 🚒" <fogo@worst.test>', "fogo@worst.test", "🎉🎉🎉 Promoção 🎉🎉🎉", "😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗☺️😚😙🥲😋😛😜🤪😝🤑🤗🤭🫢🫣🤫🤔"),
+  worst(5, '"李小龙" <li@worst.test>', "li@worst.test", "", "这是一封没有主题的邮件。"),
+  worst(6, '"محمد عبد الله" <m@worst.test>', "m@worst.test", "طلب استرداد", "مرحبا، أريد استرداد المبلغ."),
+];
+
 async function main() {
   console.log(`seeding ${URL_}`);
   for (const [name, display] of [
@@ -156,7 +178,7 @@ async function main() {
   const m = await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: userId, name: "Bia Santos", mailboxes: ["support", "privacy"] } });
   if (m.status >= 300) throw new Error(`member: ${m.status} ${JSON.stringify(m.body)}`);
   await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: "teammate-caio", name: "Caio Rocha", mailboxes: ["support"] } });
-  for (const mail of [...MAILS].reverse()) {
+  for (const mail of [...MAILS, ...(process.env.SEED_WORST ? WORST : [])].reverse()) {
     const raw = mime({ ...mail, date: new Date(Date.now() - mail.agoMin * 60_000) });
     const r = await fetch(`${URL_}/cdn-cgi/local/email?from=${encodeURIComponent(mail.envelope)}&to=${encodeURIComponent(mail.rcpt)}`, { method: "POST", body: raw });
     console.log(`  ${mail.rcpt} ← ${mail.envelope}: ${r.status} ${r.status >= 300 ? await r.text() : ""}`);

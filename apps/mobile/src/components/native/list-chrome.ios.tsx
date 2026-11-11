@@ -1,5 +1,5 @@
 // iOS: the list's actions are navigation bar items: a filter menu (UIMenu with a checkmark on the current filter)
-// and compose. Not a bottom toolbar: with the tab bar on the lists (D1), iOS 26 floats the tab bar over the bottom
+// and compose, plus "Editar" (multi-select). Not a bottom toolbar: with the tab bar on the lists (D1), iOS 26 floats the tab bar over the bottom
 // toolbar, so its items would sit under the tabs. Nothing in the list header (no chips on iOS).
 import { Stack } from "expo-router";
 import { Icons } from "../icons";
@@ -9,10 +9,11 @@ export function ListFilters<T extends string>(_: ListFilterProps<T>) {
   return null;
 }
 
-export function ListActions<T extends string>({ filter, compose }: ListActionsProps<T>) {
+export function ListActions<T extends string>({ filter, compose, edit }: ListActionsProps<T>) {
   const filtered = !!filter && filter.value !== filter.filters[0]?.value;
   return (
     <Stack.Toolbar placement="right">
+      {edit ? <Stack.Toolbar.Button onPress={edit.onPress}>{edit.label}</Stack.Toolbar.Button> : null}
       {filter && filter.filters.length ? (
         <Stack.Toolbar.Menu icon={filtered ? Icons.filterOn.ios : Icons.filter.ios} accessibilityLabel={filter.label} title={filter.label}>
           {filter.filters.map((f) => (

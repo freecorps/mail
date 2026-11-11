@@ -5,6 +5,7 @@ import { NativeTabs } from "expo-router/native-tabs";
 import { useEffect } from "react";
 import { Icons } from "../../components/icons";
 import { useI18n } from "../../i18n";
+import { useTabBarHidden } from "../../model/chrome";
 import { badge, useMailboxes, useViewCounts } from "../../model/threads";
 import { setInboxMounted } from "../../navigation";
 import { flushNotificationTarget, useNotificationRouting } from "../../push/usePush";
@@ -16,6 +17,8 @@ export default function TabsLayout() {
   const { totalUnread } = useMailboxes();
   // Minhas: how many of my conversations have unread messages (my to-do with something new in it).
   const mineUnread = useViewCounts()?.assigned.unread ?? 0;
+  // Edit mode on a list hides the tab bar: its bottom toolbar (archive, read, assign) takes the place.
+  const hidden = useTabBarHidden();
   useNotificationRouting();
   useEffect(() => {
     setInboxMounted(true);
@@ -24,7 +27,7 @@ export default function TabsLayout() {
   }, []);
 
   return (
-    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown" labelVisibilityMode="labeled">
+    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown" labelVisibilityMode="labeled" hidden={hidden}>
       <NativeTabs.Trigger name="(mailboxes)">
         <NativeTabs.Trigger.Icon sf={{ default: Icons.mailboxes.ios, selected: Icons.mailboxesSelected.ios }} md={Icons.mailboxes.android} />
         <NativeTabs.Trigger.Label>{t("tabs.mailboxes")}</NativeTabs.Trigger.Label>

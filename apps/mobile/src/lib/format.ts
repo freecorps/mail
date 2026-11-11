@@ -41,21 +41,23 @@ export function contactOf(t: Pick<Thread, "contact" | "contactName">): string {
   return t.contactName?.trim() || t.contact;
 }
 
-/** One or two letters for an avatar. */
+/**
+ * One or two letters for an avatar: the first letter of the first and last words, skipping anything that is not a
+ * letter or digit (emoji, quotes, punctuation). An email uses its local part. "" when there is no letter at all (the
+ * avatar shows a person glyph then). Scripts without case (CJK) keep one character.
+ */
 export function initials(name: string): string {
   const clean = name.replace(/<.*?>/g, "").replace(/@.*$/, "").trim();
-  const parts = clean.split(/[\s._-]+/).filter(Boolean);
-  if (!parts.length) return "?";
-  const first = parts[0]![0] ?? "";
-  const last = parts.length > 1 ? (parts[parts.length - 1]![0] ?? "") : "";
-  return (first + last).toUpperCase();
-}
-
-/** A stable hue (0–359) per string, for avatar colors. */
-export function hueOf(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
+  const words = clean
+    .split(/[\s._\-+]+/)
+    .map((w) => Array.from(w).find((ch) => /[\p{L}\p{N}]/u.test(ch)) ?? "")
+    .filter(Boolean);
+  if (!words.length) return "";
+  const first = words[0]!;
+  // Han, kana and hangul names read as one glyph (Contacts does the same).
+  if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(first)) return first;
+  const last = words.length > 1 ? words[words.length - 1]! : "";
+  return (first + last).toLocaleUpperCase();
 }
 
 export function fileSize(bytes: number | undefined, locale: Locale): string {

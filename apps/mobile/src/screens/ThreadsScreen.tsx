@@ -1,19 +1,31 @@
 // A list of conversations: one mailbox, a view across the member's mailboxes, or search across all of them. A
-// virtualized list (FlatList) whose rows open the thread (on the root stack, without the tab bar) on tap and show the
-// system context menu (iOS) / a Material menu (Android) on long-press. The chrome follows the platform: on iOS a filter
-// menu and compose in the navigation bar, and the header search bar; on Android FilterChips and a compose FAB.
+// virtualized list (FlatList) of rows (D2: unread dot, neutral monogram, status as small glyphs). A tap opens the
+// thread (on the root stack, without the tab bar); long-press shows the system context menu over a preview of the
+// thread (iOS) / a Material menu (Android); swipes run the actions picked in Settings (read, archive, assign); Edit mode
+// selects several rows for a bottom toolbar (archive, read/unread, assign). Pull to refresh resyncs the Ember client;
+// archiving offers "Desfazer". The chrome follows the platform: on iOS the filter menu, "Editar" and compose in the
+// navigation bar and the header search bar; on Android FilterChips, a select action in the top app bar and a FAB.
 import { useMutation } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { memo, useCallback, useState } from "react";
-import { FlatList, Pressable, StyleSheet, View } from "react-native";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { BackHandler, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import Animated, { LinearTransition } from "react-native-reanimated";
 import { api, INBOX_VIEWS, type InboxView } from "../api";
-import { Icons, Symbol } from "../components/icons";
-import { Avatar, Chip, ConnectionBanner, EmptyState, ListActions, ListFilters, Loading, NativeButton, RowMenu, Separator, StatusPill, ThemedText, UnreadDot } from "../components/ui";
+import { Icons, Symbol, useToolbarIcon } from "../components/icons";
+import { SwipeGroupProvider, SwipeRow, useSwipeGroup, type SwipeAction } from "../components/swipe-row";
+import { SkeletonRows, textInset, ThreadRowContent } from "../components/thread-row";
+import { ConnectionBanner, EmptyState, ListActions, ListFilters, NativeButton, RowMenu, Separator, ThemedText } from "../components/ui";
 import type { RowMenuAction } from "../components/native";
-import { useI18n } from "../i18n";
+import { refreshNow } from "../ember";
+import { useI18n, type I18n } from "../i18n";
 import { formatWhen } from "../lib/format";
-import { filterLabelKey, filtersFor, useDebounced, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
-import { screenEdge, spacing, tabular, useColors } from "../theme";
+import { haptics } from "../lib/haptics";
+import { hideTabBar } from "../model/chrome";
+import { actionable, archivable, bulkReadTarget, keepsArchived, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
+import { filterLabelKey, filtersFor, useDebounced, useMailboxes, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
+import { offerUndoArchive } from "../model/undo";
+import { useListPrefs } from "../prefs";
+import { screenEdge, spacing, useColors, type Palette } from "../theme";
 
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
 export function MailboxThreadsScreen() {
@@ -41,9 +53,26 @@ export function SearchScreen() {
   return <ThreadsScreen source={{ view: "all" }} title={t("search.title")} searchOnly />;
 }
 
+/** Row operations, stable across renders so memoized rows only re-render for their own data. */
+interface RowOps {
+  t: I18n["t"];
+  c: Palette;
+  prefs: ListPrefs;
+  /** The list still shows a thread after it is archived (the swipe springs back instead of sliding out). */
+  keepsArchived: boolean;
+  canAssign(row: ThreadRow): boolean;
+  toggleRead(row: ThreadRow): void;
+  archive(rows: ThreadRow[]): void;
+  unarchive(row: ThreadRow): void;
+  assign(rows: ThreadRow[]): void;
+}
+
+const ROW_LAYOUT = LinearTransition.duration(200);
+
 export function ThreadsScreen({ source, title, searchOnly = false }: { source: ListSource; title: string; searchOnly?: boolean }) {
   const c = useColors();
   const { t, locale, clock24 } = useI18n();
+  const prefs = useListPrefs();
   const filters = searchOnly ? [] : filtersFor(source);
   const [picked, setFilter] = useState<ThreadFilter>("all");
   const filter = filters.includes(picked) ? picked : "all";
@@ -53,22 +82,77 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
   const setStatus = useMutation(api.inbox.setStatus);
+  const { mailboxes } = useMailboxes();
+  const group = useSwipeGroup();
+  const showRows = !searchOnly || vm.searching;
 
-  const actionsFor = useCallback(
-    (row: ThreadRow): RowMenuAction[] => {
-      if (row.pending || row.status === null) return [];
-      const run = (fn: () => Promise<unknown>) => () => void fn().catch(() => {});
-      return [
-        row.unread
-          ? { label: t("thread.markRead"), icon: Icons.markRead, onPress: run(() => markRead({ threadId: row.threadId })) }
-          : { label: t("thread.markUnread"), icon: Icons.markUnread, onPress: run(() => markUnread({ threadId: row.threadId })) },
-        row.status === "closed"
-          ? { label: t("thread.unarchive"), icon: Icons.unarchive, onPress: run(() => setStatus({ threadId: row.threadId, status: "open" })) }
-          : { label: t("thread.archive"), icon: Icons.archive, onPress: run(() => setStatus({ threadId: row.threadId, status: "closed" })) },
-      ];
-    },
-    [t, markRead, markUnread, setStatus],
-  );
+  // In your own (personal) mailbox there is nobody to assign to.
+  const personal = useMemo(() => new Set(mailboxes.filter((b) => b.personal).map((b) => b.name)), [mailboxes]);
+  const keeps = keepsArchived(source, filter);
+
+  const ops = useMemo<RowOps>(() => {
+    const quiet = (p: Promise<unknown>) => void p.catch(() => {});
+    return {
+      t,
+      c,
+      prefs,
+      keepsArchived: keeps,
+      canAssign: (row) => !personal.has(row.mailbox),
+      toggleRead: (row) => quiet(row.unread ? markRead({ threadId: row.threadId }) : markUnread({ threadId: row.threadId })),
+      archive: (rows) => {
+        const records = archivable(rows);
+        for (const r of records) quiet(setStatus({ threadId: r.threadId, status: "closed" }));
+        offerUndoArchive(t("undo.archived", { count: records.length }), records, (threadId, status) => quiet(setStatus({ threadId, status })));
+      },
+      unarchive: (row) => quiet(setStatus({ threadId: row.threadId, status: "open" })),
+      assign: (rows) => {
+        const first = rows[0];
+        if (!first || rows.some((r) => r.mailbox !== first.mailbox)) return;
+        const current = rows.length === 1 ? (first.assignee ?? "") : "";
+        router.push({ pathname: "/assign", params: { threadId: first.threadId, threadIds: rows.map((r) => r.threadId).join(","), mailbox: first.mailbox, current } });
+      },
+    };
+  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus]);
+
+  // ---- Edit mode -------------------------------------------------------------------------------------------------
+  const [editing, setEditing] = useState(false);
+  const [picks, setPicks] = useState<Set<string>>(() => new Set());
+  const selected = useMemo(() => pruneSelection(picks, vm.rows), [picks, vm.rows]);
+  const selectedRows = useMemo(() => vm.rows.filter((r) => selected.has(r.threadId)), [vm.rows, selected]);
+  const selectable = useMemo(() => vm.rows.filter(actionable), [vm.rows]);
+  const allSelected = selectable.length > 0 && selected.size === selectable.length;
+  const startEditing = useCallback(() => {
+    group.closeAll();
+    setPicks(new Set());
+    setEditing(true);
+  }, [group]);
+  const stopEditing = useCallback(() => {
+    setEditing(false);
+    setPicks(new Set());
+  }, []);
+  const toggle = useCallback((threadId: string) => setPicks((p) => toggleSelected(p, threadId)), []);
+  // The tab bar gives way to the edit toolbar; Android's Back leaves Edit mode first.
+  useEffect(() => (editing ? hideTabBar() : undefined), [editing]);
+  useEffect(() => {
+    if (!editing) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => (stopEditing(), true));
+    return () => sub.remove();
+  }, [editing, stopEditing]);
+  const bulk = (fn: () => void) => () => {
+    fn();
+    haptics.light();
+    stopEditing();
+  };
+  const readTarget = bulkReadTarget(selectedRows);
+  const oneMailbox = selectedRows.length > 0 && selectedRows.every((r) => r.mailbox === selectedRows[0]!.mailbox);
+  const canBulkAssign = oneMailbox && ops.canAssign(selectedRows[0]!);
+
+  // ---- Pull to refresh -------------------------------------------------------------------------------------------
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    void refreshNow().finally(() => setRefreshing(false));
+  }, []);
 
   const filterProps = {
     filters: filters.map((f) => ({ value: f, label: t(filterLabelKey(source, f)) })),
@@ -77,13 +161,12 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     label: t("threads.filterMenu"),
   };
   const compose = () => router.push({ pathname: "/compose", params: source.mailbox ? { mailbox: source.mailbox } : {} });
-  const showRows = !searchOnly || vm.searching;
 
   const now = Date.now();
   const header = (
     <View>
       <ConnectionBanner />
-      {!vm.searching ? <ListFilters<ThreadFilter> {...filterProps} /> : null}
+      {!vm.searching && !editing ? <ListFilters<ThreadFilter> {...filterProps} /> : null}
       {vm.searching && vm.source !== "server" && (
         <View style={styles.note}>
           <Symbol icon={Icons.device} size={14} color={c.secondaryLabel} />
@@ -102,23 +185,26 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     </View>
   );
 
-  const empty = searchOnly && !vm.searching ? (
-    <EmptyState icon={Icons.search} title={t("search.title")} body={t("search.hint")} />
-  ) : vm.status === "loading" ? (
-    <View style={styles.loading}>
-      <Loading />
-    </View>
-  ) : vm.status === "error" ? (
-    <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
-  ) : vm.searching ? (
-    <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
-  ) : (
-    <EmptyState icon={Icons.empty} title={source.view === "assigned" ? t("mine.empty") : t("threads.empty")} />
-  );
+  // Never "empty" while loading: skeleton rows shaped like the real ones until the first answer.
+  const empty =
+    searchOnly && !vm.searching ? (
+      <EmptyState icon={Icons.search} title={t("search.title")} body={t("search.hint")} />
+    ) : vm.status === "loading" ? (
+      <SkeletonRows avatars={prefs.avatars} previewLines={prefs.previewLines} />
+    ) : vm.status === "error" ? (
+      <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
+    ) : vm.searching ? (
+      <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
+    ) : (
+      <EmptyState icon={Icons.empty} title={source.view === "assigned" ? t("mine.empty") : t("threads.empty")} />
+    );
+
+  const inset = textInset(prefs.avatars, editing);
+  const RowSeparator = useCallback(() => <Separator inset={inset} />, [inset]);
 
   return (
-    <>
-      <Stack.Screen options={{ title }} />
+    <SwipeGroupProvider value={group}>
+      <Stack.Screen options={{ title: editing ? (selected.size ? t("threads.selected", { count: selected.size }) : t("threads.selectNone")) : title }} />
       <Stack.SearchBar
         placeholder={searchOnly || source.view ? t("search.placeholder") : t("threads.search")}
         hideWhenScrolling={false}
@@ -126,16 +212,28 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         onChangeText={(e) => setQuery(e.nativeEvent.text)}
         onCancelButtonPress={() => setQuery("")}
       />
-      <FlatList
+      <Animated.FlatList
         style={{ backgroundColor: c.background }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
         data={showRows ? vm.rows : []}
         keyExtractor={(r) => r.key}
+        extraData={editing}
+        itemLayoutAnimation={ROW_LAYOUT}
         ListHeaderComponent={header}
         ItemSeparatorComponent={RowSeparator}
-        renderItem={({ item }) => <ThreadItem row={item} when={formatWhen(item.at, now, locale, clock24)} actions={actionsFor(item)} />}
+        renderItem={({ item }) => (
+          <ThreadItem
+            row={item}
+            when={formatWhen(item.at, now, locale, clock24)}
+            ops={ops}
+            showAssignee={source.view !== "assigned"}
+            editing={editing}
+            selected={selected.has(item.threadId)}
+            onToggle={toggle}
+          />
+        )}
         ListEmptyComponent={empty}
         ListFooterComponent={
           vm.canLoadMore ? (
@@ -146,82 +244,237 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         }
         onEndReached={vm.canLoadMore ? vm.loadMore : undefined}
         onEndReachedThreshold={0.5}
+        onScrollBeginDrag={group.closeAll}
+        refreshControl={showRows ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[c.tint]} /> : undefined}
       />
-      {/* After the list: on Android the compose FAB floats over it. */}
-      {searchOnly ? null : (
-        <ListActions<ThreadFilter> filter={filters.length ? filterProps : undefined} compose={{ label: t("threads.compose"), onPress: compose }} />
+      {searchOnly ? null : editing ? (
+        <EditChrome
+          allSelected={allSelected}
+          count={selected.size}
+          readTarget={readTarget}
+          canAssign={canBulkAssign}
+          onSelectAll={() => setPicks(allSelected ? new Set() : new Set(selectable.map((r) => r.threadId)))}
+          onDone={stopEditing}
+          onArchive={bulk(() => ops.archive(selectedRows))}
+          onRead={bulk(() => {
+            for (const r of selectedRows) if (r.unread === (readTarget === "read")) ops.toggleRead(r);
+          })}
+          onAssign={() => {
+            ops.assign(selectedRows);
+            stopEditing();
+          }}
+        />
+      ) : (
+        // After the list: on Android the compose FAB floats over it.
+        <ListActions<ThreadFilter>
+          filter={filters.length ? filterProps : undefined}
+          compose={{ label: t("threads.compose"), onPress: compose }}
+          edit={vm.rows.some(actionable) ? { label: process.env.EXPO_OS === "ios" ? t("threads.edit") : t("threads.select"), onPress: startEditing } : undefined}
+        />
       )}
+    </SwipeGroupProvider>
+  );
+}
+
+/**
+ * Edit mode chrome: "Selecionar tudo" and "OK" in the navigation bar (iOS) / close and select-all in the top app bar
+ * (Android), and a bottom toolbar with archive, read/unread and assign in place of the tab bar.
+ */
+function EditChrome(p: {
+  allSelected: boolean;
+  count: number;
+  readTarget: "read" | "unread";
+  canAssign: boolean;
+  onSelectAll(): void;
+  onDone(): void;
+  onArchive(): void;
+  onRead(): void;
+  onAssign(): void;
+}) {
+  const c = useColors();
+  const { t } = useI18n();
+  const ios = process.env.EXPO_OS === "ios";
+  const color = ios ? c.tint : c.secondaryText;
+  const archive = useToolbarIcon(Icons.archive, color);
+  const read = useToolbarIcon(p.readTarget === "read" ? Icons.markRead : Icons.markUnread, color);
+  const assign = useToolbarIcon(Icons.assign, color);
+  const close = useToolbarIcon(Icons.close, c.secondaryText);
+  const all = useToolbarIcon(Icons.selectAll, c.secondaryText);
+  const none = p.count === 0;
+  const selectAllLabel = p.allSelected ? t("threads.deselectAll") : t("threads.selectAll");
+  // Android: header items need a Material Symbol image, which loads asynchronously; mount them once it has.
+  if (!archive || !read || !assign || (!ios && (!close || !all))) return null;
+  return (
+    <>
+      <Stack.Toolbar placement="left">
+        {ios ? (
+          <Stack.Toolbar.Button onPress={p.onSelectAll}>{selectAllLabel}</Stack.Toolbar.Button>
+        ) : (
+          <Stack.Toolbar.Button icon={close} accessibilityLabel={t("common.done")} onPress={p.onDone}>
+            {t("common.done")}
+          </Stack.Toolbar.Button>
+        )}
+      </Stack.Toolbar>
+      <Stack.Toolbar placement="right">
+        {ios ? (
+          <Stack.Toolbar.Button variant="done" onPress={p.onDone}>
+            {t("common.done")}
+          </Stack.Toolbar.Button>
+        ) : (
+          <Stack.Toolbar.Button icon={all} accessibilityLabel={selectAllLabel} onPress={p.onSelectAll}>
+            {selectAllLabel}
+          </Stack.Toolbar.Button>
+        )}
+      </Stack.Toolbar>
+      <Stack.Toolbar placement="bottom">
+        <Stack.Toolbar.Button icon={archive} accessibilityLabel={t("thread.archive")} disabled={none} onPress={p.onArchive}>
+          {t("thread.archive")}
+        </Stack.Toolbar.Button>
+        <Stack.Toolbar.Spacer />
+        <Stack.Toolbar.Button icon={read} accessibilityLabel={p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")} disabled={none} onPress={p.onRead}>
+          {p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")}
+        </Stack.Toolbar.Button>
+        <Stack.Toolbar.Spacer />
+        <Stack.Toolbar.Button icon={assign} accessibilityLabel={t("thread.assign")} disabled={none || !p.canAssign} onPress={p.onAssign}>
+          {t("thread.assign")}
+        </Stack.Toolbar.Button>
+      </Stack.Toolbar>
     </>
   );
 }
 
-/** Row separators start at the text column, past the unread dot and the avatar (Mail.app). */
-const TEXT_INSET = spacing.sm + 10 + spacing.xs + 40 + spacing.md;
-const RowSeparator = () => <Separator inset={TEXT_INSET} />;
+/** The context menu's title: one or two lines, not a wall (a 200-character subject wraps over the whole menu). */
+const menuTitle = (s: string) => {
+  const chars = Array.from(s); // never cut an emoji in half
+  return chars.length > 60 ? `${chars.slice(0, 57).join("").trimEnd()}…` : s;
+};
 
-const ThreadItem = memo(function ThreadItem({ row, when, actions }: { row: ThreadRow; when: string; actions: RowMenuAction[] }) {
-  const c = useColors();
-  const { t } = useI18n();
-  const label = t("threads.a11y", { from: row.title, subject: row.subject, when, unread: row.unread ? t("threads.a11yUnread") : "" });
+function swipeAction(kind: SwipeKind, row: ThreadRow, ops: RowOps): SwipeAction | null {
+  const { t, c } = ops;
+  switch (kind) {
+    case "read":
+      return {
+        key: "read",
+        label: row.unread ? t("swipe.read") : t("swipe.unread"),
+        icon: row.unread ? Icons.markRead : Icons.markUnread,
+        color: c.swipeRead,
+        onColor: c.onSwipeRead,
+        onPress: () => ops.toggleRead(row),
+      };
+    case "archive":
+      return row.status === "closed"
+        ? { key: "archive", label: t("swipe.unarchive"), icon: Icons.unarchive, color: c.swipeArchive, onColor: c.onSwipeArchive, onPress: () => ops.unarchive(row) }
+        : { key: "archive", label: t("swipe.archive"), icon: Icons.archive, color: c.swipeArchive, onColor: c.onSwipeArchive, removes: !ops.keepsArchived, onPress: () => ops.archive([row]) };
+    case "assign":
+      return { key: "assign", label: t("swipe.assign"), icon: Icons.assign, color: c.swipeAssign, onColor: c.onSwipeAssign, onPress: () => ops.assign([row]) };
+    case "none":
+      return null;
+  }
+}
+
+const ThreadItem = memo(function ThreadItem({
+  row,
+  when,
+  ops,
+  showAssignee,
+  editing,
+  selected,
+  onToggle,
+}: {
+  row: ThreadRow;
+  when: string;
+  ops: RowOps;
+  showAssignee: boolean;
+  editing: boolean;
+  selected: boolean;
+  onToggle(threadId: string): void;
+}) {
+  const { t, c, prefs } = ops;
+  const canAssign = ops.canAssign(row);
+  // The context menu (and the accessibility actions, which mirror the swipes) has every row action.
+  const actions = useMemo<RowMenuAction[]>(() => {
+    if (!actionable(row)) return [];
+    const list: RowMenuAction[] = [
+      row.unread
+        ? { label: t("thread.markRead"), icon: Icons.markRead, onPress: () => ops.toggleRead(row) }
+        : { label: t("thread.markUnread"), icon: Icons.markUnread, onPress: () => ops.toggleRead(row) },
+      row.status === "closed"
+        ? { label: t("thread.unarchive"), icon: Icons.unarchive, onPress: () => ops.unarchive(row) }
+        : { label: t("thread.archive"), icon: Icons.archive, onPress: () => ops.archive([row]) },
+    ];
+    if (canAssign) list.push({ label: t("thread.assign"), icon: Icons.assign, onPress: () => ops.assign([row]) });
+    return list;
+  }, [row, t, ops, canAssign]);
+  const swipes = useMemo(() => {
+    const k = swipeKinds(row, prefs, canAssign);
+    return {
+      leading: k.leading ? swipeAction(k.leading, row, ops) : null,
+      trailing: k.trailing.map((kind) => swipeAction(kind, row, ops)).filter((a): a is SwipeAction => a !== null),
+    };
+  }, [row, prefs, canAssign, ops]);
+
+  const label =
+    t("threads.a11y", { from: row.title, subject: row.subject.trim() || t("threads.noSubject"), when, unread: row.unread ? t("threads.a11yUnread") : "" }) +
+    (row.status && row.status !== "open" ? t("threads.a11yStatus", { status: t(`status.${row.status}`) }) : "") +
+    (showAssignee && row.assigneeName ? t("threads.a11yAssignee", { name: row.assigneeName }) : "");
   const href = `/thread/${encodeURIComponent(row.threadId)}?mailbox=${encodeURIComponent(row.mailbox)}`;
   // A flat style object, not a ({ pressed }) => style function: on iOS the row is a `Link asChild`, whose Slot drops a
-  // function style (the row lost flexDirection/padding) and rejects arrays. The pressed highlight comes from state.
+  // function style and rejects arrays. The pressed highlight comes from state.
   const [pressed, setPressed] = useState(false);
-  return (
-    <RowMenu href={href} title={row.subject} actions={actions} disabled={row.pending}>
+  const ios = process.env.EXPO_OS === "ios";
+  const content = (
+    <ThreadRowContent
+      row={row}
+      when={when}
+      avatars={prefs.avatars}
+      previewLines={prefs.previewLines}
+      showAssignee={showAssignee}
+      editing={editing}
+      selected={selected}
+    />
+  );
+
+  if (editing) {
+    const can = actionable(row);
+    return (
       <Pressable
-        accessibilityRole="button"
+        accessibilityRole="checkbox"
         accessibilityLabel={label}
-        accessibilityHint={row.snippet}
-        // VoiceOver / TalkBack reach the context-menu actions through the rotor / actions menu.
-        accessibilityActions={actions.map((a) => ({ name: a.label, label: a.label }))}
-        onAccessibilityAction={(e) => actions.find((a) => a.label === e.nativeEvent.actionName)?.onPress()}
+        accessibilityState={{ checked: selected, disabled: !can }}
+        disabled={!can}
+        onPress={() => onToggle(row.threadId)}
         android_ripple={{ color: c.fill }}
-        onPressIn={() => setPressed(true)}
-        onPressOut={() => setPressed(false)}
-        style={StyleSheet.flatten([styles.row, { backgroundColor: pressed && process.env.EXPO_OS === "ios" ? c.fill : c.background }])}
+        style={{ backgroundColor: selected ? c.selectedRow : c.background, opacity: can ? 1 : 0.5 }}
       >
-        <View style={styles.lead}>
-          <UnreadDot visible={row.unread} />
-          <Avatar name={row.title} />
-        </View>
-        <View style={styles.body}>
-          <View style={styles.line}>
-            <ThemedText variant="headline" emphasized={row.unread} style={styles.from} numberOfLines={1}>
-              {row.title}
-            </ThemedText>
-            {row.pending ? <Symbol icon={Icons.pending} size={14} color={c.secondaryLabel} /> : null}
-            <ThemedText variant="subheadline" tone={row.unread ? "tint" : "secondary"} style={tabular}>
-              {when}
-            </ThemedText>
-          </View>
-          <ThemedText variant="subheadline" emphasized={row.unread} numberOfLines={1}>
-            {row.number ? <ThemedText variant="subheadline" tone="secondary">#{row.number} </ThemedText> : null}
-            {row.subject}
-          </ThemedText>
-          <ThemedText variant="subheadline" tone="secondary" numberOfLines={2}>
-            {row.snippet}
-          </ThemedText>
-          {(row.status && row.status !== "open") || row.assigneeName ? (
-            <View style={styles.chips}>
-              {row.status && row.status !== "open" ? <StatusPill status={row.status} /> : null}
-              {row.assigneeName ? <Chip icon={Icons.person} label={row.assigneeName} /> : null}
-            </View>
-          ) : null}
-        </View>
+        {content}
       </Pressable>
-    </RowMenu>
+    );
+  }
+
+  return (
+    <SwipeRow leading={swipes.leading} trailing={swipes.trailing}>
+      <RowMenu href={href} title={menuTitle(row.subject.trim() || t("threads.noSubject"))} actions={actions} disabled={row.pending}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          accessibilityHint={row.snippet}
+          // VoiceOver / TalkBack reach the swipe and menu actions through the rotor / actions menu.
+          accessibilityActions={actions.map((a) => ({ name: a.label, label: a.label }))}
+          onAccessibilityAction={(e) => actions.find((a) => a.label === e.nativeEvent.actionName)?.onPress()}
+          android_ripple={{ color: c.fill }}
+          onPressIn={() => setPressed(true)}
+          onPressOut={() => setPressed(false)}
+          style={StyleSheet.flatten([styles.pressable, { backgroundColor: pressed && ios ? c.fill : c.background }])}
+        >
+          {content}
+        </Pressable>
+      </RowMenu>
+    </SwipeRow>
   );
 });
 
 const styles = StyleSheet.create({
-  row: { flexDirection: "row", paddingVertical: spacing.md, paddingRight: screenEdge },
-  lead: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingLeft: spacing.sm, paddingRight: spacing.md, alignSelf: "flex-start", paddingTop: spacing.xxs },
-  body: { flex: 1, gap: spacing.xxs },
-  line: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  from: { flex: 1 },
-  chips: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
+  pressable: {},
   note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
-  loading: { height: 240 },
   more: { alignItems: "center", paddingVertical: spacing.md },
 });

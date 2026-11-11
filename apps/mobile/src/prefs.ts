@@ -1,8 +1,9 @@
-// Per-device preferences (AsyncStorage): the UI language override.
+// Per-device preferences (AsyncStorage): the UI language override and how thread lists look and swipe.
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getCalendars, getLocales } from "expo-localization";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { pickLocale, type Locale } from "./i18n";
+import { DEFAULT_LIST_PREFS, parseListPrefs, type ListPrefs } from "./model/list-actions";
 
 export type LanguagePref = "system" | Locale;
 const KEY = "ember-mail:language";
@@ -39,4 +40,39 @@ export function useLanguagePref() {
   }, []);
   const locale: Locale = pref === "system" ? deviceLocale() : pref;
   return { pref, locale, clock24: deviceClock24(), setPref: update };
+}
+
+const LIST_KEY = "ember-mail:list";
+let listPrefs: ListPrefs = DEFAULT_LIST_PREFS;
+let listLoaded = false;
+const listListeners = new Set<() => void>();
+const emitList = () => listListeners.forEach((l) => l());
+
+function loadListPrefs() {
+  if (listLoaded) return;
+  listLoaded = true;
+  AsyncStorage.getItem(LIST_KEY)
+    .then((raw) => {
+      listPrefs = parseListPrefs(raw);
+      emitList();
+    })
+    .catch(() => {});
+}
+
+const subscribeList = (l: () => void) => {
+  loadListPrefs();
+  listListeners.add(l);
+  return () => void listListeners.delete(l);
+};
+const getList = () => listPrefs;
+
+/** Thread-list appearance and swipe actions, shared by every list and Settings (one store, persisted). */
+export function useListPrefs(): ListPrefs {
+  return useSyncExternalStore(subscribeList, getList, getList);
+}
+
+export function setListPrefs(patch: Partial<ListPrefs>) {
+  listPrefs = { ...listPrefs, ...patch };
+  emitList();
+  AsyncStorage.setItem(LIST_KEY, JSON.stringify(listPrefs)).catch(() => {});
 }

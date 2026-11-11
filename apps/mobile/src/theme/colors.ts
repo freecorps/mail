@@ -26,6 +26,21 @@ function semantic() {
     /** Small filled shapes: tags, highlighted rows, attachment tiles. */
     fill: pick(Color.ios.tertiarySystemFill, Color.android.dynamic.surfaceContainerHighest, "#7676801f"),
     danger: pick(Color.ios.systemRed, Color.android.dynamic.error, "#ff3b30"),
+    /** Monogram avatar: white initials on the grey gradient (iOS, like Contacts); a tonal container on Android. */
+    monogramText: pick("#FFFFFF", Color.android.dynamic.onSecondaryContainer, "#FFFFFF"),
+    monogramFill: pick("#9A9EA8", Color.android.dynamic.secondaryContainer, "#9A9EA8"),
+    /**
+     * Swipe action backgrounds and their glyph/label color: the system's own (Mail: blue for unread, purple for archive,
+     * grey for more) on iOS; Material tonal containers on Android.
+     */
+    swipeRead: pick(Color.ios.systemBlue, Color.android.dynamic.primaryContainer, "#007aff"),
+    onSwipeRead: pick("#FFFFFF", Color.android.dynamic.onPrimaryContainer, "#FFFFFF"),
+    swipeArchive: pick(Color.ios.systemPurple, Color.android.dynamic.tertiaryContainer, "#af52de"),
+    onSwipeArchive: pick("#FFFFFF", Color.android.dynamic.onTertiaryContainer, "#FFFFFF"),
+    swipeAssign: pick(Color.ios.systemGray, Color.android.dynamic.secondaryContainer, "#8e8e93"),
+    onSwipeAssign: pick("#FFFFFF", Color.android.dynamic.onSecondaryContainer, "#FFFFFF"),
+    /** A selected row in Edit mode. */
+    selectedRow: pick(Color.ios.systemGray5, Color.android.dynamic.secondaryContainer, "#e5e5ea"),
   };
 }
 
@@ -44,6 +59,9 @@ const pairs = {
     warning: "#B25000",
     noteBackground: "#FFF8E1",
     noteBorder: "#F5C451",
+    /** Contacts' monogram gradient, top to bottom (iOS). */
+    monogramTop: "#B1B5BF",
+    monogramBottom: "#878B95",
     // The same system values as plain strings, for native views that take no platform color.
     labelText: "#000000",
     secondaryText: "#3C3C4399",
@@ -57,6 +75,8 @@ const pairs = {
     warning: "#FFB340",
     noteBackground: "#3A3218",
     noteBorder: "#8A6D1F",
+    monogramTop: "#7A7D86",
+    monogramBottom: "#56595F",
     labelText: "#FFFFFF",
     secondaryText: "#EBEBF599",
     tertiaryText: "#EBEBF54D",
