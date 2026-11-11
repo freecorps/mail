@@ -99,6 +99,43 @@ describe("reply Cco", () => {
     expect(screen.queryByText("gerente@acme.test")).toBeNull();
   });
 
+  it("Cco still typed (not a chip yet) goes with the reply, once, and does not come back as a hidden Cco", async () => {
+    const { a, client, wrapper } = setup();
+    await client.mutation(api.inbox.saveDraft, {
+      kind: "reply",
+      threadId: a.threadId,
+      text: "Corrigido",
+      bodyHtml: "<p>Corrigido</p>",
+      bcc: ["gerente@acme.test"],
+    });
+    render(<Reply threadId={a.threadId} />, { wrapper });
+    await waitFor(() => expect(screen.getByText("gerente@acme.test")).toBeTruthy());
+    // Typed, never turned into a chip: the same address again (deduped) and a new one.
+    fireEvent.change(screen.getByRole("combobox", { name: "Cco" }), { target: { value: "Gerente@acme.test, financeiro@acme.test" } });
+    fireEvent.submit(screen.getByText("Corrigido").closest("form")!);
+    await waitFor(async () => expect(await outbound(client, a.threadId)).toHaveLength(1));
+    expect((await outbound(client, a.threadId))[0]!.bcc?.map((x) => x.email)).toEqual(["gerente@acme.test", "financeiro@acme.test"]);
+    // The row went with the send; what its field had typed did not come back as a Cco nobody sees.
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Cco" })).toBeNull());
+    await new Promise((r) => setTimeout(r, 1300));
+    const d = (await client.query(api.inbox.drafts, { threadId: a.threadId })).find((x) => x.kind === "reply");
+    expect(d?.bcc ?? []).toEqual([]);
+    expect(screen.getByRole("button", { name: "Adicionar Cco" })).toBeTruthy();
+  });
+
+  it("a bad address still typed in Cco is named and nothing is sent", async () => {
+    const { a, client, wrapper } = setup();
+    await client.mutation(api.inbox.saveDraft, { kind: "reply", threadId: a.threadId, text: "Corrigido", bodyHtml: "<p>Corrigido</p>" });
+    render(<Reply threadId={a.threadId} />, { wrapper });
+    await waitFor(() => expect(screen.getByText("Corrigido")).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar Cco" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Cco" }), { target: { value: "nao-e-email" } });
+    fireEvent.submit(screen.getByText("Corrigido").closest("form")!);
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("nao-e-email"));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await outbound(client, a.threadId)).toHaveLength(0);
+  });
+
   it("an undone send kept in memory (its box was gone) comes back with its Cco", async () => {
     const { a, wrapper } = setup();
     keepUndone(a.threadId, {

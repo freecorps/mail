@@ -11,7 +11,7 @@ import { HEARTBEAT_MS, presenceBeat, presenceLine, SETTLE_MS, type PresenceTimer
 import { ATTACH_LIMIT, isLinkRefusal, isScheduled, sendLaterCheck } from "@/model/schedule";
 import { matchTags, nextColor, swapOrders, tagCreateError, tagNameError, threadTags } from "@/model/tags";
 import { snoozeTargetOf } from "@/model/snooze";
-import { invalidChips } from "@/model/recipients";
+import { invalidChips, withTyped } from "@/model/recipients";
 import { mailServer } from "./mailServer";
 
 const DAY = 86_400_000;
@@ -373,6 +373,12 @@ describe("times in the member's zone", () => {
 });
 
 describe("scheduled sends", () => {
+  it("what is still typed joins a field's chips once per address", () => {
+    expect(withTyped(["Bia <bia@x.test>"], "BIA@x.test, caio@x.test; caio@x.test")).toEqual(["Bia <bia@x.test>", "caio@x.test"]);
+    expect(withTyped(["a@x.test"], "  ")).toEqual(["a@x.test"]);
+    expect(withTyped([], "nope")).toEqual(["nope"]);
+  });
+
   it("Cco chips that are not a recipient are named", () => {
     expect(invalidChips(["a@b.test", "Bia <bia@x.test>", "nope", ""])).toEqual(["nope", ""]);
     expect(invalidChips([])).toEqual([]);

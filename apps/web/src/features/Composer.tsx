@@ -26,7 +26,7 @@ import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
 import { AttachButton, AttachmentTiles, DraftStatus, SavedRepliesButton, SignatureLine } from "./composer/parts";
 import { RecipientInput } from "./composer/RecipientInput";
 import { SendLaterButton } from "./composer/SendLater";
-import { contactsFrom, invalidChips } from "@/model/recipients";
+import { contactsFrom, invalidChips, withTyped } from "@/model/recipients";
 import { isLinkRefusal, pickSendAt, sendLaterCheck } from "@/model/schedule";
 import { formatAt } from "@/lib/when";
 
@@ -76,7 +76,16 @@ export function Composer({
   const [all, setAll] = useState(false);
   // Blind copies of a reply (never the conversation's contact: Ember drops those), shown with "Cco".
   const [bcc, setBcc] = useState<string[]>([]);
-  const [showBcc, setShowBcc] = useState(false);
+  const [showBcc, setShowBccState] = useState(false);
+  // The Cco row as the box last set it, read in the field's callbacks: a field going away (a send hides the row) commits
+  // what was typed in it, and that must not come back as a hidden Cco.
+  const bccOpen = useRef(false);
+  const setShowBcc = (open: boolean) => {
+    bccOpen.current = open;
+    setShowBccState(open);
+  };
+  // What is typed in Cco and not a chip yet: a send takes it along, as the compose windows do.
+  const bccTyped = useRef("");
   // Cco addresses that are not a recipient: named under the field (which is marked invalid), and nothing is sent.
   const [bccError, setBccError] = useState<string | null>(null);
   const recent = useQuerySnapshot(api.inbox.recent, showBcc ? { threads: 100 } : "skip");
@@ -332,7 +341,8 @@ export function Composer({
     if (waitingFiles) return void toast(t("composer.waitUploads"));
     // Cco is checked as the compose windows check theirs (each chip one recipient): a bad one stays, named, and
     // nothing leaves.
-    const badBcc = mode === "reply" ? invalidChips(bcc) : [];
+    const bccAll = mode === "reply" ? withTyped(bcc, bccOpen.current ? bccTyped.current : "") : [];
+    const badBcc = invalidChips(bccAll);
     if (badBcc.length) {
       setShowBcc(true);
       return setBccError(t("compose.invalidList", { list: badBcc.join(", ") }));
@@ -343,7 +353,7 @@ export function Composer({
     const { html, text } = body;
     const files: AttachmentArg[] = m === "reply" ? ready : [];
     const cc = m === "reply" && all && others.length ? others : undefined;
-    const blind = m === "reply" && bcc.length ? bcc : undefined;
+    const blind = m === "reply" && bccAll.length ? bccAll : undefined;
     const sig = signature;
     // The draft the send consumes: the one known now, or the one a save already on its way creates (else it would
     // outlive the send). Held until the send is confirmed, undone or fails.
@@ -354,6 +364,7 @@ export function Composer({
     // them along: the next message starts without them (an undo or a failure puts them back).
     if (m === "reply") {
       uploads.clear();
+      bccTyped.current = "";
       setBcc([]);
       setShowBcc(false);
     }
@@ -541,12 +552,15 @@ export function Composer({
               label={t("composer.bcc")}
               value={bcc}
               onChange={(next) => {
+                // A row the box closed (a send took its Cco) has nothing left to add.
+                if (!bccOpen.current) return;
                 armed.current = true;
                 setBccError(null);
                 setBcc(next);
               }}
               contacts={contacts}
               invalid={!!bccError}
+              onPending={(v) => void (bccTyped.current = v)}
               focusOnMount={!bcc.length}
             />
           </div>
