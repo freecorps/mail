@@ -4,15 +4,15 @@ import * as Clipboard from "expo-clipboard";
 import { useEffect, useState } from "react";
 import { useMutation } from "@freecorps/ember-react-native";
 import { api } from "../api";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { Icons } from "../components/icons";
-import { EmptyState } from "../components/ui";
+import { EmptyState, ThemedText } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useSession } from "../session";
-import { usePalette } from "../theme";
+import { mono, screenEdge, spacing, useColors } from "../theme";
 
 export function NotMemberScreen() {
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const session = useSession();
   const userId = session.userId ?? "";
@@ -23,7 +23,7 @@ export function NotMemberScreen() {
     if (userId) requestAccess({}).catch(() => {});
   }, [userId, requestAccess]);
   return (
-    <View style={{ flex: 1, backgroundColor: p.grouped, paddingVertical: 48 }}>
+    <View style={{ flex: 1, backgroundColor: c.groupedBackground, paddingVertical: spacing.xxxl }}>
       <EmptyState
         icon={Icons.lock}
         title={t("notMember.title")}
@@ -33,9 +33,9 @@ export function NotMemberScreen() {
           { label: t("settings.signOut"), destructive: true, onPress: () => void session.signOut() },
         ]}
       />
-      <Text selectable style={{ fontFamily: process.env.EXPO_OS === "ios" ? "Menlo" : "monospace", fontSize: 14, color: p.text, textAlign: "center", padding: 16 }} accessibilityLabel={userId}>
+      <ThemedText selectable variant="subheadline" style={[mono, { textAlign: "center", padding: screenEdge }]} accessibilityLabel={userId}>
         {userId}
-      </Text>
+      </ThemedText>
     </View>
   );
 }

@@ -3,7 +3,7 @@
 import { SymbolView, unstable_getMaterialSymbolSourceAsync, type AndroidSymbol, type SymbolViewProps } from "expo-symbols";
 import { useEffect, useState } from "react";
 import type { ColorValue, ImageSourcePropType } from "react-native";
-import { usePalette } from "../theme";
+import { useColors } from "../theme";
 
 export type SFSymbol = Extract<SymbolViewProps["name"], string>;
 
@@ -60,12 +60,12 @@ export const Icons = {
 
 /** A decorative glyph (hidden from screen readers; the surrounding control carries the label). */
 export function Symbol({ icon: spec, size = 22, color, weight }: { icon: IconSpec; size?: number; color?: ColorValue; weight?: "regular" | "medium" | "semibold" }) {
-  const p = usePalette();
+  const c = useColors();
   return (
     <SymbolView
       name={{ ios: spec.ios, android: spec.android }}
       size={size}
-      tintColor={color ?? p.tint}
+      tintColor={color ?? c.tint}
       {...(weight ? { weight } : {})}
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
@@ -83,7 +83,7 @@ export function useToolbarIcon(spec: IconSpec, color: string): SFSymbol | ImageS
  * Android only: a Material Symbol rendered to an image source, for native APIs that take images (header toolbar
  * items, Compose `Icon`). Returns null on iOS (use the SF Symbol name there) and until the glyph is ready.
  */
-export function useMaterialSource(spec: IconSpec | null, size = 24, color = "#000000"): ImageSourcePropType | null {
+export function useMaterialSource(spec: IconSpec | null, size: number, color: string): ImageSourcePropType | null {
   const [source, setSource] = useState<ImageSourcePropType | null>(null);
   const name = spec?.android ?? null;
   useEffect(() => {

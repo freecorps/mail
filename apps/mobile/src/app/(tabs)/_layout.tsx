@@ -6,10 +6,10 @@ import { useI18n } from "../../i18n";
 import { useMailboxes } from "../../model/threads";
 import { setInboxMounted } from "../../navigation";
 import { flushNotificationTarget, useNotificationRouting } from "../../push/usePush";
-import { usePalette } from "../../theme";
+import { useColors } from "../../theme";
 
 export default function TabsLayout() {
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const { totalUnread } = useMailboxes();
   useNotificationRouting();
@@ -20,7 +20,7 @@ export default function TabsLayout() {
   }, []);
 
   return (
-    <NativeTabs tintColor={p.tint} minimizeBehavior="onScrollDown">
+    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown">
       <NativeTabs.Trigger name="(inbox)">
         <NativeTabs.Trigger.Icon sf={{ default: Icons.inbox.ios, selected: Icons.inboxSelected.ios }} md={Icons.inbox.android} />
         <NativeTabs.Trigger.Label>{t("mailboxes.title")}</NativeTabs.Trigger.Label>

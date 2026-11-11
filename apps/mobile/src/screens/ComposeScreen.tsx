@@ -13,7 +13,8 @@ import { UploadSection } from "../components/Uploads";
 import { useI18n } from "../i18n";
 import { formatFull, parseRecipients } from "../lib/format";
 import { useUploadOne, useUploads } from "../lib/uploads";
-import { usePalette } from "../theme";
+import { haptics } from "../lib/haptics";
+import { useColors } from "../theme";
 
 type Forward = { threadId: string; messageId: string; mailbox: string; subject: string; text: string; files: string[] };
 
@@ -25,7 +26,7 @@ export function ComposeScreen() {
 
 /** Loads the message to forward (from the local replica when offline), then the form starts from it. */
 function ForwardCompose({ threadId, messageId }: { threadId: string; messageId: string }) {
-  const { t, locale } = useI18n();
+  const { t, locale, clock24 } = useI18n();
   const detail = useQuery(api.inbox.thread, { threadId });
   const m = detail?.messages.find((x) => x._id === messageId);
   if (!detail || !m) return <Loading />;
@@ -34,7 +35,7 @@ function ForwardCompose({ threadId, messageId }: { threadId: string; messageId: 
     messageId,
     mailbox: m.mailbox,
     subject: forwardSubject(m.subject || detail.thread.subject),
-    text: forwardText(m, { header: t("forward.header"), from: t("forward.from"), date: t("forward.date"), subject: t("forward.subject"), to: t("forward.to") }, formatFull(m.at, locale)),
+    text: forwardText(m, { header: t("forward.header"), from: t("forward.from"), date: t("forward.date"), subject: t("forward.subject"), to: t("forward.to") }, formatFull(m.at, locale, clock24)),
     files: forwardedFiles(m.attachments).map((a) => a.filename),
   };
   return <ComposeForm forward={forward} />;
@@ -42,7 +43,7 @@ function ForwardCompose({ threadId, messageId }: { threadId: string; messageId: 
 
 function ComposeForm(init: { mailbox?: string; to?: string; forward?: Forward }) {
   const fwd = init.forward ?? null;
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const mailboxes = useQuery(api.inbox.mailboxes, {}) ?? [];
   const compose = useMutation(api.inbox.compose);
@@ -59,8 +60,8 @@ function ComposeForm(init: { mailbox?: string; to?: string; forward?: Forward })
   const ready = !!from && !!to.trim() && !!body.trim() && !uploads.busy && !uploads.failed;
   // Android header items must be icons (text-only toolbar buttons are not rendered there); iOS keeps the text buttons.
   const android = process.env.EXPO_OS === "android";
-  const cancelIcon = useMaterialSource(android ? Icons.close : null, 24, p.tint);
-  const sendIcon = useMaterialSource(android ? Icons.sendMail : null, 24, p.tint);
+  const cancelIcon = useMaterialSource(android ? Icons.close : null, 24, c.tint);
+  const sendIcon = useMaterialSource(android ? Icons.sendMail : null, 24, c.tint);
   const headerReady = !android || (!!cancelIcon && !!sendIcon);
 
   const send = () => {
@@ -73,6 +74,7 @@ function ComposeForm(init: { mailbox?: string; to?: string; forward?: Forward })
     // Optimistic + queued offline: the new conversation shows in the mailbox right away.
     const attachments = uploads.attachments;
     const common = { to: rt.valid, ...(rc.valid.length ? { cc: rc.valid } : {}), subject: subject.trim(), text: body.trim(), ...(attachments.length ? { attachments } : {}) };
+    haptics.success();
     void (fwd ? forwardM({ threadId: fwd.threadId, messageId: fwd.messageId, ...common }) : compose({ mailbox: from!, ...common })).catch(() => {});
     router.back();
   };
@@ -94,12 +96,12 @@ function ComposeForm(init: { mailbox?: string; to?: string; forward?: Forward })
           </Stack.Toolbar>
         </>
       ) : null}
-      <Host style={{ flex: 1 }} seedColor={p.tint}>
+      <Host style={{ flex: 1 }} seedColor={c.tint}>
         <FieldGroup>
           <FieldGroup.Section>
             {fwd ? (
               // A forward goes from the thread's own mailbox.
-              <Text textStyle={{ color: p.secondary }}>{`${t("compose.from")}: ${mailboxes.find((b) => b.name === fwd.mailbox)?.address ?? fwd.mailbox}`}</Text>
+              <Text textStyle={{ color: c.secondaryText }}>{`${t("compose.from")}: ${mailboxes.find((b) => b.name === fwd.mailbox)?.address ?? fwd.mailbox}`}</Text>
             ) : mailboxes.length > 1 ? (
               <Picker<string> selectedValue={from ?? ""} onValueChange={setMailbox}>
                 {mailboxes.map((b) => (
@@ -107,7 +109,7 @@ function ComposeForm(init: { mailbox?: string; to?: string; forward?: Forward })
                 ))}
               </Picker>
             ) : mailboxes.length === 1 ? (
-              <Text textStyle={{ color: p.secondary }}>{`${t("compose.from")}: ${mailboxes[0]!.address}`}</Text>
+              <Text textStyle={{ color: c.secondaryText }}>{`${t("compose.from")}: ${mailboxes[0]!.address}`}</Text>
             ) : null}
             <TextInput
               placeholder={t("compose.to")}
@@ -125,12 +127,12 @@ function ComposeForm(init: { mailbox?: string; to?: string; forward?: Forward })
           </FieldGroup.Section>
           {error ? (
             <FieldGroup.Section>
-              <Text textStyle={{ color: p.danger }}>{error}</Text>
+              <Text textStyle={{ color: c.dangerText }}>{error}</Text>
             </FieldGroup.Section>
           ) : null}
           <FieldGroup.Section>
             <TextInput placeholder={t("compose.body")} accessibilityLabel={t("compose.body")} defaultValue={fwd?.text ?? ""} onChangeText={setBody} multiline numberOfLines={10} />
-            {fwd && fwd.files.length > 0 ? <Text textStyle={{ color: p.secondary }}>{t("forward.files", { list: fwd.files.join(", ") })}</Text> : null}
+            {fwd && fwd.files.length > 0 ? <Text textStyle={{ color: c.secondaryText }}>{t("forward.files", { list: fwd.files.join(", ") })}</Text> : null}
           </FieldGroup.Section>
           <UploadSection items={uploads.items} onAdd={() => void uploads.add().catch(() => {})} onRemove={uploads.remove} />
         </FieldGroup>

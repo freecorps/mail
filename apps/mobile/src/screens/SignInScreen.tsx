@@ -7,11 +7,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { EMBER_URL } from "../config";
 import { useI18n } from "../i18n";
 import { useSession } from "../session";
-import { usePalette } from "../theme";
+import { useColors, type } from "../theme";
 
 export function SignInScreen() {
   const { auth } = useSession();
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
   const [email, setEmail] = useState("");
@@ -39,12 +39,12 @@ export function SignInScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: p.grouped, ...(Platform.OS === "android" ? { paddingTop: insets.top, paddingBottom: insets.bottom } : null) }}>
-      <Host style={{ flex: 1 }} seedColor={p.tint}>
+    <View style={{ flex: 1, backgroundColor: c.groupedBackground, ...(Platform.OS === "android" ? { paddingTop: insets.top, paddingBottom: insets.bottom } : null) }}>
+      <Host style={{ flex: 1 }} seedColor={c.tint}>
         <FieldGroup>
           <FieldGroup.Section>
             <FieldGroup.SectionHeader>
-              <Text textStyle={{ fontSize: 30, fontWeight: "700", color: p.text, textAlign: "center" }}>{t("app.name")}</Text>
+              <Text textStyle={{ fontSize: type.title1.fontSize, fontWeight: "700", color: c.labelText, textAlign: "center" }}>{t("app.name")}</Text>
             </FieldGroup.SectionHeader>
             {mode === "signUp" ? <TextInput placeholder={t("signin.name")} accessibilityLabel={t("signin.name")} onChangeText={setName} autoComplete="name" /> : null}
             <TextInput
@@ -71,14 +71,14 @@ export function SignInScreen() {
               testID="signin-password"
             />
             <FieldGroup.SectionFooter>
-              <Text textStyle={{ color: error ? p.danger : p.secondary }}>{error ?? t("signin.subtitle")}</Text>
+              <Text textStyle={{ color: error ? c.dangerText : c.secondaryText }}>{error ?? t("signin.subtitle")}</Text>
             </FieldGroup.SectionFooter>
           </FieldGroup.Section>
           <FieldGroup.Section>
             <Button variant="filled" onPress={() => void submit()} disabled={!canSubmit} testID="signin-submit" label={mode === "signIn" ? t("signin.submit") : t("signin.signup")} />
             <Button variant="text" onPress={() => setMode(mode === "signIn" ? "signUp" : "signIn")} label={mode === "signIn" ? t("signin.toSignup") : t("signin.toSignin")} />
             <FieldGroup.SectionFooter>
-              <Text textStyle={{ color: p.tertiary, fontSize: 12 }}>{t("signin.server", { url: EMBER_URL.replace(/^https?:\/\//, "") })}</Text>
+              <Text textStyle={{ color: c.tertiaryText, fontSize: type.caption1.fontSize }}>{t("signin.server", { url: EMBER_URL.replace(/^https?:\/\//, "") })}</Text>
             </FieldGroup.SectionFooter>
           </FieldGroup.Section>
         </FieldGroup>

@@ -4,18 +4,22 @@ import { Host } from "@expo/ui";
 import { Button, Column, Text, TextButton } from "@expo/ui/jetpack-compose";
 import { SymbolView } from "expo-symbols";
 import { Text as RNText, View } from "react-native";
-import { usePalette } from "../../theme";
+import { spacing, type, useColors } from "../../theme";
 import type { EmptyStateProps } from "./types";
 
 export function EmptyState({ icon, title, body, actions }: EmptyStateProps) {
-  const p = usePalette();
+  const c = useColors();
   return (
-    <View style={{ flex: 1, minHeight: 320, alignItems: "center", justifyContent: "center", padding: 32, gap: 12 }}>
-      <SymbolView name={{ android: icon.android }} size={48} tintColor={p.secondary} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
-      <RNText style={{ color: p.text, fontSize: 22, lineHeight: 28, textAlign: "center" }} accessibilityRole="header">
+    <View style={{ flex: 1, minHeight: 320, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.md }}>
+      <SymbolView name={{ android: icon.android }} size={48} tintColor={c.secondaryLabel} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
+      <RNText style={[type.title2, { color: c.label, textAlign: "center" }]} accessibilityRole="header">
         {title}
       </RNText>
-      {body ? <RNText selectable style={{ color: p.secondary, fontSize: 14, lineHeight: 20, textAlign: "center", letterSpacing: 0.25 }}>{body}</RNText> : null}
+      {body ? (
+        <RNText selectable style={[type.subheadline, { color: c.secondaryLabel, textAlign: "center" }]}>
+          {body}
+        </RNText>
+      ) : null}
       {actions?.length ? (
         <Host matchContents>
           <Column horizontalAlignment="center">
@@ -26,7 +30,7 @@ export function EmptyState({ icon, title, body, actions }: EmptyStateProps) {
                 </Button>
               ) : (
                 <TextButton key={a.label} onClick={a.onPress}>
-                  <Text {...(a.destructive ? { color: p.danger } : {})}>{a.label}</Text>
+                  <Text {...(a.destructive ? { color: c.dangerText } : {})}>{a.label}</Text>
                 </TextButton>
               ),
             )}

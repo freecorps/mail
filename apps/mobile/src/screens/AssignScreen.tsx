@@ -7,18 +7,20 @@ import { Icons } from "../components/icons";
 import { Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useMembers } from "../model/thread";
-import { usePalette } from "../theme";
+import { haptics } from "../lib/haptics";
+import { useColors } from "../theme";
 
 export function AssignScreen() {
   const params = useLocalSearchParams<{ threadId: string; mailbox: string; current?: string }>();
   const current = params.current || null;
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const { members, status } = useMembers(params.mailbox);
   const { online } = useConnectionState();
   const assign = useMutation(api.inbox.assign);
 
   const pick = (userId: string | null) => {
+    haptics.selection();
     void assign({ threadId: params.threadId, userId }).catch(() => {});
     router.back();
   };
@@ -38,22 +40,22 @@ export function AssignScreen() {
       {status === "loading" && online ? (
         <Loading />
       ) : (
-        <Host style={{ flex: 1 }} seedColor={p.tint}>
+        <Host style={{ flex: 1 }} seedColor={c.tint}>
           <FieldGroup>
             <FieldGroup.Section>
               {rows.map((m) => (
                 <ListItem
                   key={m.userId ?? "-"}
                   onPress={() => pick(m.userId)}
-                  leading={<NativeIcon icon={m.userId ? Icons.person : Icons.unassign} color={m.userId ? p.tint : p.secondary} />}
-                  trailing={current === m.userId ? <NativeIcon icon={Icons.check} color={p.tint} /> : undefined}
+                  leading={<NativeIcon icon={m.userId ? Icons.person : Icons.unassign} color={m.userId ? c.tint : c.secondaryText} />}
+                  trailing={current === m.userId ? <NativeIcon icon={Icons.check} color={c.tint} /> : undefined}
                 >
                   <Text>{m.name}</Text>
                 </ListItem>
               ))}
               {!members.length && !online ? (
                 <FieldGroup.SectionFooter>
-                  <Text textStyle={{ color: p.secondary }}>{t("assign.offline")}</Text>
+                  <Text textStyle={{ color: c.secondaryText }}>{t("assign.offline")}</Text>
                 </FieldGroup.SectionFooter>
               ) : null}
             </FieldGroup.Section>

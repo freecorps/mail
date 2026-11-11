@@ -3,10 +3,12 @@ import { useMemo, useState } from "react";
 import { Linking, PixelRatio, StyleSheet, View } from "react-native";
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from "react-native-webview";
 import { buildEmailDocument, HEIGHT_PROBE, isExternalLink, isInitialLoad } from "../lib/emailHtml";
+import { corner, paper, radius, type } from "../theme";
 
 export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; loadImages: boolean; cid: Record<string, string>; label: string }) {
   const [height, setHeight] = useState(80);
-  const fontSize = Math.round(16 * Math.min(PixelRatio.getFontScale(), 2));
+  // The body text size of the ramp, scaled with Dynamic Type (up to 2×) like native text.
+  const fontSize = Math.round((type.callout.fontSize ?? 16) * Math.min(PixelRatio.getFontScale(), 2));
   const source = useMemo(() => ({ html: buildEmailDocument(html, { loadImages, cid, fontSize }), baseUrl: "about:blank" }), [html, loadImages, cid, fontSize]);
 
   const onShouldStart = (req: WebViewNavigation) => {
@@ -63,6 +65,6 @@ export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; 
 const NO_DATA_DETECTORS: ["none"] = ["none"];
 
 const styles = StyleSheet.create({
-  box: { overflow: "hidden", borderRadius: 10, backgroundColor: "#FFFFFF" },
+  box: { overflow: "hidden", ...corner(radius.sm), backgroundColor: paper.background },
   web: { flex: 1, backgroundColor: "transparent" },
 });

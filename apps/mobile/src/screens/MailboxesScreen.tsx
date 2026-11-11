@@ -6,16 +6,16 @@ import { Icons, useToolbarIcon, type IconSpec } from "../components/icons";
 import { EmptyState, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useMailboxes } from "../model/threads";
-import { usePalette } from "../theme";
+import { useColors } from "../theme";
 
 const MAILBOX_ICONS: Record<string, IconSpec> = { support: Icons.support, privacy: Icons.privacy };
 
 export function MailboxesScreen() {
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const vm = useMailboxes();
-  const c = useConnectionState();
-  const composeIcon = useToolbarIcon(Icons.compose, p.tint);
+  const conn = useConnectionState();
+  const composeIcon = useToolbarIcon(Icons.compose, c.tint);
 
   // Android: the header item needs a Material Symbol image, which loads asynchronously; mount it once it has.
   const toolbar = composeIcon ? (
@@ -31,18 +31,18 @@ export function MailboxesScreen() {
   else if (vm.status === "error" && !vm.mailboxes.length) body = <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />;
   else if (!vm.mailboxes.length) body = <EmptyState icon={Icons.empty} title={t("mailboxes.empty")} />;
   else {
-    const offline = !c.online || c.pendingMutations > 0;
+    const offline = !conn.online || conn.pendingMutations > 0;
     body = (
-      <Host style={{ flex: 1 }} seedColor={p.tint}>
+      <Host style={{ flex: 1 }} seedColor={c.tint}>
         <FieldGroup>
           <FieldGroup.Section>
             {vm.mailboxes.map((b) => (
               <ListItem
                 key={b.name}
                 onPress={() => router.push({ pathname: "/mailbox/[mailbox]", params: { mailbox: b.name, title: b.displayName ?? b.address } })}
-                leading={<NativeIcon icon={MAILBOX_ICONS[b.name] ?? Icons.mailbox} color={p.tint} />}
+                leading={<NativeIcon icon={MAILBOX_ICONS[b.name] ?? Icons.mailbox} color={c.tint} />}
                 supportingText={`${b.address} · ${t("mailboxes.threads", { count: b.threads })}`}
-                trailing={b.unread > 0 ? <Text textStyle={{ color: p.secondary }}>{String(b.unread)}</Text> : undefined}
+                trailing={b.unread > 0 ? <Text textStyle={{ color: c.secondaryText }}>{String(b.unread)}</Text> : undefined}
                 testID={`mailbox-${b.name}`}
               >
                 <Text textStyle={{ fontWeight: "600" }}>{b.displayName ?? b.name}</Text>
@@ -52,10 +52,10 @@ export function MailboxesScreen() {
           {offline ? (
             <FieldGroup.Section>
               <ListItem
-                leading={<NativeIcon icon={c.online ? Icons.pending : Icons.offline} color={p.secondary} />}
-                supportingText={!c.online && c.pendingMutations > 0 ? t("banner.pending", { count: c.pendingMutations }) : undefined}
+                leading={<NativeIcon icon={conn.online ? Icons.pending : Icons.offline} color={c.secondaryText} />}
+                supportingText={!conn.online && conn.pendingMutations > 0 ? t("banner.pending", { count: conn.pendingMutations }) : undefined}
               >
-                <Text textStyle={{ color: p.secondary }}>{!c.online ? t("banner.offline") : t("banner.pending", { count: c.pendingMutations })}</Text>
+                <Text textStyle={{ color: c.secondaryText }}>{!conn.online ? t("banner.offline") : t("banner.pending", { count: conn.pendingMutations })}</Text>
               </ListItem>
             </FieldGroup.Section>
           ) : null}

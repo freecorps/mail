@@ -2,14 +2,16 @@
 // composer with a native segmented control (reply / internal note) and a native text field.
 import { Host, TextInput, type TextInputRef } from "@expo/ui";
 import { router, Stack, useLocalSearchParams } from "expo-router";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, Keyboard, KeyboardAvoidingView, StyleSheet, Text, View } from "react-native";
+import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { FlatList, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
+import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AttachmentList } from "../components/Attachments";
 import { UploadStrip } from "../components/Uploads";
 import { EmailHtmlView } from "../components/EmailHtmlView";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
-import { Avatar, Chip, ConnectionBanner, EmptyState, IconButton, Loading, NativeButton, Segmented, StatusPill } from "../components/ui";
+import { Avatar, Chip, ConnectionBanner, EmptyState, IconButton, Loading, NativeButton, Segmented, StatusPill, ThemedText } from "../components/ui";
 import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf, displayAddress, formatFull } from "../lib/format";
@@ -17,11 +19,12 @@ import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { deliveryState, useThread, type MessageItem } from "../model/thread";
 import { composerMode, isPersonal, useMailboxes } from "../model/threads";
 import { replyAllCc } from "../model/forward";
-import { usePalette } from "../theme";
+import { haptics } from "../lib/haptics";
+import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 export function ThreadScreen() {
   const { threadId } = useLocalSearchParams<{ threadId: string; mailbox?: string }>();
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const vm = useThread(threadId);
   const [loadImages, setLoadImages] = useState(false);
@@ -35,9 +38,9 @@ export function ThreadScreen() {
   const others = useMemo(() => (thread ? replyAllCc(vm.items.map((i) => i.message), own, thread.contact) : []), [vm.items, thread, own]);
   const unread = (thread?.unreadCount ?? 0) > 0;
   const closed = thread?.status === "closed";
-  const readIcon = useToolbarIcon(unread ? Icons.markRead : Icons.markUnread, p.tint);
-  const assignIcon = useToolbarIcon(Icons.assign, p.tint);
-  const archiveIcon = useToolbarIcon(closed ? Icons.unarchive : Icons.archive, p.tint);
+  const readIcon = useToolbarIcon(unread ? Icons.markRead : Icons.markUnread, c.tint);
+  const assignIcon = useToolbarIcon(Icons.assign, c.tint);
+  const archiveIcon = useToolbarIcon(closed ? Icons.unarchive : Icons.archive, c.tint);
 
   const remote = useMemo(() => vm.items.some((i) => i.message.direction === "inbound" && i.message.html && hasRemoteImages(i.message.html)), [vm.items]);
 
@@ -64,7 +67,10 @@ export function ThreadScreen() {
             accessibilityLabel={closed ? t("thread.unarchive") : t("thread.archive")}
             onPress={() => {
               vm.toggleArchive();
-              if (!closed) router.back();
+              if (!closed) {
+                haptics.light();
+                router.back();
+              }
             }}
           >
             {closed ? t("thread.unarchive") : t("thread.archive")}
@@ -80,20 +86,22 @@ export function ThreadScreen() {
   const header = (
     <View style={styles.header}>
       <ConnectionBanner />
-      <Text selectable style={[styles.subject, { color: p.text }]} accessibilityRole="header">
+      <ThemedText selectable variant="title2" emphasized style={styles.subject} accessibilityRole="header">
         {thread.subject}
-      </Text>
+      </ThemedText>
       <View style={styles.meta}>
         <StatusPill status={thread.status} />
         {personal ? null : <Chip icon={Icons.person} label={thread.assigneeName ? t("thread.assignedTo", { name: thread.assigneeName }) : t("thread.unassigned")} />}
-        <Text style={{ color: p.secondary, fontSize: 13 }} numberOfLines={1}>
+        <ThemedText variant="footnote" tone="secondary" numberOfLines={1}>
           {contactOf(thread)}
-        </Text>
+        </ThemedText>
       </View>
       {remote && !loadImages && (
-        <View style={[styles.images, { backgroundColor: p.chip }]}>
-          <Symbol icon={Icons.image} size={18} color={p.secondary} />
-          <Text style={{ color: p.secondary, fontSize: 13, flex: 1 }}>{t("thread.imagesBlocked")}</Text>
+        <View style={[styles.images, { backgroundColor: c.fill }]}>
+          <Symbol icon={Icons.image} size={18} color={c.secondaryLabel} />
+          <ThemedText variant="footnote" tone="secondary" style={styles.grow}>
+            {t("thread.imagesBlocked")}
+          </ThemedText>
           <NativeButton label={t("thread.loadImages")} onPress={() => setLoadImages(true)} />
         </View>
       )}
@@ -101,7 +109,8 @@ export function ThreadScreen() {
   );
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: p.grouped }} behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>
+    // Follows the keyboard's real frame (react-native-keyboard-controller), on both platforms.
+    <KeyboardAvoidingView style={[styles.grow, { backgroundColor: c.groupedBackground }]} behavior="padding">
       {chrome}
       <FlatList
         data={vm.items}
@@ -116,12 +125,18 @@ export function ThreadScreen() {
             onForward={forwardMessage}
           />
         )}
-        contentContainerStyle={{ paddingBottom: 16 }}
+        contentContainerStyle={styles.list}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {vm.canReply ? <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} /> : <Text style={[styles.spam, { color: p.secondary }]}>{t("thread.spamNoReply")}</Text>}
+      {vm.canReply ? (
+        <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} />
+      ) : (
+        <ThemedText variant="subheadline" tone="secondary" style={styles.spam}>
+          {t("thread.spamNoReply")}
+        </ThemedText>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -140,46 +155,46 @@ const MessageCard = memo(function MessageCard({
   /** Forwards this message (not offered for a note or a message still sending). */
   onForward?: (messageId: string) => void;
 }) {
-  const p = usePalette();
-  const { t, locale } = useI18n();
+  const c = useColors();
+  const { t, locale, clock24 } = useI18n();
   const m = item.message;
   const note = m.direction === "note";
   const who = m.direction === "inbound" ? displayAddress(m.from) : (m.author ?? displayAddress(m.from));
   const files = m.attachments.filter((a) => !(a.inline && a.contentId && m.html?.includes(`cid:${a.contentId.replace(/^<|>$/g, "")}`)));
-  const when = formatFull(m.at, locale);
+  const when = formatFull(m.at, locale, clock24);
   // Where the email it sent is (not while the reply is still being sent).
   const delivery = item.pending ? null : deliveryState(m);
   const badDelivery = delivery === "failed" || delivery === "spam";
   return (
     <View
-      style={[styles.card, { backgroundColor: note ? p.noteBg : p.card, borderColor: note ? p.noteBorder : "transparent" }, m.direction === "outbound" && { marginLeft: 32 }]}
+      style={[styles.card, { backgroundColor: note ? c.noteBackground : c.surface, borderColor: note ? c.noteBorder : "transparent" }, m.direction === "outbound" && styles.outbound]}
       accessibilityLabel={`${note ? t("thread.note") + ", " : ""}${who}, ${when}`}
     >
       <View style={styles.cardHead}>
         <Avatar name={who} size={32} />
-        <View style={{ flex: 1 }}>
-          <Text style={{ color: p.text, fontWeight: "600", fontSize: 15 }} numberOfLines={1}>
+        <View style={styles.grow}>
+          <ThemedText variant="subheadline" emphasized numberOfLines={1}>
             {note ? `${t("thread.note")} · ${who}` : who}
-          </Text>
-          <Text style={{ color: p.secondary, fontSize: 12 }} numberOfLines={1}>
+          </ThemedText>
+          <ThemedText variant="caption1" tone="secondary" numberOfLines={1}>
             {item.pending ? (online ? t("thread.sending") : t("thread.queued")) : m.direction === "inbound" ? `${m.from.email} · ${when}` : `${t("thread.to", { to: m.to.map(displayAddress).join(", ") || "—" })} · ${when}`}
-          </Text>
+          </ThemedText>
           {delivery ? (
-            <Text style={{ color: badDelivery ? p.danger : delivery === "delivered" ? p.tint : p.secondary, fontSize: 12 }} accessibilityLabel={t(`delivery.${delivery}`)}>
+            <ThemedText variant="caption1" tone={badDelivery ? "danger" : delivery === "delivered" ? "tint" : "secondary"} accessibilityLabel={t(`delivery.${delivery}`)}>
               {t(`delivery.${delivery}`)}
               {badDelivery && m.delivery?.reason ? ` · ${m.delivery.reason}` : ""}
-            </Text>
+            </ThemedText>
           ) : null}
         </View>
-        {item.pending ? <Symbol icon={Icons.pending} size={16} color={p.secondary} /> : null}
+        {item.pending ? <Symbol icon={Icons.pending} size={16} color={c.secondaryLabel} /> : null}
         {onForward && !note && !item.pending ? <IconButton icon={Icons.forward} label={t("thread.forward")} onPress={() => onForward(m._id)} /> : null}
       </View>
       {m.html && m.direction === "inbound" ? (
         <EmailHtmlView html={m.html} loadImages={loadImages} cid={item.cid} label={m.text.slice(0, 500)} />
       ) : (
-        <Text selectable style={[styles.text, { color: p.text }]}>
+        <ThemedText selectable variant="callout" style={styles.text}>
           {m.text}
-        </Text>
+        </ThemedText>
       )}
       <AttachmentList attachments={files} urls={urls} />
     </View>
@@ -201,7 +216,7 @@ function Composer({
   notes?: boolean;
   others?: string[];
 }) {
-  const p = usePalette();
+  const c = useColors();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
   const input = useRef<TextInputRef>(null);
@@ -213,16 +228,10 @@ function Composer({
   const [text, setText] = useState("");
   const uploads = useUploads(useUploadOne());
   // The home-indicator inset only matters while the bar sits at the bottom; above the keyboard it is empty space.
-  const [keyboard, setKeyboard] = useState(false);
-  useEffect(() => {
-    const ios = process.env.EXPO_OS === "ios";
-    const show = Keyboard.addListener(ios ? "keyboardWillShow" : "keyboardDidShow", () => setKeyboard(true));
-    const hide = Keyboard.addListener(ios ? "keyboardWillHide" : "keyboardDidHide", () => setKeyboard(false));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
+  // It follows the keyboard's position frame by frame (0 → 1 as it opens), on the UI thread.
+  const keyboard = useReanimatedKeyboardAnimation();
+  const rest = Math.max(insets.bottom, spacing.sm);
+  const inset = useAnimatedStyle(() => ({ paddingBottom: interpolate(keyboard.progress.value, [0, 1], [rest, spacing.sm]) }));
   const placeholder = mode === "reply" ? t("thread.replyPlaceholder") : t("thread.notePlaceholder");
   const send = () => {
     const body = text.trim();
@@ -235,9 +244,10 @@ function Composer({
     setText("");
     // A note keeps the files picked for the next reply.
     if (mode === "reply") uploads.clear();
+    haptics.success();
   };
   return (
-    <View style={[styles.composer, { backgroundColor: p.card, borderTopColor: p.separator, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 8) }]}>
+    <Animated.View style={[styles.composer, { backgroundColor: c.surface, borderTopColor: c.separator }, inset]}>
       {notes || others.length > 0 ? (
         <Segmented<"reply" | "all" | "note">
           label={t("thread.modeLabel")}
@@ -256,33 +266,38 @@ function Composer({
       {mode === "reply" ? <UploadStrip items={uploads.items} onRemove={uploads.remove} /> : null}
       <View style={styles.inputRow}>
         {mode === "reply" ? <IconButton icon={Icons.attach} label={t("attach.add")} onPress={() => void uploads.add().catch(() => {})} /> : null}
-        <Host matchContents={{ vertical: true }} style={[styles.input, { backgroundColor: mode === "note" ? p.noteBg : p.grouped, borderColor: p.separator }]}>
+        <Host matchContents={{ vertical: true }} style={[styles.input, { backgroundColor: mode === "note" ? c.noteBackground : c.groupedBackground, borderColor: c.separator }]}>
           <TextInput
             ref={input}
             multiline
             placeholder={placeholder}
             accessibilityLabel={placeholder}
             onChangeText={setText}
-            textStyle={{ fontSize: 16, color: p.text }}
-            style={{ paddingHorizontal: 14, paddingVertical: 10 }}
+            textStyle={{ fontSize: type.callout.fontSize, color: c.labelText }}
+            style={styles.field}
           />
         </Host>
         <IconButton icon={mode === "reply" ? Icons.send : Icons.note} label={mode === "reply" ? t("thread.send") : t("thread.addNote")} onPress={send} disabled={!text.trim() || (mode === "reply" && (uploads.busy || uploads.failed))} />
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: { paddingBottom: 4 },
-  subject: { fontSize: 22, fontWeight: "700", paddingHorizontal: 16, paddingTop: 12 },
-  meta: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingTop: 8, flexWrap: "wrap" },
-  images: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 12, padding: 10, borderRadius: 10 },
-  card: { marginHorizontal: 12, marginTop: 10, padding: 12, borderRadius: 14, borderWidth: 1 },
-  cardHead: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 10 },
-  text: { fontSize: 16, lineHeight: 23 },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 0 },
-  inputRow: { flexDirection: "row", alignItems: "flex-end", gap: 8, paddingHorizontal: 12 },
-  input: { flex: 1, minHeight: 40, maxHeight: 140, borderRadius: 20, borderCurve: "continuous", borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  spam: { textAlign: "center", padding: 16 },
+  grow: { flex: 1 },
+  list: { paddingBottom: spacing.lg },
+  header: { paddingBottom: spacing.xs },
+  subject: { paddingHorizontal: screenEdge, paddingTop: spacing.md },
+  meta: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingTop: spacing.sm, flexWrap: "wrap" },
+  images: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: screenEdge, marginTop: spacing.md, padding: spacing.md, ...corner(radius.sm) },
+  card: { marginHorizontal: spacing.md, marginTop: spacing.md, padding: spacing.md, ...corner(radius.md), borderWidth: 1 },
+  outbound: { marginLeft: spacing.xxl },
+  cardHead: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.md },
+  // Reading text: the callout step with a looser leading than UI text.
+  text: { lineHeight: 23 },
+  composer: { borderTopWidth: StyleSheet.hairlineWidth },
+  inputRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md },
+  input: { flex: 1, minHeight: 40, maxHeight: 140, ...corner(radius.lg), borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
+  field: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
+  spam: { textAlign: "center", padding: spacing.lg },
 });

@@ -3,12 +3,13 @@
 import { Directory, File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 import { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, View } from "react-native";
 import type { Attachment } from "../api";
 import { useI18n } from "../i18n";
 import { fileSize } from "../lib/format";
-import { usePalette } from "../theme";
+import { corner, minTouch, radius, spacing, useColors } from "../theme";
 import { Icons, Symbol, type IconSpec } from "./icons";
+import { ThemedText } from "./themed-text";
 
 function iconFor(type: string): IconSpec {
   if (type.startsWith("image/")) return Icons.image;
@@ -33,7 +34,7 @@ async function openAttachment(url: string, a: Attachment) {
 }
 
 export function AttachmentList({ attachments, urls }: { attachments: Attachment[]; urls: Record<string, string | null> }) {
-  const p = usePalette();
+  const c = useColors();
   const { t, locale } = useI18n();
   const [busy, setBusy] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -58,17 +59,21 @@ export function AttachmentList({ attachments, urls }: { attachments: Attachment[
             accessibilityRole="button"
             accessibilityLabel={`${a.filename}${meta ? `, ${meta}` : ""}`}
             accessibilityState={{ disabled: !url, busy: busy === a.file }}
-            android_ripple={{ color: p.separator }}
-            style={({ pressed }) => [styles.item, { backgroundColor: p.chip, opacity: url ? (pressed ? 0.6 : 1) : 0.55 }]}
+            android_ripple={{ color: c.separator }}
+            style={({ pressed }) => [styles.item, { backgroundColor: c.fill, opacity: url ? (pressed ? 0.6 : 1) : 0.55 }]}
           >
             {busy === a.file ? <ActivityIndicator /> : <Symbol icon={failed === a.file ? Icons.error : iconFor(a.contentType)} size={20} />}
             <View style={{ flex: 1 }}>
-              <Text style={{ color: p.text, fontSize: 14, fontWeight: "500" }} numberOfLines={1}>
+              <ThemedText variant="subheadline" style={{ fontWeight: "500" }} numberOfLines={1}>
                 {a.filename}
-              </Text>
-              {meta ? <Text style={{ color: p.secondary, fontSize: 12 }}>{meta}</Text> : null}
+              </ThemedText>
+              {meta ? (
+                <ThemedText variant="caption1" tone="secondary">
+                  {meta}
+                </ThemedText>
+              ) : null}
             </View>
-            {url ? <Symbol icon={Icons.download} size={18} color={p.secondary} /> : null}
+            {url ? <Symbol icon={Icons.download} size={18} color={c.secondaryLabel} /> : null}
           </Pressable>
         );
       })}
@@ -77,6 +82,6 @@ export function AttachmentList({ attachments, urls }: { attachments: Attachment[
 }
 
 const styles = StyleSheet.create({
-  list: { gap: 6, marginTop: 10 },
-  item: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 10, borderCurve: "continuous", paddingHorizontal: 12, minHeight: 48, paddingVertical: 6 },
+  list: { gap: spacing.sm, marginTop: spacing.md },
+  item: { flexDirection: "row", alignItems: "center", gap: spacing.md, ...corner(radius.sm), paddingHorizontal: spacing.md, minHeight: minTouch, paddingVertical: spacing.sm },
 });
