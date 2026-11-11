@@ -8,13 +8,22 @@ import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { ThreadStatus } from "../api";
 import { useI18n } from "../i18n";
 import { initials } from "../lib/format";
-import { corner, radius, screenEdge, spacing, useColors } from "../theme";
+import { corner, hairline, radius, screenEdge, spacing, useColors } from "../theme";
 import { Icons, Symbol, type IconSpec } from "./icons";
+import { NativeIcon } from "./native";
 import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
 export { EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner, useDateTimePicker } from "./native";
+
+/**
+ * The trailing chevron of a row that opens another screen: iOS only (a Settings-style disclosure). Material 3 list
+ * rows that navigate have no chevron, so on Android there is nothing.
+ */
+export function disclosure(color: string) {
+  return process.env.EXPO_OS === "ios" ? <NativeIcon icon={Icons.chevron} size={14} color={color} /> : undefined;
+}
 
 /**
  * A neutral monogram, like Contacts: white initials on a grey gradient (iOS), a Material tonal container (Android).
@@ -128,7 +137,7 @@ export function ConnectionBanner() {
 
 export function Separator({ inset = 0 }: { inset?: number }) {
   const c = useColors();
-  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginLeft: inset }} />;
+  return <View style={{ height: hairline, backgroundColor: c.separator, marginLeft: inset }} />;
 }
 
 const styles = StyleSheet.create({

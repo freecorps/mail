@@ -50,7 +50,7 @@ import { keepUndoneCompose } from "../model/undone-compose";
 import { forwardedFiles } from "../model/forward";
 import { formatAgo, formatLater } from "../lib/when";
 import { usePresence } from "../presence";
-import { corner, radius, screenEdge, spacing, useColors } from "../theme";
+import { corner, hairline, radius, screenEdge, spacing, useColors } from "../theme";
 
 const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
   open: Icons.statusOpen,
@@ -693,5 +693,5 @@ const styles = StyleSheet.create({
   expandRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.sm },
   pressed: { opacity: 0.5 },
   spam: { textAlign: "center", padding: spacing.lg },
-  paneBar: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  paneBar: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.sm, borderTopWidth: hairline },
 });

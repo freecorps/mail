@@ -40,7 +40,7 @@ import { formatLater, laterChoices } from "../lib/when";
 import { deviceTimeZone } from "../prefs";
 import { usePresence } from "../presence";
 import { RECENT_THREADS } from "../offline/replica";
-import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
+import { corner, hairline, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 type Params = { threadId?: string; mode?: string; forwardThread?: string; forwardMessage?: string; mailbox?: string; to?: string; draftId?: string; restore?: string };
 
@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
   body: { minHeight: 180, fontSize: type.body.fontSize, lineHeight: type.body.lineHeight, paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.md, ...corner(radius.xs) },
   quoted: { paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   actions: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
-  signature: { marginHorizontal: screenEdge, paddingTop: spacing.md, gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  signature: { marginHorizontal: screenEdge, paddingTop: spacing.md, gap: spacing.sm, borderTopWidth: hairline },
   signatureHead: { flexDirection: "row", alignItems: "center" },
   off: { opacity: 0.4, textDecorationLine: "line-through" },
 });

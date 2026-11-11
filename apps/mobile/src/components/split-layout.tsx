@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { useColors } from "../theme";
+import { hairline, useColors } from "../theme";
 
 export function SplitLayout({ split, listWidth, detail, children }: { split: boolean; listWidth: number; detail: ReactNode; children: ReactNode }) {
   const c = useColors();
@@ -24,6 +24,6 @@ export function SplitLayout({ split, listWidth, detail, children }: { split: boo
 
 const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: "row" },
-  divider: { width: StyleSheet.hairlineWidth },
+  divider: { width: hairline },
   detail: { flex: 1 },
 });

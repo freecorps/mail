@@ -6,7 +6,7 @@ import { useConnectionState } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { Alert } from "react-native";
 import { Icons } from "../components/icons";
-import { LabeledPicker, NativeIcon } from "../components/ui";
+import { disclosure, LabeledPicker, NativeIcon } from "../components/ui";
 import { EMBER_URL, PUSH_TRANSPORT } from "../config";
 import { useI18n } from "../i18n";
 import type { SwipeKind } from "../model/list-actions";
@@ -85,7 +85,7 @@ export function SettingsScreen() {
         <FieldGroup.Section title={t("settings.sending")}>
           <ListItem
             leading={<NativeIcon icon={Icons.signature} color={colors.tint} />}
-            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            trailing={disclosure(colors.tertiaryText)}
             onPress={() => router.push("/signature")}
           >
             <Text>{t("settings.signature")}</Text>
@@ -144,7 +144,7 @@ export function SettingsScreen() {
         <FieldGroup.Section title={t("settings.tags")}>
           <ListItem
             leading={<NativeIcon icon={Icons.tag} color={colors.tint} />}
-            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            trailing={disclosure(colors.tertiaryText)}
             onPress={() => router.push("/tag-list")}
             testID="settings-tags"
           >
@@ -156,7 +156,7 @@ export function SettingsScreen() {
         <FieldGroup.Section title={t("settings.notifications")}>
           <ListItem
             leading={<NativeIcon icon={Icons.bell} color={colors.tint} />}
-            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            trailing={disclosure(colors.tertiaryText)}
             supportingText={pushText}
             onPress={() => router.push("/notifications")}
           >

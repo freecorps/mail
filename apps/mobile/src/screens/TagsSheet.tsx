@@ -7,7 +7,7 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
 import { api } from "../api";
 import { Icons } from "../components/icons";
-import { Loading, NativeIcon } from "../components/ui";
+import { disclosure, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
 import { createBlock, TAG_NAME_MAX, tagColor, tagSearch, THREAD_TAGS_MAX, toggleTag } from "../model/tags";
@@ -118,7 +118,7 @@ export function TagsSheet() {
                   router.push("/tag-list");
                 }}
                 leading={<NativeIcon icon={Icons.settings} color={c.tint} />}
-                trailing={<NativeIcon icon={Icons.chevron} size={14} color={c.tertiaryText} />}
+                trailing={disclosure(c.tertiaryText)}
               >
                 <Text>{t("tags.manage")}</Text>
               </ListItem>

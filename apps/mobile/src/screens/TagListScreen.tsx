@@ -5,7 +5,7 @@ import { useQuery } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { api } from "../api";
 import { Icons } from "../components/icons";
-import { Loading, NativeIcon } from "../components/ui";
+import { disclosure, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { byMailbox, tagColor } from "../model/tags";
 import { useMailboxes } from "../model/threads";
@@ -31,7 +31,7 @@ export function TagListScreen() {
                   key={x._id}
                   onPress={() => router.push({ pathname: "/tag/[tagId]", params: { tagId: x._id, mailbox: x.mailbox } })}
                   leading={<NativeIcon icon={Icons.tagFill} color={hue(tagColor(x.color))} />}
-                  trailing={<NativeIcon icon={Icons.chevron} size={14} color={c.tertiaryText} />}
+                  trailing={disclosure(c.tertiaryText)}
                   testID={`tag-${x._id}`}
                 >
                   <Text>{x.name}</Text>

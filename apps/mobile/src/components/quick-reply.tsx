@@ -18,7 +18,7 @@ import { draftReplyMode, quoteHeader, quotedMessage, replyState, type ReplyMode 
 import { createDraftSaver, replyDraftArgs } from "../model/draft-saver";
 import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
-import { corner, radius, spacing, type, useColors } from "../theme";
+import { corner, hairline, radius, spacing, type, useColors } from "../theme";
 import { Icons, type IconSpec } from "./icons";
 import { IconButton, MenuButton, type MenuItem } from "./native";
 import { canSchedule, draftStep, isLinkRefusal, releaseDraft, runScheduled } from "../model/schedule";
@@ -372,10 +372,10 @@ export function QuickReply({
 }
 
 const styles = StyleSheet.create({
-  bar: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: spacing.sm },
+  bar: { borderTopWidth: hairline, paddingTop: spacing.sm },
   row: { flexDirection: "row", alignItems: "flex-end", gap: spacing.xs, paddingHorizontal: spacing.sm },
   // Every control centers on the one-line field's height, and stays at the bottom as the field grows.
   ctrl: { height: 40, justifyContent: "center", alignItems: "center", minWidth: 32 },
-  field: { flex: 1, minHeight: 40, ...corner(radius.lg), borderWidth: StyleSheet.hairlineWidth, justifyContent: "center" },
+  field: { flex: 1, minHeight: 40, ...corner(radius.lg), borderWidth: hairline, justifyContent: "center" },
   input: { fontSize: type.callout.fontSize, lineHeight: type.callout.lineHeight, maxHeight: 140, paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.sm },
 });
