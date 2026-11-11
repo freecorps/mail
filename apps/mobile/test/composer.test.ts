@@ -113,6 +113,51 @@ describe("undo send (outbox)", () => {
     vi.useRealTimers();
   });
 
+  it("a plain notice (no undo) never sends a waiting message early: it shows after the send's banner, or is dropped", () => {
+    vi.useFakeTimers();
+    const box = createOutbox();
+    const undo = createUndoStore();
+    const run = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "reply", threadId: "t1", text: "oi" }, delayMs: 5000, run });
+    // "Link copiado" while it waits: the send keeps its banner and its delay.
+    undo.show("Link copiado", undefined, 2500);
+    expect(run).not.toHaveBeenCalled();
+    expect(box.get()).toHaveLength(1);
+    expect(undo.get()?.message).toBe("Enviando");
+    vi.advanceTimersByTime(1000);
+    // Still within its moment when the send goes out: it shows then (a newer notice replaces an older one in line).
+    undo.show("Texto copiado", undefined, 2500);
+    vi.advanceTimersByTime(1000);
+    box.flushAll();
+    expect(run).toHaveBeenCalledOnce();
+    expect(undo.get()?.message).toBe("Texto copiado");
+    vi.advanceTimersByTime(2500);
+    expect(undo.get()).toBeNull();
+
+    // Its moment passed while the send waited: dropped. Desfazer still works meanwhile.
+    const run2 = vi.fn();
+    const back = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "reply", threadId: "t1", text: "de novo" }, delayMs: 5000, run: run2, restore: back });
+    undo.show("Link copiado", undefined, 2500);
+    vi.advanceTimersByTime(3000);
+    undo.undo();
+    expect(back).toHaveBeenCalledOnce();
+    expect(run2).not.toHaveBeenCalled();
+    expect(undo.get()).toBeNull();
+
+    // With no send waiting, a notice shows at once as before.
+    undo.show("Link copiado", undefined, 2500);
+    expect(undo.get()?.message).toBe("Link copiado");
+    // An action with its own undo (an archive) over a waiting send still sends it at once.
+    undo.dismiss();
+    const run3 = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "reply", threadId: "t1", text: "x" }, delayMs: 5000, run: run3 });
+    undo.show("Arquivada", vi.fn());
+    expect(run3).toHaveBeenCalledOnce();
+    expect(undo.get()?.message).toBe("Arquivada");
+    vi.useRealTimers();
+  });
+
   it("the delay pref: 0/5/10/20, default 5", () => {
     expect(parseUndoDelay("10")).toBe(10);
     expect(parseUndoDelay("0")).toBe(0);

@@ -92,8 +92,8 @@ export type Outbox = ReturnType<typeof createOutbox>;
 /**
  * Schedules a send and offers "Desfazer" for it on the undo banner. Once the send goes out (its delay ran out, or the
  * app went to the background and `flushAll` sent it), the banner goes too: there is nothing left to undo. The banner
- * has one slot: when another notice takes it (an archive, a second send), this send goes out at once instead of
- * waiting with no way left to undo it.
+ * has one slot: when another action with its own undo takes it (an archive, a second send), this send goes out at
+ * once instead of waiting with no way left to undo it. A plain notice ("Link copiado") waits instead (`UndoStore`).
  */
 export function scheduleWithUndo(o: {
   outbox: Outbox;
