@@ -60,6 +60,52 @@ export default defineSchema({
      */
     personal: defineTable({ mailbox: v.string(), userId: v.string() }).index("by_mailbox", ["mailbox"]).index("by_user", ["userId"]),
 
+    /**
+     * A member's signature (ember/composer.ts): for one mailbox, or with no `mailbox` the default for all of theirs.
+     * None until they save one: a send without a row here goes without a signature.
+     */
+    signatures: defineTable({ userId: v.string(), mailbox: v.optional(v.string()), text: v.string(), html: v.optional(v.string()), updatedAt: v.number() }).index("by_user", [
+      "userId",
+      "mailbox",
+    ]),
+
+    /**
+     * Drafts, private to the member who writes them (ember/composer.ts): a reply or a note on a thread, a forward of
+     * one of its messages, or a new conversation. `mailbox` is the thread's for the first three. The files hold their
+     * uploads (`v.file()`), so a draft's attachments are not collected while it waits; untouched for 30 days, the
+     * draft is removed (`inbox:pruneDrafts`, daily).
+     */
+    drafts: defineTable({
+      userId: v.string(),
+      /** reply | note | compose | forward */
+      kind: v.string(),
+      threadId: v.optional(v.string()),
+      /** forward: the message forwarded. */
+      messageId: v.optional(v.string()),
+      mailbox: v.string(),
+      to: v.array(v.string()),
+      cc: v.array(v.string()),
+      bcc: v.array(v.string()),
+      subject: v.string(),
+      text: v.string(),
+      bodyHtml: v.optional(v.string()),
+      attachments: v.array(v.object({ file: v.file(), filename: v.string(), contentType: v.string() })),
+      updatedAt: v.number(),
+    })
+      .index("by_user", ["userId", "updatedAt"])
+      .index("by_thread", ["threadId"])
+      .index("by_updated", ["updatedAt"]),
+
+    /** Saved replies of a mailbox (ember/composer.ts): read and written by who sees it, changed by their author or an admin. */
+    savedReplies: defineTable({
+      mailbox: v.string(),
+      title: v.string(),
+      text: v.string(),
+      bodyHtml: v.optional(v.string()),
+      createdBy: v.string(),
+      updatedAt: v.number(),
+    }).index("by_mailbox", ["mailbox"]),
+
     /** Webhooks (ember/webhooks.ts): HTTPS endpoints for the service's events, signed with `secret` (Standard Webhooks). */
     webhooks: defineTable({
       endpoint: v.string(),

@@ -20,7 +20,8 @@
     "@freecorps/ember-rate-limit": "^0.6.0",
     "@freecorps/ember-runtime": "^0.6.0",
     "@freecorps/ember-server": "^0.6.0",
-    "@freecorps/ember-values": "^0.6.0"
+    "@freecorps/ember-values": "^0.6.0",
+    "@freecorps/mail-email-html": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.5.1",
