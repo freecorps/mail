@@ -113,8 +113,9 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
   **Caixas** (ícone, endereço, badge de não lidas). Precisa de queries `inbox:unified` / filtro por responsável em
   `apps/api` (feature de produto, fica aqui).
 - Tabs: Caixas, Minhas, Ajustes + tab de busca (`role="search"`, botão separado no iOS 26).
-- Barra inferior da lista no iOS: filtro (menu nativo) | status ("Atualizado agora", offline, pendentes) | nova
-  mensagem. Android: FilterChips + FAB de compose.
+- iOS: filtro (menu nativo) e nova mensagem na barra de navigação da lista (com a tab bar presente, o iOS 26 desenha
+  a tab bar por cima de uma toolbar inferior; a HIG põe essas ações no topo nesse caso). Offline/pendentes no banner
+  da lista. Android: FilterChips + FAB de compose, com os hosts Compose semeados no acento ember.
 
 | Tarefa | Status |
 |---|---|
@@ -219,7 +220,9 @@ passkeys.
 
 **E2. Ember: recursos de conversa**: etiquetas (tags) em conversas, linha do tempo de atividade (atribuição, status,
 entrega), soneca (`snoozedUntil`, some da lista e volta aberta), envio agendado, presença ("Bia está respondendo").
-Release e bump.
+Também, para as visões da camada `api` ficarem exatas (hoje "Atribuídas a mim" e "Não lidas" varrem até 500 conversas
+por caixa e status): índice e filtro de `threads` por responsável, flag indexada "tem não lidas" com filtro `unread`,
+e contagens por caixa/status/responsável numa query `counts`. Release e bump.
 
 | Tarefa | Status |
 |---|---|

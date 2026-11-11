@@ -1,5 +1,5 @@
 // Android: tap opens the row, long-press opens a Material 3 dropdown menu (Jetpack Compose) anchored to the row.
-import { Host } from "@expo/ui";
+import { BrandHost as Host } from "./brand-host";
 import { Box, DropdownMenu, DropdownMenuItem, Text } from "@expo/ui/jetpack-compose";
 import { router } from "expo-router";
 import { cloneElement, isValidElement, useState, type ReactElement } from "react";

@@ -1,5 +1,5 @@
 // Android (Material 3): filters as FilterChips in the list header, compose as a FAB over the list.
-import { Host } from "@expo/ui";
+import { BrandHost as Host } from "./brand-host";
 import { FilterChip, FloatingActionButton, Icon, LazyRow, Text } from "@expo/ui/jetpack-compose";
 import { semantics } from "@expo/ui/jetpack-compose/modifiers";
 import { StyleSheet } from "react-native";

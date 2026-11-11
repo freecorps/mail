@@ -1,6 +1,6 @@
 // Android: Compose has no empty-state component, so this is the Material layout (icon, title, body) in plain views
 // with Material 3 buttons for the actions.
-import { Host } from "@expo/ui";
+import { BrandHost as Host } from "./brand-host";
 import { Button, Column, Text, TextButton } from "@expo/ui/jetpack-compose";
 import { SymbolView } from "expo-symbols";
 import { Text as RNText, View } from "react-native";

@@ -1,5 +1,5 @@
 // Android: a Material 3 filled icon button (Jetpack Compose).
-import { Host } from "@expo/ui";
+import { BrandHost as Host } from "./brand-host";
 import { FilledIconButton, Icon } from "@expo/ui/jetpack-compose";
 import { semantics } from "@expo/ui/jetpack-compose/modifiers";
 import { useColors } from "../../theme";
