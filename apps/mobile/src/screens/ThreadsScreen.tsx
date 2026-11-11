@@ -317,18 +317,20 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     searchOnly && !vm.searching ? (
       <EmptyState icon={Icons.search} title={t("search.title")} body={t("search.hint")} />
     ) : vm.status === "loading" ? (
-      <Animated.View exiting={SKELETON_OUT}>
+      // Keyed per state: a different element, so the skeleton's exit and the next state's entrance run (the same
+      // Animated.View reused across states would do neither).
+      <Animated.View key="skeleton" exiting={SKELETON_OUT}>
         <SkeletonRows avatars={prefs.avatars} previewLines={prefs.previewLines} />
       </Animated.View>
     ) : vm.status === "error" ? (
-      <Animated.View entering={STATE_IN} style={styles.state}>
+      <Animated.View key="error" entering={STATE_IN} style={styles.state}>
         <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
       </Animated.View>
     ) : vm.searching ? (
       // Typed: the answer to a query appears as it is, without a fade per keystroke.
       <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
     ) : (
-      <Animated.View entering={STATE_IN} style={styles.state}>
+      <Animated.View key="empty" entering={STATE_IN} style={styles.state}>
         <EmptyState
           icon={source.view === "snoozed" ? Icons.snooze : Icons.empty}
           title={source.view === "assigned" ? t("mine.empty") : source.view === "snoozed" ? t("snooze.empty") : t("threads.empty")}
