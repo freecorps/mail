@@ -14,7 +14,7 @@ import { extractEncryptedPush, loadPushKeys, openPushEnvelope, parsePushEnvelope
 import * as Notifications from "expo-notifications";
 import { api, SHARD } from "../api";
 import { translate, type Locale } from "../i18n";
-import { withBackgroundTime } from "../lib/background-time";
+import { withBackgroundTime } from "../lib/system";
 import { deviceClock24, storedLocale } from "../prefs";
 import {
   actionCalls,

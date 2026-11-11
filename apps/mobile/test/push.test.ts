@@ -19,6 +19,7 @@ import { nextNotificationPrefs } from "../src/offline/optimistic";
 
 vi.mock("expo-quick-actions", () => ({ setItems: vi.fn(async () => {}), addListener: vi.fn(() => ({ remove() {} })), initial: undefined }));
 vi.mock("expo-router", () => ({ router: { navigate: vi.fn() } }));
+vi.mock("../src/lib/system", () => ({ takeLaunchShortcut: vi.fn(async () => null), withBackgroundTime: (_: string, f: () => unknown) => f() }));
 const { quickActionItems } = await import("../src/quick-actions");
 
 const at = Date.UTC(2026, 10, 11, 4, 0);

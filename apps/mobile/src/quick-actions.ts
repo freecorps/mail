@@ -6,6 +6,7 @@ import * as QuickActions from "expo-quick-actions";
 import { router, type Href } from "expo-router";
 import { useEffect } from "react";
 import { translate, type Locale } from "./i18n";
+import { takeLaunchShortcut } from "./lib/system";
 
 export type QuickAction = QuickActions.Action & { params: { href: Href & string } };
 
@@ -25,25 +26,29 @@ const hrefOf = (a: QuickActions.Action): Href | null => {
 };
 
 /** The action that launched the app is followed once (the tabs mount again after a sign-in). */
-let initialFollowed = false;
+let launchFollowed = false;
 
 /**
  * Sets the actions and follows them, also the one that launched the app. Mounted in the tabs layout (a member's
  * routes exist there). The package's own router hook imports an expo-router internal path, so this is the same thing
- * through the public `router`.
+ * through the public `router`. The launch action: the package's `initial` (Android), or on iOS the native side's
+ * (modules/mail-system: with UIScene the package never sees a cold-start shortcut).
  */
 export function useQuickActions(locale: Locale) {
   useEffect(() => {
-    const go = (a: QuickActions.Action) => {
-      const href = hrefOf(a);
+    const go = (a: QuickActions.Action | null | undefined) => {
+      const href = a ? hrefOf(a) : null;
       if (href) setTimeout(() => router.navigate(href, { withAnchor: true }));
     };
-    if (QuickActions.initial && !initialFollowed) {
-      initialFollowed = true;
-      go(QuickActions.initial);
+    if (!launchFollowed) {
+      launchFollowed = true;
+      if (QuickActions.initial) go(QuickActions.initial);
+      else void takeLaunchShortcut().then((id) => go(quickActionItems(locale, process.env.EXPO_OS ?? "ios").find((a) => a.id === id)));
     }
     const sub = QuickActions.addListener(go);
     return () => sub.remove();
+    // The launch action and the listener are set up once; `locale` only names the actions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     QuickActions.setItems(quickActionItems(locale, process.env.EXPO_OS ?? "ios")).catch((e: unknown) => console.warn("[quick actions]", e));

@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
-  s.name           = 'BackgroundTime'
+  s.name           = 'MailSystem'
   s.version        = '1.0.0'
-  s.summary        = 'Background execution time for notification actions (UIApplication.beginBackgroundTask).'
+  s.summary        = 'iOS system glue of the mail app: background time for notification actions, the launch quick action.'
   s.description    = s.summary
   s.author         = 'Freecorps'
   s.homepage       = 'https://github.com/freecorps/mail'
