@@ -3,11 +3,16 @@
 **pt-BR** · [English](#english)
 
 Serviço de email self-hosted na Cloudflare, feito sobre o [Ember](https://github.com/freecorps/ember) ("Convex na
-Cloudflare"). Tem três partes:
+Cloudflare"). Tem quatro partes:
 
 - API HTTP no estilo do Resend, com chaves, idempotência, templates, supressões e domínios;
 - inbox para `support@`/`privacy@`, com push;
+- inbox web: lista com etiquetas e responsáveis, conversa com o histórico de atividade, janelas de composição com
+  assinatura, adiar, envio agendado, presença, paleta ⌘K e atalhos de teclado, tela de administração, layout para
+  celular (ver [`apps/web/README.md`](apps/web/README.md));
 - app móvel (Expo).
+
+![Inbox web](apps/web/docs/screenshots/thread-light.png)
 
 Roda na sua conta Cloudflare: Workers, Durable Objects, R2, Queues, Email Service e Email Routing. Licença MIT.
 
@@ -95,10 +100,13 @@ Veja [`AGENTS.md`](AGENTS.md): decisões de stack, skills instaladas (`.agents/s
 ## English
 
 Self-hosted email service on Cloudflare, built on [Ember](https://github.com/freecorps/ember) ("Convex on
-Cloudflare"). It has three parts:
+Cloudflare"). It has four parts:
 
 - a Resend-style HTTP API with keys, idempotency, templates, suppressions and domains;
 - an inbox for `support@`/`privacy@`, with push;
+- a web inbox: a list with tags and assignees, the conversation with its activity, compose windows with signatures,
+  snooze, scheduled send, presence, a ⌘K palette and keyboard shortcuts, the admin screen, a phone layout (see
+  [`apps/web/README.md`](apps/web/README.md));
 - a mobile app (Expo).
 
 It runs in your own Cloudflare account: Workers, Durable Objects, R2, Queues, Email Service and Email Routing. MIT
