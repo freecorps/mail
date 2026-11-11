@@ -11,3 +11,7 @@ android/
 ember/_generated/
 .ember/
 .wrangler/
+
+# Local Expo modules keep their native sources (the generated ios/ and android/ projects stay ignored).
+!modules/*/ios/
+!modules/*/android/
