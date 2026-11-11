@@ -2,12 +2,15 @@
 // (back button, bar buttons). The tint alone would color the titles too.
 import { Platform } from "react-native";
 import { useColors } from "./colors";
+import { type } from "./typography";
 
 export function useHeaderColors() {
   const c = useColors();
   return {
     headerTintColor: c.tint,
-    headerTitleStyle: { color: c.label },
+    // Android: Material's top app bar title (title large, 22 sp). Left unset, react-native-screens' toolbar title did not
+    // follow the system font scale and ended up smaller than the body text at a large text size.
+    headerTitleStyle: { color: c.label, ...(process.env.EXPO_OS === "android" ? { fontSize: type.title2.fontSize } : {}) },
     headerLargeTitleStyle: { color: c.label },
   };
 }
