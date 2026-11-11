@@ -104,6 +104,19 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
   schemas dos componentes nem o runtime mudaram, por isso não houve ensaio. O shard migrou no deploy. Inventário
   antes e depois: só adição. `ops e2e` passou: entregas em 2–7 s, SPF, DKIM e DMARC `pass`, e as respostas entraram
   nas threads certas.
+- **Deploy de 2026-11-11** (Ember 0.7.2, a reforma da UI: #31–#55). O schema ganhou tabelas (`signatures`,
+  `drafts`, `savedReplies`, `notificationPrefs`, `sendRequests`; no componente `email`: `tags`, `threadTags`,
+  `threadEvents`, `presence`), campos opcionais e índices/agregados novos em `threads`, `messages` e `emails`.
+  - Ensaio local antes: `ember dev` em `main` (e5d8897) com o seed, depois o mesmo `.ember/state` aberto pelo código
+    final: sem `MigrationRefused`, mesmo usuário e conversas, gravações novas (inbound, tags) ok.
+  - Merges dos três stacks (api → web → mobile) com o workflow `Mobile` desligado, para nenhum commit intermediário
+    gerar build; depois do CI verde no `main`, `ops deploy`: o shard migrou com backfill dos índices novos (o
+    `hasUnread` das conversas antigas é preenchido pelo cron do Ember). Inventário antes e depois: só adição. `ops e2e`
+    passou: entregas em 2–6 s, SPF, DKIM e DMARC `pass`, respostas nas threads certas.
+  - Web: `ember-mail-web` publicado com a config de produção refeita a partir do Worker no ar (vars, binding `API`,
+    custom domain), fora do repositório. Depois, `Mobile` religado e disparado à mão (build novo: widgets, `mail-keys`,
+    App Group dos widgets).
+  - Não volte o Worker para um build com Ember < 0.7 depois desta migração: corrija para frente.
 - **Troca do MX do apex, 2026-11-10** (`freecorps.com.br` saiu do Openship; o conteúdo de lá não foi importado):
   1. API publicada com o catch-all (#20, Ember 0.5.7) e mailbox `geral` criada com `catch_all: true`.
   2. Com um token da API da Cloudflare (DNS Edit + Email Routing Rules Edit na zona; o login OAuth do wrangler não
