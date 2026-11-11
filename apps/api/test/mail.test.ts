@@ -4,7 +4,7 @@
 // members-only reactive queries.
 import { createExecutionContext, createMessageBatch, env, getQueueResult, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { EmberMail } from "@freecorps/mail-sdk";
+import { EmberMail, verifyWebhook } from "@freecorps/mail-sdk";
 import worker from "./worker.ts";
 import { addDomain, removeDomain, resolveAccountId } from "../src/operator.ts";
 
@@ -645,5 +645,117 @@ describe("mail app", () => {
     const sup = (await as("query", "suppressions", { project: "acme", paginationOpts: { numItems: 50, cursor: null } })).value.page;
     expect(sup.map((x: any) => x.email)).toContain("block@user.test");
     expect((await as("mutation", "unsuppress", { project: "acme", email: "block@user.test" })).value).toBe(true);
+  });
+
+  it("webhooks: signed email.received and email.delivered, retries, test, rotate, filters; personal mailboxes never", async () => {
+    // Tests and the Worker share an isolate: requests to hooks.test land here.
+    const got: Array<{ url: string; headers: Headers; body: string }> = [];
+    let answer = 200;
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (!url.startsWith("https://hooks.test/")) return real(input, init);
+      got.push({ url, headers: new Headers(init?.headers), body: String(init?.body) });
+      return new Response(answer === 200 ? "ok" : "nope", { status: answer });
+    }) as typeof fetch;
+    try {
+      for (const [endpoint, msg] of [["http://hooks.test/x", /https/], ["https://10.0.0.1/x", /IP address/], ["https://localhost/x", /public host/]] as const) {
+        expect((await admin.webhooks.create({ endpoint, events: ["email.received"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(msg) });
+      }
+      expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.opened" as any] })).error).toMatchObject({ statusCode: 422 });
+      expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], mailboxes: ["wolf"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/personal/) });
+      expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], project: 7 as any })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/project must be a string/) });
+      expect((await admin.webhooks.create({ endpoint: "https://hooks.test/a", events: ["email.received"], mailboxes: ["nope"] })).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/mailbox nope not found/) });
+
+      const all = await admin.webhooks.create({ endpoint: "https://hooks.test/all", events: ["email.received", "email.delivered"], description: "everything" });
+      expect(all.data!.signing_secret).toMatch(/^whsec_/);
+      const acme = await admin.webhooks.create({ endpoint: "https://hooks.test/acme", events: ["email.delivered"], project: "acme" });
+      const sales = await admin.webhooks.create({ endpoint: "https://hooks.test/privacy", events: ["email.received"], mailboxes: ["privacy"] });
+      expect((await admin.webhooks.list()).data!.data.map((w) => w.endpoint)).toEqual(["https://hooks.test/all", "https://hooks.test/acme", "https://hooks.test/privacy"]);
+      const read = (await admin.webhooks.get(all.data!.id)).data!;
+      expect(read).toMatchObject({ events: ["email.received", "email.delivered"], description: "everything" });
+      expect(read).not.toHaveProperty("signing_secret"); // only create and rotate return it
+      expect((await call("query", "console:webhookSecret", { id: all.data!.id }, "user:root-1")).value).toBe(all.data!.signing_secret);
+      expect((await sender.webhooks.list()).error).toMatchObject({ statusCode: 403 });
+
+      // email.received: support → only the unfiltered webhook; signed per Standard Webhooks.
+      const m = inbound("rui@user.test", "support@acme.test", mime({ from: '"Rui" <rui@user.test>', to: "support@acme.test", subject: "Hook me", text: "hello hooks", id: "hook-1@user.test" }));
+      await worker.email(m.msg as never, env as never, createExecutionContext());
+      const first = await until(async () => got.filter((g) => g.body.includes("Hook me")), (x) => x.length > 0);
+      expect(first.map((g) => g.url)).toEqual(["https://hooks.test/all"]);
+      const ev = await verifyWebhook<any>({ secret: all.data!.signing_secret, headers: first[0]!.headers, body: first[0]!.body });
+      expect(ev).toMatchObject({ type: "email.received", data: { mailbox: "support", subject: "Hook me", from: { email: "rui@user.test", name: "Rui" }, new_thread: true } });
+      expect(first[0]!.headers.get("user-agent")).toMatch(/EmberMail-Webhooks/);
+
+      // A personal mailbox's mail never goes out.
+      const p = inbound("rui@user.test", "wolf@acme.test", mime({ from: "rui@user.test", to: "wolf@acme.test", subject: "Private hook", text: "x", id: "hook-2@user.test" }));
+      await worker.email(p.msg as never, env as never, createExecutionContext());
+
+      // email.delivered of an acme email: the unfiltered and the acme webhooks, with the email's details.
+      const r = await sender.emails.send({ from: "hello@acme.test", to: "eva@user.test", subject: "Delivered hook", text: "x", tags: [{ name: "kind", value: "hook" }] });
+      const sent = await until(() => sender.emails.get(r.data!.id), (x) => x.data?.last_event === "sent");
+      await env.EMBER_Q_EMAIL_EVENTS.send(event("delivered", sent.data!.message_id!, "ev-hook-1", { recipient: "eva@user.test" }));
+      const delivered = await until(async () => got.filter((g) => g.body.includes("email.delivered")), (x) => x.length >= 2);
+      expect(delivered.map((g) => g.url).sort()).toEqual(["https://hooks.test/acme", "https://hooks.test/all"]);
+      expect(JSON.parse(delivered[0]!.body)).toMatchObject({ type: "email.delivered", data: { email_id: r.data!.id, project: "acme", recipient: "eva@user.test", subject: "Delivered hook", to: ["eva@user.test"], tags: { kind: "hook" } } });
+      expect(got.some((g) => g.body.includes("Private hook"))).toBe(false);
+
+      const okList = (await admin.webhooks.deliveries(all.data!.id)).data!.data;
+      expect(okList.map((d) => [d.type, d.status, d.attempts, d.last_status])).toEqual([
+        ["email.delivered", "succeeded", 1, 200],
+        ["email.received", "succeeded", 1, 200],
+      ]);
+
+      // A failing endpoint: the attempt is recorded and the next one scheduled; retry sends the same id and body.
+      answer = 500;
+      expect((await admin.webhooks.test(sales.data!.id)).error).toBeNull();
+      const failing = await until(async () => (await admin.webhooks.deliveries(sales.data!.id)).data!.data[0]!, (d) => d.attempts === 1);
+      expect(failing).toMatchObject({ type: "webhook.test", status: "pending", last_status: 500, last_error: "HTTP 500 nope" });
+      expect(failing.next_attempt_at).toBeTruthy();
+      expect((await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures).toBe(1);
+      answer = 200;
+      const before = got.length;
+      expect((await admin.webhooks.retry(failing.id)).data).toEqual({ ok: true });
+      await until(async () => (await admin.webhooks.deliveries(sales.data!.id)).data!.data[0]!, (d) => d.status === "succeeded");
+      const resent = got.slice(before).find((g) => g.url === "https://hooks.test/privacy")!;
+      expect(resent.headers.get("webhook-id")).toBe(failing.id);
+      expect((await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures).toBe(0);
+
+      // Pausing holds a pending delivery (no failure counted, no attempt); turning back on sends it.
+      answer = 500;
+      await admin.webhooks.test(sales.data!.id);
+      const held = await until(async () => (await admin.webhooks.deliveries(sales.data!.id)).data!.data[0]!, (d) => d.type === "webhook.test" && d.attempts === 1 && d.status === "pending");
+      const failuresBefore = (await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures;
+      expect((await admin.webhooks.update(sales.data!.id, { enabled: false })).data).toMatchObject({ enabled: false });
+      const paused = (await admin.webhooks.deliveries(sales.data!.id)).data!.data.find((d) => d.id === held.id)!;
+      expect(paused).toMatchObject({ status: "pending", next_attempt_at: null });
+      expect((await admin.webhooks.list()).data!.data.find((w) => w.id === sales.data!.id)!.failures).toBe(failuresBefore);
+      answer = 200;
+      expect((await admin.webhooks.update(sales.data!.id, { enabled: true })).data).toMatchObject({ enabled: true });
+      await until(async () => (await admin.webhooks.deliveries(sales.data!.id)).data!.data.find((d) => d.id === held.id)!, (d) => d.status === "succeeded");
+
+      // Rotate: the old secret no longer verifies; disabled webhooks get nothing; delete removes it and its deliveries.
+      const rotated = await admin.webhooks.rotateSecret(sales.data!.id);
+      expect(rotated.data!.signing_secret).not.toBe(sales.data!.signing_secret);
+      const seen = got.filter((g) => g.url === "https://hooks.test/privacy").length;
+      await admin.webhooks.test(sales.data!.id);
+      const t2 = await until(async () => got.filter((g) => g.url === "https://hooks.test/privacy"), (x) => x.length > seen);
+      const last = t2[t2.length - 1]!;
+      await expect(verifyWebhook({ secret: sales.data!.signing_secret, headers: last.headers, body: last.body })).rejects.toThrow();
+      await expect(verifyWebhook({ secret: rotated.data!.signing_secret, headers: last.headers, body: last.body })).resolves.toMatchObject({ type: "webhook.test" });
+      expect((await admin.webhooks.update(all.data!.id, { enabled: false })).data).toMatchObject({ enabled: false });
+      // A paused webhook's test is refused (it would never be sent).
+      expect((await admin.webhooks.test(all.data!.id)).error).toMatchObject({ statusCode: 422, message: expect.stringMatching(/paused/) });
+      const n = got.length;
+      const m2 = inbound("rui@user.test", "support@acme.test", mime({ from: "rui@user.test", to: "support@acme.test", subject: "Quiet hook", text: "x", id: "hook-3@user.test" }));
+      await worker.email(m2.msg as never, env as never, createExecutionContext());
+      await new Promise((r) => setTimeout(r, 300));
+      expect(got.slice(n).filter((g) => g.url === "https://hooks.test/all")).toEqual([]);
+      for (const w of [all, acme, sales]) expect((await admin.webhooks.remove(w.data!.id)).data).toMatchObject({ deleted: true });
+      expect((await admin.webhooks.list()).data!.data).toEqual([]);
+      expect((await admin.webhooks.deliveries(all.data!.id)).error).toMatchObject({ statusCode: 404 });
+    } finally {
+      globalThis.fetch = real;
+    }
   });
 });

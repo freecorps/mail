@@ -242,6 +242,100 @@ function emailBody(o: CreateEmailOptions): Record<string, unknown> {
   };
 }
 
+// ---------------------------------------------------------------------------------------------- webhooks
+
+export type WebhookEventType = "email.received" | "email.delivered" | "email.delivery_delayed" | "email.bounced" | "email.complained" | "email.failed";
+
+export interface Webhook {
+  id: string;
+  endpoint: string;
+  events: WebhookEventType[];
+  /** Only this sending project's `email.*` events (null: every shared one). */
+  project: string | null;
+  /** Only these mailboxes' `email.received` (empty: every shared one). */
+  mailboxes: string[];
+  description: string | null;
+  enabled: boolean;
+  created_at: string;
+  /** Consecutive failed deliveries (a success resets it). */
+  failures: number;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  type: WebhookEventType | "webhook.test";
+  status: "pending" | "succeeded" | "failed";
+  attempts: number;
+  created_at: string;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  last_status: number | null;
+  last_error: string | null;
+  duration_ms: number | null;
+}
+
+/** What a webhook request carries. `data` depends on `type` (see the README). */
+export interface WebhookEvent<D = Record<string, unknown>> {
+  type: WebhookEventType | "webhook.test";
+  created_at: string;
+  data: D;
+}
+
+export class WebhookVerificationError extends Error {
+  override readonly name = "WebhookVerificationError";
+}
+
+const b64bytes = (s: string): Uint8Array<ArrayBuffer> => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+/**
+ * Verifies a webhook request (Standard Webhooks: `webhook-id`, `webhook-timestamp`, `webhook-signature`) and returns
+ * its event. `body` must be the raw request body, as received. Throws `WebhookVerificationError` on a bad or missing
+ * signature, or a timestamp more than `toleranceSeconds` (default 5 minutes) away from now.
+ */
+export async function verifyWebhook<D = Record<string, unknown>>(o: {
+  secret: string;
+  headers: Headers | Record<string, string | string[] | undefined>;
+  body: string;
+  toleranceSeconds?: number;
+  now?: number;
+}): Promise<WebhookEvent<D>> {
+  const get = (k: string) => {
+    if (o.headers instanceof Headers) return o.headers.get(k);
+    const v = Object.entries(o.headers).find(([name]) => name.toLowerCase() === k)?.[1];
+    return Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+  };
+  const id = get("webhook-id");
+  const ts = get("webhook-timestamp");
+  const sig = get("webhook-signature");
+  if (!id || !ts || !sig) throw new WebhookVerificationError("missing webhook-id, webhook-timestamp or webhook-signature");
+  const t = Number(ts);
+  const now = Math.floor((o.now ?? Date.now()) / 1000);
+  if (!Number.isInteger(t) || Math.abs(now - t) > (o.toleranceSeconds ?? 300)) throw new WebhookVerificationError("timestamp too old or in the future");
+  let raw: Uint8Array<ArrayBuffer>;
+  try {
+    raw = b64bytes(o.secret.startsWith("whsec_") ? o.secret.slice(6) : o.secret);
+  } catch {
+    throw new WebhookVerificationError("the secret is not a whsec_ base64 secret");
+  }
+  if (!raw.length) throw new WebhookVerificationError("the secret is empty");
+  const key = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  const data = new TextEncoder().encode(`${id}.${t}.${o.body}`);
+  for (const part of sig.split(" ")) {
+    const [version, value] = part.split(",");
+    if (version !== "v1" || !value) continue;
+    let mac: Uint8Array<ArrayBuffer>;
+    try {
+      mac = b64bytes(value);
+    } catch {
+      continue;
+    }
+    if (await crypto.subtle.verify("HMAC", key, mac, data)) return JSON.parse(o.body) as WebhookEvent<D>;
+  }
+  throw new WebhookVerificationError("no matching signature");
+}
+
 export class EmberMail {
   private readonly base: string;
   private readonly f: typeof fetch;
@@ -412,6 +506,27 @@ export class EmberMail {
   readonly suppressions = {
     add: (email: string, reason?: string) => this.request<{ id: string }>("POST", "/suppressions", { email, ...(reason ? { reason } : {}) }),
     remove: (email: string) => this.request<{ deleted: boolean }>("DELETE", `/suppressions/${encodeURIComponent(email)}`),
+  };
+
+  /** Webhooks (full_access keys): signed HTTPS callbacks for inbound mail and delivery events. Check them with `verifyWebhook`. */
+  readonly webhooks = {
+    create: (o: { endpoint: string; events: WebhookEventType[]; project?: string | null; mailboxes?: string[] | null; description?: string | null }) =>
+      this.request<{ object: "webhook"; id: string; signing_secret: string }>("POST", "/webhooks", o),
+    list: () => this.request<{ object: "list"; data: Webhook[] }>("GET", "/webhooks"),
+    /** The webhook, without its secret (`create` and `rotateSecret` return that). */
+    get: (id: string) => this.request<Webhook & { object: "webhook" }>("GET", `/webhooks/${encodeURIComponent(id)}`),
+    /** Patch: absent fields keep their value; null clears `project`, `mailboxes`, `description`. */
+    update: (id: string, o: { endpoint?: string; events?: WebhookEventType[]; project?: string | null; mailboxes?: string[] | null; description?: string | null; enabled?: boolean }) =>
+      this.request<Webhook & { object: "webhook" }>("PATCH", `/webhooks/${encodeURIComponent(id)}`, o),
+    remove: (id: string) => this.request<{ object: "webhook"; id: string; deleted: true }>("DELETE", `/webhooks/${encodeURIComponent(id)}`),
+    /** A new signing secret (the old one stops working at once). */
+    rotateSecret: (id: string) => this.request<{ object: "webhook"; id: string; signing_secret: string }>("POST", `/webhooks/${encodeURIComponent(id)}/rotate`, {}),
+    /** Sends a `webhook.test` event to this webhook. */
+    test: (id: string) => this.request<{ object: "delivery"; id: string }>("POST", `/webhooks/${encodeURIComponent(id)}/test`, {}),
+    deliveries: (id: string, o: { limit?: number } = {}) =>
+      this.request<{ object: "list"; data: WebhookDelivery[] }>("GET", `/webhooks/${encodeURIComponent(id)}/deliveries${o.limit ? `?limit=${o.limit}` : ""}`),
+    /** Sends a delivery again (same id and body), from its first attempt. */
+    retry: (deliveryId: string) => this.request<{ ok: boolean }>("POST", `/webhooks/deliveries/${encodeURIComponent(deliveryId)}/retry`, {}),
   };
 
   readonly inbox = {

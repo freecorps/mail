@@ -9,6 +9,7 @@ import * as domains from "../ember/domains.ts";
 import * as inbox from "../ember/inbox.ts";
 import * as keys from "../ember/keys.ts";
 import * as support from "../ember/support.ts";
+import * as webhooks from "../ember/webhooks.ts";
 
-export const functions = { access, admin, console, domains, inbox, keys, support };
+export const functions = { access, admin, console, domains, inbox, keys, support, webhooks };
 export { schema, app, http };

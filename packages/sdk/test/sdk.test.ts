@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { EmberMail } from "../src/index.ts";
+import { EmberMail, verifyWebhook, WebhookVerificationError } from "../src/index.ts";
 
 function fake(status = 200, reply: unknown = { id: "e1" }) {
   const calls: Array<{ url: string; method: string; headers: Headers; body: any }> = [];
@@ -122,5 +122,30 @@ describe("EmberMail", () => {
     // (this fetch ignores the abort and answers after the 30 ms deadline: its answer is still used)
     const slow = new EmberMail("em_x", { baseUrl: "https://mail.test", fetch: (async () => (await new Promise((r) => setTimeout(r, 60)), Response.json({ id: "e6", last_event: "delivered" }))) as typeof fetch });
     expect((await slow.emails.waitFor("e6", { timeoutMs: 30 })).data).toMatchObject({ last_event: "delivered" });
+  });
+});
+
+describe("verifyWebhook (Standard Webhooks)", () => {
+  // The spec's own test vector (standard-webhooks/libraries).
+  const secret = "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw";
+  const id = "msg_p5jXN8AQM9LWM0D4loKWxJek";
+  const ts = 1614265330;
+  const body = '{"test": 2432232314}';
+  const sig = "v1,g0hM9SsE+OTPJTGt/tmIKtSyZlE3uFJELVlNIOLJ1OE=";
+
+  test("accepts the spec's signed request, with several signatures and plain header objects", async () => {
+    const ev = await verifyWebhook({ secret, headers: new Headers({ "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": `v1,bm9wZQ== ${sig}` }), body, now: ts * 1000 });
+    expect(ev).toEqual({ test: 2432232314 });
+    await expect(verifyWebhook({ secret, headers: { "Webhook-Id": id, "webhook-timestamp": String(ts), "webhook-signature": [sig] }, body, now: ts * 1000 })).resolves.toBeTruthy();
+  });
+
+  test("refuses a changed body, a wrong secret, an old timestamp and missing headers", async () => {
+    const headers = { "webhook-id": id, "webhook-timestamp": String(ts), "webhook-signature": sig };
+    await expect(verifyWebhook({ secret, headers, body: body + " ", now: ts * 1000 })).rejects.toBeInstanceOf(WebhookVerificationError);
+    await expect(verifyWebhook({ secret: "whsec_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", headers, body, now: ts * 1000 })).rejects.toThrow(/no matching/);
+    await expect(verifyWebhook({ secret, headers, body, now: (ts + 301) * 1000 })).rejects.toThrow(/timestamp/);
+    await expect(verifyWebhook({ secret, headers: { "webhook-id": id }, body })).rejects.toThrow(/missing/);
+    await expect(verifyWebhook({ secret: "whsec_not base64!", headers, body, now: ts * 1000 })).rejects.toBeInstanceOf(WebhookVerificationError);
+    await expect(verifyWebhook({ secret: "whsec_", headers, body, now: ts * 1000 })).rejects.toThrow(/empty/);
   });
 });

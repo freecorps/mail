@@ -1,7 +1,9 @@
 // Hooks the email component calls (function handles in ember.config.ts), in the transaction that files the message.
 import { anyComponents as components, internalMutationGeneric as internalMutation, v } from "@freecorps/ember-server";
 import { PushNotifications } from "@freecorps/ember-push";
+import { eventTypeOf } from "../src/webhooks.ts";
 import { canSeeWith, owners, type Member } from "./access.ts";
+import { emailEventData, emit } from "./webhooks.ts";
 
 const push = new PushNotifications(components.push);
 
@@ -20,7 +22,21 @@ export const onInbound = internalMutation({
     autoSubmitted: v.boolean(),
   },
   handler: (ctx, e) => {
-    if (e.status === "spam" || e.autoSubmitted) return null;
+    if (e.status === "spam") return null;
+    // Webhooks get every message but spam (automated mail included, flagged); personal mailboxes never (webhooks.ts).
+    emit(ctx as any, "email.received", {
+      mailbox: e.mailbox,
+      thread_id: e.threadId,
+      message_id: e.messageId,
+      number: e.number,
+      new_thread: e.newThread,
+      status: e.status,
+      from: e.from,
+      subject: e.subject,
+      snippet: e.snippet,
+      auto_submitted: e.autoSubmitted,
+    }, { mailbox: e.mailbox });
+    if (e.autoSubmitted) return null;
     // A personal mailbox's mail reaches only its owner (ember/access.ts); a shared one's, its members and the admins.
     const personal = owners(ctx.db);
     const users = (ctx.db.query("members").collect() as Member[]).filter((m) => canSeeWith(personal, m, e.mailbox)).map((m) => m.userId);
@@ -36,5 +52,22 @@ export const onInbound = internalMutation({
       collapseId: e.threadId,
     });
     return users.length;
+  },
+});
+
+/** A delivery event of a sent email (delivered, deferred, bounced, complained, failed, rejected): to the webhooks. */
+export const onEvent = internalMutation({
+  args: {
+    emailId: v.string(),
+    project: v.string(),
+    type: v.string(),
+    status: v.string(),
+    recipient: v.optional(v.union(v.string(), v.null())),
+    tags: v.optional(v.any()),
+  },
+  handler: (ctx, e) => {
+    const type = eventTypeOf(e.type);
+    if (!type) return 0;
+    return emit(ctx as any, type, emailEventData(ctx as any, e as any), { project: e.project });
   },
 });

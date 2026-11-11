@@ -15,12 +15,17 @@
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
 //   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
+//   GET    /webhooks               POST /webhooks { endpoint, events, project?, mailboxes?, description? } → signing_secret
+//   GET    /webhooks/:id (no secret: create and rotate return it)   PATCH /webhooks/:id { endpoint?, events?, project?, mailboxes?, description?, enabled? }
+//   DELETE /webhooks/:id           POST /webhooks/:id/rotate | /test     GET /webhooks/:id/deliveries
+//   POST   /webhooks/deliveries/:id/retry
 //
 // Auth: `Authorization: Bearer em_...` (API keys, hashed at rest) or the Worker's EMBER_ADMIN_TOKEN (bootstrap).
 import { anyComponents as components, httpActionGeneric as httpAction, httpRouter, type ActionCtx } from "@freecorps/ember-server";
 import { parseAddress, domainOf, type SendInput } from "@freecorps/ember-email";
 import { isDomainName } from "@freecorps/ember-email/cloudflare";
 import { ApiError, authenticate, body, errorResponse, iso, json, need, newToken, parseWhen, sha256Hex, type Principal } from "../src/api.ts";
+import { newSecret } from "../src/webhooks.ts";
 
 const email = components.email.lib;
 const http = httpRouter();
@@ -407,6 +412,105 @@ http.route({
   pathPrefix: "/suppressions/",
   method: "DELETE",
   handler: route(async (ctx, _r, p, url) => (need(p, "sending_access"), json({ deleted: await ctx.runMutation(email.unsuppress, { project: p.project, email: tail(url, "/suppressions/")[0] ?? "" }) }))),
+});
+
+// ------------------------------------------------------------------------------------------------ webhooks (full_access)
+
+/** Errors thrown by webhooks:* (an internal mutation) → 404 / 422 with their message. */
+const hookError = (e: unknown): never => {
+  const m = (e as Error)?.message ?? String(e);
+  // Validation first: "mailbox x not found" is a bad field, not a missing webhook.
+  if (/^(endpoint|events|at most|mailbox|a personal|.* is a personal|webhook is paused)/.test(m)) throw new ApiError(422, "validation_error", m);
+  if (/not found/.test(m)) throw new ApiError(404, "not_found", m);
+  throw e;
+};
+const hookCall = async <T>(f: () => Promise<T>) => {
+  try {
+    return await f();
+  } catch (e) {
+    return hookError(e);
+  }
+};
+type HookBody = { endpoint?: string; events?: string[]; project?: string | null; mailboxes?: string[] | null; description?: string | null; enabled?: boolean };
+const hookFields = (b: HookBody) => {
+  if (b.events !== undefined && (!Array.isArray(b.events) || b.events.some((x) => typeof x !== "string"))) throw new ApiError(422, "validation_error", "events must be an array of event types");
+  if (b.mailboxes !== undefined && b.mailboxes !== null && (!Array.isArray(b.mailboxes) || b.mailboxes.some((x) => typeof x !== "string"))) throw new ApiError(422, "validation_error", "mailboxes must be an array of names");
+  if (b.enabled !== undefined && typeof b.enabled !== "boolean") throw new ApiError(422, "validation_error", "enabled must be a boolean");
+  if (b.project !== undefined && b.project !== null && typeof b.project !== "string") throw new ApiError(422, "validation_error", "project must be a string, or null");
+  if (b.description !== undefined && b.description !== null && typeof b.description !== "string") throw new ApiError(422, "validation_error", "description must be a string, or null");
+  return {
+    ...(b.endpoint !== undefined ? { endpoint: String(b.endpoint) } : {}),
+    ...(b.events !== undefined ? { events: b.events } : {}),
+    ...(b.project !== undefined ? { project: b.project } : {}),
+    ...(b.mailboxes !== undefined ? { mailboxes: b.mailboxes } : {}),
+    ...(b.description !== undefined ? { description: b.description } : {}),
+    ...(b.enabled !== undefined ? { enabled: b.enabled } : {}),
+  };
+};
+
+http.route({ path: "/webhooks", method: "GET", handler: route(async (ctx, _r, p) => (need(p), json({ object: "list", data: await ctx.runQuery("webhooks:list" as any, {}) }))) });
+http.route({
+  path: "/webhooks",
+  method: "POST",
+  handler: route(async (ctx, request, p) => {
+    need(p);
+    const b = await body<HookBody>(request);
+    if (typeof b.endpoint !== "string") throw new ApiError(422, "missing_required_field", "endpoint is required");
+    if (!b.events) throw new ApiError(422, "missing_required_field", "events is required");
+    const secret = newSecret();
+    const { enabled: _, ...fields } = hookFields(b);
+    const id = await hookCall(() => ctx.runMutation("webhooks:create" as any, { ...fields, secret }) as Promise<string>);
+    return json({ object: "webhook", id, signing_secret: secret }, 201);
+  }),
+});
+http.route({
+  pathPrefix: "/webhooks/",
+  method: "GET",
+  handler: route(async (ctx, _r, p, url) => {
+    need(p);
+    const [id, sub] = tail(url, "/webhooks/");
+    if (sub === "deliveries") return json({ object: "list", data: await hookCall(() => ctx.runQuery("webhooks:deliveries" as any, { id: id ?? "", limit: pageLimit(url, 50) })) });
+    if (sub) throw new ApiError(404, "not_found", "Not found");
+    return json({ object: "webhook", ...((await hookCall(() => ctx.runQuery("webhooks:get" as any, { id: id ?? "" }))) as object) });
+  }),
+});
+http.route({
+  pathPrefix: "/webhooks/",
+  method: "PATCH",
+  handler: route(async (ctx, request, p, url) => {
+    need(p);
+    const [id, sub] = tail(url, "/webhooks/");
+    if (sub) throw new ApiError(404, "not_found", "Not found");
+    const fields = hookFields(await body<HookBody>(request));
+    return json({ object: "webhook", ...((await hookCall(() => ctx.runMutation("webhooks:update" as any, { id: id ?? "", ...fields }))) as object) });
+  }),
+});
+http.route({
+  pathPrefix: "/webhooks/",
+  method: "POST",
+  handler: route(async (ctx, _r, p, url) => {
+    need(p);
+    const [a, b, c] = tail(url, "/webhooks/");
+    if (a === "deliveries" && b && c === "retry") return json({ ok: await hookCall(() => ctx.runMutation("webhooks:redeliver" as any, { id: b })) });
+    if (b === "rotate") {
+      const secret = newSecret();
+      await hookCall(() => ctx.runMutation("webhooks:update" as any, { id: a ?? "", secret }));
+      return json({ object: "webhook", id: a, signing_secret: secret });
+    }
+    if (b === "test") return json({ object: "delivery", id: await hookCall(() => ctx.runMutation("webhooks:test" as any, { id: a ?? "" })) }, 201);
+    throw new ApiError(404, "not_found", "Not found");
+  }),
+});
+http.route({
+  pathPrefix: "/webhooks/",
+  method: "DELETE",
+  handler: route(async (ctx, _r, p, url) => {
+    need(p);
+    const [id, sub] = tail(url, "/webhooks/");
+    if (sub) throw new ApiError(404, "not_found", "Not found");
+    await hookCall(() => ctx.runMutation("webhooks:remove" as any, { id: id ?? "" }));
+    return json({ object: "webhook", id, deleted: true });
+  }),
 });
 
 // ------------------------------------------------------------------------------------------------ inbox (dashboard, scripts)
