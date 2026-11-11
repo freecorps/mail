@@ -140,9 +140,15 @@ export function SettingsScreen() {
           </>
         )}
 
+        {/* Notificações: per mailbox, preview, and this device's permission (its own screen). */}
         <FieldGroup.Section title={t("settings.notifications")}>
-          <ListItem leading={<NativeIcon icon={Icons.bell} color={colors.tint} />}>
-            <Text>{pushText}</Text>
+          <ListItem
+            leading={<NativeIcon icon={Icons.bell} color={colors.tint} />}
+            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            supportingText={pushText}
+            onPress={() => router.push("/notifications")}
+          >
+            <Text>{t("notifications.title")}</Text>
           </ListItem>
         </FieldGroup.Section>
 

@@ -15,6 +15,7 @@ import { useI18n } from "../i18n";
 import { useUploadOne, useUploads } from "../lib/uploads";
 import { draftReplyMode, quoteHeader, quotedMessage, replyState, type ReplyMode } from "../model/compose";
 import { createDraftSaver, replyDraftArgs } from "../model/draft-saver";
+import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
 import { corner, radius, spacing, type, useColors } from "../theme";
 import { Icons, type IconSpec } from "./icons";
@@ -191,11 +192,12 @@ export function QuickReply({
     } else {
       const quoted = quotedMessage(messages);
       const header = quoted ? quoteHeader(quoted, locale, clock24) : undefined;
+      const requestId = newRequestId();
       sendLater(
         { kind: "reply", threadId, text: body, ...(sentCc.length ? { cc: sentCc } : {}) },
         () => {
           const draftId = saver.id();
-          void replyM({ threadId, text: body, ...(sentCc.length ? { cc: sentCc } : {}), ...(files.length ? { attachments: files } : {}), ...(header ? { quoteHeader: header } : {}), ...(draftId ? { draftId } : {}) }).catch(() => {});
+          void replyM({ threadId, text: body, requestId, ...(sentCc.length ? { cc: sentCc } : {}), ...(files.length ? { attachments: files } : {}), ...(header ? { quoteHeader: header } : {}), ...(draftId ? { draftId } : {}) }).catch(() => {});
           saver.sent(draftId);
         },
         // "Desfazer": the bar opens again over the kept draft (this bar has closed by then).

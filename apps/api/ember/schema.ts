@@ -107,6 +107,29 @@ export default defineSchema({
       updatedAt: v.number(),
     }).index("by_mailbox", ["mailbox"]),
 
+    /**
+     * A member's push preferences (ember/notifications.ts), one row per member, none until they change one: `muted`
+     * mailboxes push nothing to them; `preview: false` leaves the subject and the snippet out of the notification.
+     */
+    notificationPrefs: defineTable({ userId: v.string(), muted: v.array(v.string()), preview: v.boolean(), updatedAt: v.number() }).index("by_user", ["userId"]),
+
+    /**
+     * Sends already done, by the client's id for them (`requestId` on `inbox:reply` / `compose` / `forward`): a retry
+     * of the same send (a lost answer, the offline queue, a notification action sent twice) returns `result` and sends
+     * nothing; the same id with other arguments is refused. Kept 7 days (`inbox:pruneSendRequests`, daily).
+     */
+    sendRequests: defineTable({
+      userId: v.string(),
+      requestId: v.string(),
+      fn: v.string(),
+      /** What was sent: the thread (reply, forward) or the mailbox (compose), and a hash of the arguments. */
+      target: v.string(),
+      result: v.any(),
+      at: v.number(),
+    })
+      .index("by_request", ["userId", "requestId"])
+      .index("by_at", ["at"]),
+
     /** Webhooks (ember/webhooks.ts): HTTPS endpoints for the service's events, signed with `secret` (Standard Webhooks). */
     webhooks: defineTable({
       endpoint: v.string(),

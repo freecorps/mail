@@ -47,9 +47,18 @@ const fromRegisterForPush = (r: RegisterForPushResult): PushRegistration => r as
 
 const MAIL_CHANNEL = { id: "mail", name: "Mail" };
 
+/**
+ * Android: the push task (index.ts) opens sealed pushes and runs the notification actions tapped with the app in the
+ * background or killed, so either transport registers it once push is granted.
+ */
+async function withTask(r: PushRegistration): Promise<PushRegistration> {
+  if (r.status === "granted" && r.platform === "android") await registerEmberPushTask().catch((e: unknown) => console.warn("[push] task", e));
+  return r;
+}
+
 export const expoPushTransport: PushTransport = {
   name: "expo",
-  register: async () => fromRegisterForPush(await registerForPush({ androidChannel: MAIL_CHANNEL })),
+  register: async () => withTask(fromRegisterForPush(await registerForPush({ androidChannel: MAIL_CHANNEL }))),
   forget: async () => {},
 };
 
@@ -64,11 +73,7 @@ export const directPushTransport: PushTransport = {
   register: async () => {
     try {
       const key = await ensurePushKey().catch((e: unknown) => (console.warn("[push] no device key", e), null));
-      const r = fromRegisterForPush(
-        await registerForPush({ kind: "device", ...(key ? { publicKey: key.publicKey } : {}), androidChannels: [MAIL_CHANNEL] }),
-      );
-      if (r.status === "granted" && r.platform === "android") await registerEmberPushTask().catch((e: unknown) => console.warn("[push] task", e));
-      return r;
+      return withTask(fromRegisterForPush(await registerForPush({ kind: "device", ...(key ? { publicKey: key.publicKey } : {}), androidChannels: [MAIL_CHANNEL] })));
     } catch (e) {
       // No native token (no network for the APNs/FCM token, a build without push): not registered, never a crash.
       return { status: "unsupported", reason: e instanceof Error ? e.message : String(e) };

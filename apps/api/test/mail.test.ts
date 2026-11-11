@@ -409,6 +409,123 @@ describe("mail app", () => {
     expect(await names("caio")).toEqual(["caio*"]);
   });
 
+  it("notifications: per-mailbox on/off and preview, filtered on the server; one push per member with its badge", async () => {
+    // Wolf sees support and his own mailbox; Heitor (admin) every shared one and his own.
+    expect((await call("query", "inbox:notifications", {}, "user:wolf")).value).toEqual({ muted: [], preview: true });
+    expect((await call("mutation", "inbox:setNotifications", { mailbox: "privacy", enabled: false }, "user:wolf")).error.message).toMatch(/no access/);
+    expect((await call("mutation", "inbox:setNotifications", { mailbox: "support" }, "user:wolf")).error.message).toMatch(/go together/);
+    expect((await call("query", "inbox:notifications", {}, "user:stranger")).error.message).toMatch(/not a member/);
+
+    const t = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.find((x: any) => x.number === 1);
+    const pushes = async () => (await call("mutation", "testing:inboundPushes", { threadId: t._id })).value as Array<{ userId: string; message: any }>;
+    const badge = async (who: string) => (await call("query", "inbox:mailboxes", {}, `user:${who}`)).value.reduce((n: number, b: any) => n + b.unread, 0);
+    const before = await pushes();
+    const users = before.map((p) => p.userId).sort();
+    // Everyone who sees support (its members and the admin), never the owner of another personal mailbox.
+    expect(users).toEqual(expect.arrayContaining(["agent-1", "heitor", "wolf"]));
+    expect(users).not.toContain("agent-2");
+    expect(users).not.toContain("caio");
+    const wolf = before.find((p) => p.userId === "wolf")!.message;
+    expect(wolf).toMatchObject({ categoryId: "mail", threadId: t._id, channelId: "mail", sound: "default", data: { threadId: t._id, mailbox: "support", number: 1, from: { email: expect.any(String) } } });
+    expect(wolf.title).toMatch(/· #1$/);
+    expect(wolf.body).toContain(t.subject);
+    expect(typeof wolf.data.at).toBe("number");
+    expect(wolf.collapseId).toBeUndefined();
+    // The badge is each member's own unread total (the app's foreground badge): Wolf's counts his personal mailbox.
+    expect(wolf.badge).toBe(await badge("wolf"));
+    expect(wolf.data.badge).toBe(wolf.badge);
+    expect(before.find((p) => p.userId === "heitor")!.message.badge).toBe(await badge("heitor"));
+    // A snoozed thread's unread messages are out of the push's badge, as they are out of the app's: the icon does not
+    // jump down when the app opens.
+    const other = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.find((x: any) => x.number === 2);
+    expect((await call("mutation", "inbox:markUnread", { threadId: other._id }, "user:wolf")).error ?? null).toBeNull();
+    const awake = (await pushes()).find((p) => p.userId === "wolf")!.message.badge;
+    expect(awake).toBe(await badge("wolf"));
+    expect((await call("mutation", "inbox:snooze", { threadId: other._id, until: Date.now() + 3600_000 }, "user:wolf")).error ?? null).toBeNull();
+    const asleep = (await pushes()).find((p) => p.userId === "wolf")!.message.badge;
+    expect(asleep).toBe(await badge("wolf"));
+    expect(asleep).toBeLessThan(awake);
+    expect((await call("mutation", "inbox:unsnooze", { threadId: other._id }, "user:wolf")).error ?? null).toBeNull();
+
+    // Support off for Wolf: no push for him; preview off for Heitor: no subject or snippet, the rest the same.
+    expect((await call("mutation", "inbox:setNotifications", { mailbox: "support", enabled: false }, "user:wolf")).value).toEqual({ muted: ["support"], preview: true });
+    expect((await call("mutation", "inbox:setNotifications", { preview: false }, "user:heitor")).value).toEqual({ muted: [], preview: false });
+    const after = await pushes();
+    expect(after.map((p) => p.userId)).not.toContain("wolf");
+    const heitor = after.find((p) => p.userId === "heitor")!.message;
+    expect(heitor.body).toBe("");
+    expect(heitor.title).toMatch(/· #1$/);
+    expect(heitor.data.threadId).toBe(t._id);
+    expect((await call("query", "inbox:notifications", {}, "user:wolf")).value).toEqual({ muted: ["support"], preview: true });
+    // On again; a second "off" does not list it twice.
+    await call("mutation", "inbox:setNotifications", { mailbox: "support", enabled: false }, "user:wolf");
+    expect((await call("query", "inbox:notifications", {}, "user:wolf")).value.muted).toEqual(["support"]);
+    expect((await call("mutation", "inbox:setNotifications", { mailbox: "support", enabled: true }, "user:wolf")).value.muted).toEqual([]);
+    expect((await pushes()).map((p) => p.userId)).toContain("wolf");
+    await call("mutation", "inbox:setNotifications", { preview: true }, "user:heitor");
+
+    // Nothing to change writes nothing (no row until the member really changes something).
+    expect((await call("query", "testing:prefsRows", { userId: "agent-3" })).value).toBe(0);
+    expect((await call("mutation", "inbox:setNotifications", {}, "user:agent-3")).value).toEqual({ muted: [], preview: true });
+    expect((await call("mutation", "inbox:setNotifications", { mailbox: "support", enabled: true }, "user:agent-3")).value).toEqual({ muted: [], preview: true });
+    expect((await call("query", "testing:prefsRows", { userId: "agent-3" })).value).toBe(0);
+    // The answer has the query's shape: a mailbox the member no longer sees is not listed (it stays stored, for when
+    // they see it again).
+    expect((await call("mutation", "inbox:setNotifications", { mailbox: "support", enabled: false }, "user:agent-3")).value.muted).toEqual(["support"]);
+    expect((await admin.inbox.addMember({ user_id: "agent-3", mailboxes: [], name: "Agent Three" })).error).toBeNull();
+    expect((await call("mutation", "inbox:setNotifications", { preview: false }, "user:agent-3")).value).toEqual({ muted: [], preview: false });
+    expect((await call("query", "inbox:notifications", {}, "user:agent-3")).value).toEqual({ muted: [], preview: false });
+    expect((await admin.inbox.addMember({ user_id: "agent-3", mailboxes: ["support"], name: "Agent Three" })).error).toBeNull();
+    expect((await call("query", "inbox:notifications", {}, "user:agent-3")).value).toEqual({ muted: ["support"], preview: false });
+  });
+
+  it("a send with a requestId goes out once: retries return the first result; another member's equal id is theirs", async () => {
+    const t = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.find((x: any) => x.number === 1);
+    const outbound = async () => (await call("query", "inbox:thread", { threadId: t._id }, "user:wolf")).value.messages.filter((m: any) => m.direction === "outbound").length;
+    const before = await outbound();
+    const args = { threadId: t._id, text: "Once only.", requestId: "6f1c2a7e-0d4b-4b8a-9b1e-3c5d7e9f1a2b" };
+    const first = await call("mutation", "inbox:reply", args, "user:wolf");
+    expect(first.error ?? null).toBeNull();
+    // The retry (a lost answer, the offline queue, the notification action's fallback): same result, nothing sent.
+    const again = await call("mutation", "inbox:reply", args, "user:wolf");
+    expect(again.value).toEqual(first.value);
+    // A retry whose quote line was rebuilt in another language (the device changed it meanwhile) is the same send.
+    const relocalized = await call("mutation", "inbox:reply", { ...args, quoteHeader: "On Nov 5, 2026, Ana wrote:" }, "user:wolf");
+    expect(relocalized.value).toEqual(first.value);
+    expect(await outbound()).toBe(before + 1);
+    // Another member with the same id sends their own.
+    const other = await call("mutation", "inbox:reply", { ...args, text: "Mine too." }, "user:heitor");
+    expect(other.error ?? null).toBeNull();
+    expect(other.value.emailId).not.toBe(first.value.emailId);
+    expect(await outbound()).toBe(before + 2);
+    // An id belongs to one kind of send; ids are 1 to 64 characters.
+    // The same id for anything else (another kind of send, another thread, other words) is refused, never answered
+    // with the first send's result.
+    const t2 = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.find((x: any) => x.number === 2);
+    for (const [fn, a] of [
+      ["inbox:compose", { mailbox: "support", to: ["x@user.test"], subject: "s", text: "t", requestId: args.requestId }],
+      ["inbox:reply", { ...args, threadId: t2._id }],
+      ["inbox:reply", { ...args, text: "Something else." }],
+    ] as const) {
+      const r = await call("mutation", fn, a, "user:wolf");
+      expect(r.error).toMatchObject({ code: "ValidationError", message: expect.stringMatching(/already used for another send/) });
+    }
+    expect(await outbound()).toBe(before + 2);
+    expect((await call("mutation", "inbox:reply", { ...args, requestId: "x".repeat(65) }, "user:wolf")).error.message).toMatch(/1 to 64/);
+    expect((await call("mutation", "inbox:reply", { ...args, requestId: "" }, "user:wolf")).error.message).toMatch(/1 to 64/);
+    // A new conversation sent twice is one conversation.
+    const c = { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Once", text: "One thread.", requestId: "compose-1" };
+    const c1 = await call("mutation", "inbox:compose", c, "user:wolf");
+    const c2 = await call("mutation", "inbox:compose", c, "user:wolf");
+    expect(c2.value).toEqual(c1.value);
+    const sent = (await call("query", "inbox:threads", { mailbox: "support" }, "user:wolf")).value.page.filter((x: any) => x.subject === "Once");
+    expect(sent).toHaveLength(1);
+    // After 7 days the ids are forgotten (daily prune): the same id sends again.
+    expect((await call("mutation", "testing:ageSendRequests", { userId: "wolf", at: Date.now() - 8 * 24 * 3600 * 1000 })).value).toBeGreaterThanOrEqual(2);
+    expect((await call("mutation", "inbox:reply", args, "user:wolf")).value.emailId).not.toBe(first.value.emailId);
+    expect(await outbound()).toBe(before + 3);
+  });
+
   it("reply all copies the others; forward sends a message on, with its files, as a new conversation", async () => {
     const t = (await call("query", "inbox:threads", { mailbox: "support" }, "user:agent-1")).value.page.find((x: any) => x.number === 1);
     const full = (await call("query", "inbox:thread", { threadId: t._id }, "user:agent-1")).value;

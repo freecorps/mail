@@ -27,6 +27,12 @@ export function deviceClock24(): boolean {
   }
 }
 
+/** The app's language outside React (notification actions in the background): the stored override, else the device's. */
+export async function storedLocale(): Promise<Locale> {
+  const v = await AsyncStorage.getItem(KEY).catch(() => null);
+  return v === "pt-BR" || v === "en" ? v : deviceLocale();
+}
+
 export function useLanguagePref() {
   const [pref, setPref] = useState<LanguagePref>("system");
   useEffect(() => {

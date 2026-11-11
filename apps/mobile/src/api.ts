@@ -143,6 +143,8 @@ export type ComposerArgs = {
   signature?: boolean;
   /** The member's draft of this message, deleted with the send. */
   draftId?: string;
+  /** This send's id (`newRequestId`): every retry of it carries the same one, so the server sends it once. */
+  requestId?: string;
 };
 
 export type DraftKind = "reply" | "note" | "compose" | "forward";
@@ -202,6 +204,13 @@ export interface SavedReply {
   updatedAt: number;
 }
 
+/** The member's push preferences (`inbox:notifications`): mailboxes turned off, and whether pushes show the subject. */
+export interface NotificationPrefs {
+  muted: string[];
+  preview: boolean;
+}
+export type SetNotificationsArgs = { mailbox?: string; enabled?: boolean; preview?: boolean };
+
 export type PageOpts = { numItems: number; cursor: string | null };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
@@ -256,6 +265,8 @@ export const api = {
       string
     >("inbox:registerDevice"),
     unregisterDevice: q<"mutation", { token: string }, boolean>("inbox:unregisterDevice"),
+    notifications: q<"query", Record<string, never>, NotificationPrefs>("inbox:notifications"),
+    setNotifications: q<"mutation", SetNotificationsArgs, NotificationPrefs>("inbox:setNotifications"),
     generateUploadUrl: q<"mutation", { contentType?: string; size: number; sha256?: string; multipart?: boolean }, unknown>("inbox:generateUploadUrl"),
   },
 };

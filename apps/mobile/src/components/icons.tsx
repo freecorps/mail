@@ -85,6 +85,7 @@ export const Icons = {
   replyAll: icon("arrowshape.turn.up.left.2", "reply_all"),
   trash: icon("trash", "delete"),
   link: icon("link", "link"),
+  external: icon("arrow.up.forward.app", "open_in_new"),
   copy: icon("doc.on.doc", "content_copy"),
   signature: icon("signature", "draw"),
   chevron: icon("chevron.right", "chevron_right"),

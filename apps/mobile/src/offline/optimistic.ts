@@ -252,6 +252,12 @@ function saveDraftLocally(store: Store, a: SaveDraftArgs, at: number) {
   }
 }
 
+/** The preferences after `inbox:setNotifications` (the server's rule: a mailbox listed once in `muted`). */
+export function nextNotificationPrefs(p: { muted: string[]; preview: boolean }, a: { mailbox?: string; enabled?: boolean; preview?: boolean }) {
+  const muted = a.mailbox === undefined || a.enabled === undefined ? p.muted : a.enabled ? p.muted.filter((b) => b !== a.mailbox) : [...new Set([...p.muted, a.mailbox])];
+  return { muted, preview: a.preview ?? p.preview };
+}
+
 export function inboxOptimisticUpdates(now: () => number = Date.now): Record<string, OptimisticUpdate> {
   const updates: Record<string, OptimisticUpdate> = {
     "inbox:reply": (store, args: { threadId: string; text: string }) => append(store, args, "outbound", now()),
@@ -357,6 +363,11 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
   updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string }, rec) => {
     const mailbox = mailboxOf(store, args.threadId);
     if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text }, rec);
+  };
+  // Ajustes › Notificações: the switches move at once (offline too; the server filters pushes once it lands).
+  updates["inbox:setNotifications"] = (store, a: { mailbox?: string; enabled?: boolean; preview?: boolean }) => {
+    const p = store.getQuery<any>("inbox:notifications", {}) as { muted: string[]; preview: boolean } | undefined;
+    if (p) store.setQuery<any>("inbox:notifications", {}, nextNotificationPrefs(p, a));
   };
   // A send with `draftId` deletes that draft (on the server in the same transaction; here at once, with the row of its
   // first save if that still shows under a temporary id).

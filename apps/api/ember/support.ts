@@ -2,12 +2,34 @@
 import { anyComponents as components, internalMutationGeneric as internalMutation, v } from "@freecorps/ember-server";
 import { PushNotifications } from "@freecorps/ember-push";
 import { eventTypeOf } from "../src/webhooks.ts";
-import { canSeeWith, owners, type Member } from "./access.ts";
+import { owners, type Member } from "./access.ts";
+import { mailboxCountsOf } from "./inbox.ts";
+import { inboundPushes, prefsOf, type InboundEvent } from "./notifications.ts";
 import { emailEventData, emit } from "./webhooks.ts";
 
 const push = new PushNotifications(components.push);
+const email = components.email.lib;
 
-/** A new inbound message: push to everyone who can see the mailbox (the mobile inbox). Spam and automated mail stay quiet. */
+type HookCtx = { db: any; runQuery: any; now?: number };
+
+/**
+ * The pushes of an inbound message, one per member (ember/notifications.ts): who can see the mailbox and did not turn
+ * it off, each with their own badge and preview setting.
+ */
+export function pushesFor(ctx: HookCtx, e: InboundEvent) {
+  const personal = owners(ctx.db);
+  const members = ctx.db.query("members").collect() as Member[];
+  const boxes = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string }>).map((b) => b.name);
+  // The same counts as `inbox:mailboxes` (snoozed threads left out), so the badge a push sets is the one the app
+  // shows once it opens.
+  const unread = mailboxCountsOf(ctx, boxes);
+  return inboundPushes({ e, members, personal, prefs: (u) => prefsOf(ctx.db, u), boxes, unread, at: ctx.now ?? Date.now() });
+}
+
+/**
+ * A new inbound message: push to everyone who can see the mailbox (the mobile inbox), unless they turned it off.
+ * Spam and automated mail stay quiet.
+ */
 export const onInbound = internalMutation({
   args: {
     threadId: v.string(),
@@ -38,20 +60,11 @@ export const onInbound = internalMutation({
     }, { mailbox: e.mailbox });
     if (e.autoSubmitted) return null;
     // A personal mailbox's mail reaches only its owner (ember/access.ts); a shared one's, its members and the admins.
-    const personal = owners(ctx.db);
-    const users = (ctx.db.query("members").collect() as Member[]).filter((m) => canSeeWith(personal, m, e.mailbox)).map((m) => m.userId);
-    if (!users.length) return null;
-    push.send(ctx, users, {
-      title: `${e.from.name ?? e.from.email} · #${e.number}`,
-      body: `${e.subject}\n${e.snippet}`.slice(0, 180),
-      data: { threadId: e.threadId, mailbox: e.mailbox },
-      sound: "default",
-      // Android: the app's "mail" channel; one notification per thread, replaced by its next message. The tag is in
-      // clear at Google, so it is the thread's opaque id, never the subject.
-      channelId: "mail",
-      collapseId: e.threadId,
-    });
-    return users.length;
+    // One send per member: the badge and the preview are theirs. No collapse id: iOS stacks a conversation's
+    // notifications (thread-id), and the app replaces a thread's notification on Android itself.
+    const pushes = pushesFor(ctx as HookCtx, e);
+    for (const p of pushes) push.send(ctx, [p.userId], p.message);
+    return pushes.length || null;
   },
 });
 

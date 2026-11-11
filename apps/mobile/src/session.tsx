@@ -6,10 +6,14 @@ import { PUSH_TRANSPORT } from "./config";
 import { authClient, clearReplica } from "./ember";
 import { setReplicaUser } from "./offline/replica";
 import type { LanguagePref } from "./prefs";
+import { resetNotificationSurface, resetPushState } from "./push/actions";
 import { pushTransport, type PushRegistration } from "./push/transport";
+import { clearQuickActions } from "./quick-actions";
 import { usePushRegistration } from "./push/usePush";
 
 const transport = pushTransport(PUSH_TRANSPORT);
+/** How long sign-out waits for the server to forget this device's push token. */
+const UNREGISTER_WAIT_MS = 3000;
 
 export type Lang = { pref: LanguagePref; setPref(v: LanguagePref): void };
 /** Which part of the app is reachable: drives the root `Stack.Protected` guards. */
@@ -55,8 +59,13 @@ function Member({ auth, lang, children }: { auth: UseEmberAuthTokenResult; lang:
   const unregister = useMutation(api.inbox.unregisterDevice);
 
   const signOut = useCallback(async () => {
-    if (push.token) await unregister({ token: push.token }).catch(() => {});
+    // Push's state of this member first: a response still running stops, a waiting tap never opens for the next one.
+    await resetPushState();
+    // Bounded: offline, the write waits in the queue, and sign-out must not wait with it (`clearReplica` drops it).
+    if (push.token) await Promise.race([unregister({ token: push.token }).catch(() => {}), new Promise((r) => setTimeout(r, UNREGISTER_WAIT_MS))]);
     await transport.forget();
+    // No badge, notifications, mailbox channels or icon shortcuts of this account left behind.
+    await Promise.all([resetNotificationSurface(), clearQuickActions()]);
     await clearReplica();
     await auth.signOut().catch(() => {});
   }, [push.token, unregister, auth]);

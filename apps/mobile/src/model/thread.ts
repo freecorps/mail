@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useConnectionState, useMutation, useQuerySnapshot } from "@freecorps/ember-react-native";
 import type { AttachmentArg } from "../lib/uploads";
+import { newRequestId } from "../lib/request-id";
 import { api, type Message, type Thread, type ThreadStatus } from "../api";
 import { isOptimisticId } from "../offline/optimistic";
 import type { LoadStatus, Source } from "./threads";
@@ -108,7 +109,7 @@ export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?
   /** Resolves when the server confirmed (the optimistic message shows right away, also offline). */
   const reply = useCallback(
     (text: string, attachments?: AttachmentArg[], cc?: string[]) =>
-      replyM({ threadId, text: text.trim(), ...(cc?.length ? { cc } : {}), ...(attachments?.length ? { attachments } : {}) }),
+      replyM({ threadId, text: text.trim(), requestId: newRequestId(), ...(cc?.length ? { cc } : {}), ...(attachments?.length ? { attachments } : {}) }),
     [threadId, replyM],
   );
   const note = useCallback((text: string) => noteM({ threadId, text: text.trim() }), [threadId, noteM]);
