@@ -61,7 +61,7 @@ import { mailboxIcon, VIEW_ICON, type Folder } from "@/lib/nav";
 import { formatAt, snoozePresets } from "@/lib/when";
 import { openPicker } from "@/model/picker";
 import { snoozeTargetOf, useSnooze } from "@/model/snooze";
-import { tagsOf, useAllTags, useTagActions } from "@/model/tags";
+import { TAG_LIMITS, tagsOf, tagToggle, useAllTags, useTagActions } from "@/model/tags";
 
 export interface PaletteProps {
   open: boolean;
@@ -256,12 +256,16 @@ function Body(p: PaletteProps & { close: () => void }) {
             />
             {tagsOf(allTags, th.mailbox).map((x) => {
               const on = th.tags?.includes(x._id) ?? false;
+              // At the most tags a conversation takes, adding is off (as in the tag menu), saying why.
+              const blocked = tagToggle([{ tags: th.tags ?? [] }], x._id) === "blocked";
               return (
                 <Item
                   key={x._id}
                   id={`tag:${x._id}`}
                   icon={Tag}
                   label={t(on ? "palette.tagRemove" : "palette.tagAdd", { name: x.name })}
+                  disabled={blocked}
+                  hint={blocked ? t("tags.limit", { count: TAG_LIMITS.perThread }) : undefined}
                   onSelect={run(() => tagActions.toggle([{ threadId: th._id, tags: th.tags ?? [] }], x))}
                 />
               );
@@ -459,6 +463,7 @@ function Item({
   hint,
   keys,
   current = false,
+  disabled = false,
   onSelect,
 }: {
   /** Makes the cmdk value unique when labels can repeat (two members or mailboxes with the same name). */
@@ -469,12 +474,13 @@ function Item({
   keys?: string[];
   /** The preference already in use. */
   current?: boolean;
+  disabled?: boolean;
   onSelect: () => void;
 }) {
   const { t } = useI18n();
   const currentLabel = t("common.current");
   return (
-    <CommandItem value={id ? `${label}\u0000${id}` : label} keywords={hint ? [hint] : undefined} onSelect={onSelect}>
+    <CommandItem value={id ? `${label}\u0000${id}` : label} keywords={hint ? [hint] : undefined} disabled={disabled} onSelect={onSelect}>
       <Icon aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {hint && <span className="max-w-48 shrink-0 truncate text-xs text-muted-foreground">{hint}</span>}

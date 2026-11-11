@@ -9,7 +9,7 @@ import { checkPick, dayAt, formatAt, MAX_AHEAD_MS, sendPresets, snoozePresets, w
 import { phraseOf, placeEntries, showsInline } from "@/model/activity";
 import { HEARTBEAT_MS, presenceBeat, presenceLine, SETTLE_MS, type PresenceTimers } from "@/model/presence";
 import { ATTACH_LIMIT, isLinkRefusal, isScheduled, sendLaterCheck } from "@/model/schedule";
-import { matchTags, nextColor, swapOrders, tagCreateError, tagNameError, threadTags, withCreated } from "@/model/tags";
+import { matchTags, nextColor, swapOrders, tagCreateError, tagNameError, tagToggle, threadTags, withCreated } from "@/model/tags";
 import { searchRows } from "@/model/threads";
 import { snoozeTargetOf } from "@/model/snooze";
 import { invalidChips, withTyped } from "@/model/recipients";
@@ -588,6 +588,16 @@ describe("tag helpers", () => {
     expect(tagCreateError("Nova", list, [{ tags: twenty }])).toBe("threadFull");
     expect(tagCreateError("Nova", list, [{ tags: twenty.slice(1) }, { tags: [] }])).toBeNull();
     expect(tagCreateError("reembolso", list, [{ tags: twenty }])).toBe("taken");
+  });
+
+  it("a tag click at the per-thread cap: a full thread lacking it blocks adding; a mixed box then takes it off", () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => `t${i}`);
+    expect(tagToggle([{ tags: [] }, { tags: ["g"] }], "g")).toBe("add");
+    expect(tagToggle([{ tags: ["g"] }, { tags: ["g"] }], "g")).toBe("remove");
+    // Full but already has it: nothing to add there, so adding to the others goes on.
+    expect(tagToggle([{ tags: [...twenty.slice(1), "g"] }, { tags: [] }], "g")).toBe("add");
+    expect(tagToggle([{ tags: twenty }], "g")).toBe("blocked");
+    expect(tagToggle([{ tags: twenty }, { tags: ["g"] }], "g")).toBe("remove");
   });
 
   it("search folds accents and ranks starts-with first; colors and reordering", () => {

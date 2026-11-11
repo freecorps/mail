@@ -10,7 +10,7 @@ import { useI18n } from "@/i18n/context";
 import { TAG_COLORS, type TagColor } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { openPicker, type TagTarget } from "@/model/picker";
-import { matchTags, nextColor, TAG_LIMITS, tagCreateError, tagsOf, withCreated, useAllTags, useTagActions } from "@/model/tags";
+import { matchTags, nextColor, TAG_LIMITS, tagCreateError, tagsOf, tagToggle, withCreated, useAllTags, useTagActions } from "@/model/tags";
 import { useMailboxes } from "@/model/threads";
 
 export function TagMenu({
@@ -62,12 +62,11 @@ export function TagCommand({ targets, onClose }: { targets: TagTarget[]; onClose
   const toggle = (id: string) => {
     const tag = tags.find((x) => x._id === id);
     if (!tag) return;
-    const every = live.every((x) => x.tags.includes(id));
-    if (!every && full) return;
-    actions.toggle(live, tag);
+    const mode = actions.toggle(live, tag);
+    if (mode === "blocked") return;
     setLocal(
       Object.fromEntries(
-        live.map((x) => [x.threadId, every ? x.tags.filter((y) => y !== id) : x.tags.includes(id) ? x.tags : [...x.tags, id]]),
+        live.map((x) => [x.threadId, mode === "remove" ? x.tags.filter((y) => y !== id) : x.tags.includes(id) ? x.tags : [...x.tags, id]]),
       ),
     );
   };
@@ -104,7 +103,7 @@ export function TagCommand({ targets, onClose }: { targets: TagTarget[]; onClose
                   key={tag._id}
                   value={tag._id}
                   onSelect={() => toggle(tag._id)}
-                  disabled={state === "off" && full}
+                  disabled={tagToggle(live, tag._id) === "blocked"}
                   aria-checked={state === "on" ? true : state === "some" ? "mixed" : false}
                   role="menuitemcheckbox"
                 >

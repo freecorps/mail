@@ -84,6 +84,18 @@ export function tagCreateError(
 }
 
 /**
+ * What a click on a tag does to these threads: "remove" when every one has it; else "add" to those lacking it, unless
+ * one of those is at the most tags a thread takes. Then a mixed state takes it off the ones that have it (a click on
+ * a mixed box always changes something), and a tag none of them has is "blocked".
+ */
+export function tagToggle(threads: ReadonlyArray<{ tags?: readonly string[] }>, tagId: string): "add" | "remove" | "blocked" {
+  const has = (x: { tags?: readonly string[] }) => x.tags?.includes(tagId) ?? false;
+  if (threads.every(has)) return "remove";
+  if (!threads.some((x) => !has(x) && (x.tags?.length ?? 0) >= TAG_LIMITS.perThread)) return "add";
+  return threads.some(has) ? "remove" : "blocked";
+}
+
+/**
  * The menu's state after a tag it created landed: the new tag added to each thread's tags as the menu has them now
  * (`local`, toggled since the click; else the thread's own), never the snapshot from when it was created.
  */
@@ -139,24 +151,29 @@ export function useTagActions() {
   const remove = useMutation(api.inbox.removeTag);
   const create = useMutation(api.inbox.createTag);
 
-  /** Puts the tag on every thread that lacks it, or takes it off them all when every one has it. */
+  /**
+   * Puts the tag on every thread that lacks it, or takes it off the ones that have it (`tagToggle`: every one has it,
+   * or one lacking it is at the most tags a thread takes). Returns what it did; "blocked" does nothing.
+   */
   const toggle = useCallback(
     (threads: ReadonlyArray<{ threadId: string; tags?: readonly string[] }>, tag: TagDoc) => {
-      const all = threads.every((x) => x.tags?.includes(tag._id));
-      if (all) {
-        for (const x of threads) quiet(remove({ threadId: x.threadId, tag: tag._id }));
+      const mode = tagToggle(threads, tag._id);
+      if (mode === "remove") {
+        const had = threads.filter((x) => x.tags?.includes(tag._id));
+        for (const x of had) quiet(remove({ threadId: x.threadId, tag: tag._id }));
         toast(t("tags.removed", { name: tag.name }), {
           duration: UNDO_MS,
           action: {
             label: t("common.undo"),
             onClick: () => {
-              for (const x of threads) quiet(add({ threadId: x.threadId, tag: tag._id }));
+              for (const x of had) quiet(add({ threadId: x.threadId, tag: tag._id }));
             },
           },
         });
-      } else {
+      } else if (mode === "add") {
         for (const x of threads) if (!x.tags?.includes(tag._id)) quiet(add({ threadId: x.threadId, tag: tag._id }));
       }
+      return mode;
     },
     [add, remove, t],
   );

@@ -91,10 +91,11 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const adminSection = me.admin ? route.admin : null;
 
   // The list: a view across mailboxes (`?v=`), or the mailbox's (a status tab, Sent or Spam).
-  const allTags = useAllTags().tags;
-  // A tag's list (`?g=`): the "all" view narrowed to it; an unknown tag (deleted, or not visible) is ignored.
+  const { tags: allTags, loading: tagsLoading } = useAllTags();
+  // A tag's list (`?g=`): the "all" view narrowed to it; an unknown tag (deleted, or not visible) is ignored once the
+  // tags are known. Until then the link is taken at its word, so its list loads first, not the mailbox's.
   const tagDoc = route.tag ? (allTags.find((x) => x._id === route.tag) ?? null) : null;
-  const tag = tagDoc?._id ?? null;
+  const tag = tagDoc?._id ?? (route.tag && tagsLoading ? route.tag : null);
   const view = route.view ?? (tag ? "all" : null);
   const folder: Folder | null = !view && (route.filter === "sent" || route.filter === "spam") ? route.filter : null;
   const list_ = useThreadList({ mailbox: mailbox ?? "", view, tag, filter: route.filter, query: route.query });
