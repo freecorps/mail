@@ -24,3 +24,37 @@ export function takeUndone(threadId: string): UndoneSend | null {
   kept.delete(threadId);
   return u;
 }
+
+/**
+ * Puts an undone (or failed) send back, deciding where once the draft it held is known (`draft`: a save on its way
+ * may still be finishing). Shown in the box now if the box can take it (`here`), else kept for it (`keep`). When the
+ * draft resolves: if the box is still there, it takes the draft (`adopt`); if it is gone (it was, or it went in
+ * between), what was sent is kept for its next mount and written back as the draft (`writeBack`, with the id when
+ * there is one). The send's hold on the draft goes after that (`release`), so nothing restores the older draft first.
+ */
+export function restoreSend(o: {
+  draft: Promise<string | null>;
+  here: () => boolean;
+  showHere: () => void;
+  keep: () => void;
+  adopt: (id: string) => void;
+  writeBack: (id: string | null) => Promise<unknown>;
+  release: () => void;
+}): void {
+  const shown = o.here();
+  if (shown) o.showHere();
+  else o.keep();
+  void o.draft.then((id) => {
+    if (shown && o.here()) {
+      if (id) o.adopt(id);
+      o.release();
+      return;
+    }
+    // Gone in between: the box took it with it, so it waits in memory again for the box's next mount.
+    if (shown) o.keep();
+    void o
+      .writeBack(id)
+      .catch(() => {})
+      .finally(o.release);
+  });
+}

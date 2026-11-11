@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/i18n/context";
 import { api, type AttachmentArg, type SaveDraftArgs } from "@/lib/api";
-import { keepUndone, takeUndone } from "@/model/undone";
+import { keepUndone, restoreSend, takeUndone } from "@/model/undone";
 import { htmlIsEmpty, textToHtml } from "@/lib/editorText";
 import { undoSendMs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -289,33 +289,28 @@ export function Composer({
             ...(cc ? { cc } : {}),
             ...(files.length ? { attachments: files } : {}),
           };
-    const restore = () => {
-      const inPlace = mounted.current && !disabledNow.current;
-      if (!inPlace) {
-        // The box is gone or off: what was sent waits in memory for it (read on its next mount or when it turns
-        // back on), and is written back as the draft for a later visit (or another device).
-        keepUndone(p.threadId, { mode: m, html, text, all: !!cc, signature: sig, files });
-      }
-      void draft.then((id) => {
-        if (inPlace) {
-          if (id) autosave.adopt(id);
-          hold.release();
-          return;
-        }
-        // Released only once written back, so the conversation does not restore the older draft in between.
-        void saveDraft({ ...snapshot, ...(id ? { id } : {}) })
-          .catch(() => {})
-          .finally(() => hold.release());
+    const restore = () =>
+      restoreSend({
+        draft,
+        // Decided again when the draft is known: the box may go (another conversation, spam) while it is on its way.
+        here: () => mounted.current && !disabledNow.current,
+        showHere: () => {
+          sending.current = false;
+          setMode(m);
+          setAll(!!cc);
+          setSignature(sig);
+          // A note had no files: the reply's uploads, left alone by the send, stay as they are (restore replaces the
+          // list).
+          if (m === "reply") uploads.restore(files);
+          editor.current?.setContent(html);
+        },
+        // The box is gone or off: what was sent waits in memory for it (read on its next mount or when it turns back
+        // on), and is written back as the draft for a later visit (or another device).
+        keep: () => keepUndone(p.threadId, { mode: m, html, text, all: !!cc, signature: sig, files }),
+        adopt: (id) => autosave.adopt(id),
+        writeBack: (id) => saveDraft({ ...snapshot, ...(id ? { id } : {}) }),
+        release: () => hold.release(),
       });
-      if (!inPlace) return;
-      sending.current = false;
-      setMode(m);
-      setAll(!!cc);
-      setSignature(sig);
-      // A note had no files: the reply's uploads, left alone by the send, stay as they are (restore replaces the list).
-      if (m === "reply") uploads.restore(files);
-      editor.current?.setContent(html);
-    };
     const quoteHeader = p.quoteHeader;
     const run = () =>
       void draft

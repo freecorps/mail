@@ -304,7 +304,9 @@ function ComposeWindow({
     toast(t("compose.discarded"));
   };
 
-  // Esc in the window minimizes it (a field's own Esc, such as closing suggestions, comes first).
+  // Esc in the window minimizes it. A field's own Esc comes first: this listener is native, so it runs before the
+  // field's React handler; a recipient field with its suggestions open keeps the key (it closes them), and a key the
+  // editor took is `defaultPrevented`. Menus the window opens are portaled outside it and close themselves.
   const section = useRef<HTMLElement>(null);
   const minimized = w.minimized;
   useEffect(() => {
@@ -312,6 +314,7 @@ function ComposeWindow({
     if (!el) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.target instanceof Element && e.target.closest('[role="combobox"][aria-expanded="true"]')) return;
       e.stopPropagation();
       minimizeWindow(w.key, true);
     };
