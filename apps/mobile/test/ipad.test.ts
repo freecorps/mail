@@ -1,7 +1,7 @@
 // iPad: the split layout by window width, moving the selection, and the hardware keyboard's commands and registry.
 import { describe, expect, it, vi } from "vitest";
 import { translate } from "../src/i18n/strings";
-import { nextAfter, paneLayout, reselect, SPLIT_MIN_WIDTH, step } from "../src/model/split";
+import { afterListChange, nextAfter, paneLayout, reselect, SPLIT_MIN_WIDTH, step } from "../src/model/split";
 import { actionOf, BINDINGS, createShortcutRegistry, keyCommands, SHORTCUT_TITLES, type ShortcutAction } from "../src/model/shortcuts";
 
 const rows = (...ids: string[]) => ids.map((threadId) => ({ threadId }));
@@ -48,6 +48,15 @@ describe("selection", () => {
     expect(ids(nextAfter(list, "c"))).toBe("b");
     expect(nextAfter(rows("a"), "a")).toBeNull();
     expect(nextAfter(list, "gone")).toBeNull();
+  });
+
+  it("opening an unread conversation in Não lidas keeps it open as it leaves; one archived from the list moves on", () => {
+    // Read by opening it: it leaves the unread list, and the pane stays on it (it never walks on, reading the rest).
+    expect(afterListChange(list, rows("b", "c"), "a", new Set())).toBe("a");
+    // Archived or snoozed from the list: the neighbor takes its place.
+    expect(afterListChange(list, rows("b", "c"), "a", new Set(["a"]))).toBe("b");
+    expect(afterListChange(list, rows("a", "c"), "a", new Set(["a"]))).toBe("a");
+    expect(afterListChange(list, list, null, new Set(["a"]))).toBeNull();
   });
 
   it("keeps a selection still listed and hands a vanished one to its surviving neighbor", () => {

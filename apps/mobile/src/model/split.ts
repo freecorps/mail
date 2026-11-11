@@ -56,3 +56,14 @@ export function reselect<T extends Keyed>(before: readonly T[], after: readonly 
   for (let j = i - 1; j >= 0; j--) if (now.has(before[j]!.threadId)) return before[j]!.threadId;
   return null;
 }
+
+/**
+ * The pane's conversation once the list changed. Still listed, it stays. Gone because of an action on it from the list
+ * (`acted`: archive, snooze, a move), the selection passes to its surviving neighbor (`reselect`). Gone for any other
+ * reason (opening it read it, so it left "Não lidas"; a change made elsewhere), the pane keeps showing it: opening an
+ * unread conversation never walks on through the rest, reading each one.
+ */
+export function afterListChange<T extends Keyed>(before: readonly T[], after: readonly T[], current: string | null, acted: ReadonlySet<string>): string | null {
+  if (current === null || after.some((r) => r.threadId === current)) return current;
+  return acted.has(current) ? reselect(before, after, current) : current;
+}

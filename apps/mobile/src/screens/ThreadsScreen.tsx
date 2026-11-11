@@ -34,7 +34,7 @@ import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
 import { useShortcuts } from "../keys";
-import { nextAfter, paneLayout, reselect, step } from "../model/split";
+import { afterListChange, nextAfter, paneLayout, step } from "../model/split";
 import { ThreadPane, type ThreadHost } from "./ThreadScreen";
 import { screenEdge, spacing, useColors, type Palette } from "../theme";
 
@@ -113,8 +113,13 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const personal = useMemo(() => new Set(mailboxes.filter((b) => b.personal).map((b) => b.name)), [mailboxes]);
   const keeps = keepsArchived(source, filter);
 
+  // Rows acted on from the list (archive, snooze, unarchive): if the pane shows one and it leaves, the pane moves on.
+  const acted = useRef(new Set<string>());
   const ops = useMemo<RowOps>(() => {
     const quiet = (p: Promise<unknown>) => void p.catch(() => {});
+    const mark = (ids: readonly string[]) => {
+      for (const id of ids) acted.current.add(id);
+    };
     return {
       t,
       c,
@@ -123,17 +128,18 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
       keepsSnoozed: keepsSnoozed(source),
       tagIndex,
       canAssign: (row) => !personal.has(row.mailbox),
-      snoozeAt: (row, until) => snoozer.run([{ threadId: row.threadId, until: row.snoozedUntil }], until),
-      askSnooze: (row, custom) => snoozer.ask([{ threadId: row.threadId, until: row.snoozedUntil }], custom ? { custom } : {}),
+      snoozeAt: (row, until) => (mark([row.threadId]), snoozer.run([{ threadId: row.threadId, until: row.snoozedUntil }], until)),
+      askSnooze: (row, custom) => (mark([row.threadId]), snoozer.ask([{ threadId: row.threadId, until: row.snoozedUntil }], custom ? { custom } : {})),
       snoozeChoices: snoozer.choices,
       tags: (row) => router.push({ pathname: "/tags", params: { threadId: row.threadId, mailbox: row.mailbox } }),
       toggleRead: (row) => quiet(row.unread ? markRead({ threadId: row.threadId }) : markUnread({ threadId: row.threadId })),
       archive: (rows) => {
         const records = archivable(rows);
+        mark(records.map((r) => r.threadId));
         for (const r of records) quiet(setStatus({ threadId: r.threadId, status: "closed" }));
         offerUndoArchive(t("undo.archived", { count: records.length }), records, (threadId, status) => quiet(setStatus({ threadId, status })));
       },
-      unarchive: (row) => quiet(setStatus({ threadId: row.threadId, status: "open" })),
+      unarchive: (row) => (mark([row.threadId]), quiet(setStatus({ threadId: row.threadId, status: "open" }))),
       assign: (rows) => {
         const first = rows[0];
         if (!first || rows.some((r) => r.mailbox !== first.mailbox)) return;
@@ -189,8 +195,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const split = layout.split;
   const openable = useMemo(() => (showRows ? vm.rows.filter((r) => !r.pending) : []), [showRows, vm.rows]);
   const [current, setCurrent] = useState<string | null>(null);
-  // A new list (another filter, a search) starts with nothing open; a conversation that left this one passes the
-  // selection to its neighbor.
+  // A new list (another filter, a search) starts with nothing open; a conversation acted on that left this one passes
+  // the selection to its neighbor, one that left otherwise (read in "Não lidas") stays open (`afterListChange`).
   useEffect(() => setCurrent(null), [filter, debounced, searchOnly]);
   const shown = useRef(openable);
   const rowsRef = useRef(openable);
@@ -199,17 +205,23 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     if (vm.status !== "ready") return;
     const before = shown.current;
     shown.current = openable;
-    setCurrent((cur) => reselect(before, openable, cur));
+    setCurrent((cur) => afterListChange(before, openable, cur, acted.current));
   }, [openable, vm.status]);
   const paneHost = useMemo<ThreadHost>(
     () => ({
       pane: true,
       leave: () => setCurrent((cur) => (cur ? (nextAfter(rowsRef.current, cur)?.threadId ?? null) : null)),
-      go: (to) => setCurrent(to.threadId),
+      go: (to) => {
+        acted.current.clear();
+        setCurrent(to.threadId);
+      },
     }),
     [],
   );
-  const open = useCallback((row: ThreadRow) => setCurrent(row.threadId), []);
+  const open = useCallback((row: ThreadRow) => {
+    acted.current.clear();
+    setCurrent(row.threadId);
+  }, []);
   const listRef = useRef<FlatList<ThreadRow>>(null);
   const visible = useRef(new Set<string>());
   const onViewable = useRef(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
