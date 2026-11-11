@@ -158,7 +158,7 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
 | M3 lista mobile | todo |
 | W1 fundação web | review (#34) |
 | W2 shell web | review (#35) |
-| W3 sidebar + ⌘K | todo |
+| W3 sidebar + ⌘K | review (#36) |
 
 ### Onda 3 (paralelo): Composer + conversa, mobile e web
 
