@@ -22,16 +22,37 @@ cara de email escrito por gente: liso, sem card, com assinatura opcional.
 
 ## Processo
 
-- **No máximo 2 subagentes grandes ao mesmo tempo**, cada um no seu worktree e na sua branch, em áreas que não se
-  sobrepõem (ex.: um em `apps/mobile`, outro no Ember). `apps/api` só um por vez.
-- Cada tarefa = 1 PR pequeno o bastante para revisar. Título em Conventional Commits (`feat(mobile): ...`).
-- O orquestrador revisa todo PR (crítico, não cricri): correção, aderência a este plano e às skills, screenshots
+- **Stacked PRs.** Cada tarefa vira uma camada: um PR cuja base é a branch da camada de baixo, não `main`. Assim cada
+  PR mostra só o próprio diff, o CI (`ci.yml` roda em todo `pull_request`) e os bots revisam camada por camada, e nada
+  chega em `main` (nem em produção) até a gente olhar a pilha junto.
+- **Forma da pilha** (uma árvore com um tronco comum):
+
+  ```
+  main
+   └─ api            (queries e tabelas de apps/api que web e mobile usam: visões, assinaturas, rascunhos, ...)
+       ├─ mobile/m1 ─ mobile/m2 ─ mobile/m3 ─ mobile/composer ─ mobile/m4 ─ mobile/m5 ─ ...
+       └─ web/w1 ─ web/w2-w3 ─ web/w4 ─ web/composer ─ web/w5 ─ ...
+  ```
+
+  Branches: `ui/<pilha>/<nn>-<nome>` (ex.: `ui/mobile/01-foundation`). PR com `Stack: mobile 1/6` e o link da camada
+  de baixo e de cima no corpo.
+- **No máximo 2 subagentes grandes ao mesmo tempo**, um por pilha (mobile e web), cada um no seu worktree. O Ember
+  (repo `freecorps/ember`) conta como uma pilha à parte quando estiver em andamento. A camada `api` é feita por um
+  agente só, antes das outras (ou acrescentada no topo do tronco quando surgir uma necessidade nova).
+- Mudou uma camada de baixo depois de revisada: o agente da pilha faz rebase das camadas de cima
+  (`git rebase --onto <base-nova> <base-antiga> <branch>`) e `push --force-with-lease`. Nunca reescrever branch de
+  outra pilha.
+- O orquestrador revisa toda camada (crítico, não cricri): correção, aderência a este plano e às skills, screenshots
   claro/escuro das telas tocadas, nada de segredo/ID de conta/caminho local.
-- **Merge só com CI verde e bots verdes**, squash. Quem dá o merge é o orquestrador.
+- **Merge:** só com CI verde e bots verdes em todas as camadas a mergear, depois da revisão conjunta da pilha. De baixo
+  para cima: merge da camada mais baixa em `main` (squash), retarget da próxima para `main` (`gh pr edit --base main`),
+  rebase dela sobre `main` (`git rebase --onto main <head-antigo-da-camada-mergeada>`), CI verde de novo, e assim por
+  diante. Quem dá o merge é o orquestrador.
 - `bun run check` antes de cada push (o CI roda o mesmo).
 - **Atenção:** merge em `main` com mudança em `apps/mobile` dispara `.github/workflows/mobile.yml` (EAS Update para o
-  canal `production`, ou build + TestFlight se o fingerprint nativo mudou). PR que adiciona módulo nativo (ex.:
-  `react-native-keyboard-controller`, widgets) gera build nova: agrupar mudanças nativas para não gastar builds à toa.
+  canal `production`, ou build + TestFlight se o fingerprint nativo mudou). A pilha do mobile entra em `main` de uma vez
+  por checkpoint (fim de onda), não camada por camada em dias diferentes; mudanças nativas (ex.:
+  `react-native-keyboard-controller`, widgets) concentradas para gerar o mínimo de builds.
 - Mudança no Ember: PR no `freecorps/ember`, release, depois bump de `@freecorps/ember-*` aqui (num PR próprio ou no
   primeiro PR que usa a feature).
 - Screenshots: rodar no simulador iOS / emulador Android pelas ferramentas de device, e no navegador para o web.
