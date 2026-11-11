@@ -238,7 +238,7 @@ Release e bump.
 
 | Tarefa | Status |
 |---|---|
-| UI de tags / atividade / soneca / agendamento / presença | todo |
+| UI de tags / atividade / soneca / agendamento / presença | web: review (#46); mobile: todo (camada própria) |
 | Ações na notificação + badge | todo |
 | Quick actions + widgets | todo |
 | iPad | todo |
