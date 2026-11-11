@@ -265,6 +265,11 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         store.setQuery<any>(name, args as never, { ...value, page: value.page.filter((t) => t._id !== threadId) });
       }
     }
+    // Gone everywhere at once: search hits of it, and the conversation itself (its screen shows "not found").
+    for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: unknown; value: Array<{ threadId: string }> | undefined }>) {
+      if (value?.some((h) => h.threadId === threadId)) store.setQuery<any>("inbox:search", args as never, value.filter((h) => h.threadId !== threadId));
+    }
+    if (store.getQuery<any>("inbox:thread", { threadId } as never) !== undefined) store.setQuery<any>("inbox:thread", { threadId } as never, null);
     dropped.delete(threadId);
     if (found) {
       const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;

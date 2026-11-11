@@ -297,8 +297,12 @@ describe("optimistic updates", () => {
       ["inbox:sent", { mailbox: "support", limit: 30 }, { page: [{ ...t, lastSentAt: 1 }], isDone: true }],
       ["inbox:views", {}, { all: { ...zero, threads: 1, unread: 2 }, assigned: zero, unread: { ...zero, threads: 1, unread: 2 }, waiting: zero }],
       ["inbox:mailboxes", {}, boxes],
+      ["inbox:thread", { threadId: t._id }, { thread: t, messages: [] }],
+      ["inbox:search", { query: "oi" }, [{ threadId: t._id, messageId: "m1" }, { threadId: "email$threads_9", messageId: "m2" }]],
     ]);
     up["inbox:deleteThread"]!(s.store, { threadId: t._id }, rec);
+    expect(s.get("inbox:thread", { threadId: t._id })).toBeNull();
+    expect(s.get("inbox:search", { query: "oi" }).map((h: { threadId: string }) => h.threadId)).toEqual(["email$threads_9"]);
     expect(s.get("inbox:threads", all).page).toEqual([]);
     expect(s.get("inbox:view", { view: "all" }).page).toEqual([]);
     expect(s.get("inbox:sent", { mailbox: "support", limit: 30 }).page).toEqual([]);

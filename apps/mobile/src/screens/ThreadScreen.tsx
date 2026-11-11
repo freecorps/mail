@@ -174,6 +174,12 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   const assignIcon = useToolbarIcon(Icons.assign, tint);
   const replyIcon = useToolbarIcon(Icons.reply, tint);
   const moreIcon = useToolbarIcon(Icons.more, tint);
+  // The More menu's items: SF Symbols on iOS, Material Symbols on Android (never SF names there).
+  const forwardIcon = useToolbarIcon(Icons.forward, tint);
+  const readIcon = useToolbarIcon(Icons.markRead, tint);
+  const unreadIcon = useToolbarIcon(Icons.markUnread, tint);
+  const linkIcon = useToolbarIcon(Icons.link, tint);
+  const trashIcon = useToolbarIcon(Icons.trash, tint);
   const icons = !!(prevIcon && nextIcon && archiveIcon && assignIcon && replyIcon && moreIcon);
 
   const chrome = (
@@ -208,18 +214,18 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
           {ios ? <Stack.Toolbar.Spacer /> : null}
           <Stack.Toolbar.Menu icon={moreIcon} accessibilityLabel={t("thread.more")} title="">
             {lastMail ? (
-              <Stack.Toolbar.MenuAction icon={Icons.forward.ios} onPress={() => forward(lastMail._id)}>
+              <Stack.Toolbar.MenuAction icon={forwardIcon} onPress={() => forward(lastMail._id)}>
                 {t("thread.forward")}
               </Stack.Toolbar.MenuAction>
             ) : null}
-            <Stack.Toolbar.MenuAction icon={unread ? Icons.markRead.ios : Icons.markUnread.ios} onPress={vm.toggleRead}>
+            <Stack.Toolbar.MenuAction icon={unread ? readIcon : unreadIcon} onPress={vm.toggleRead}>
               {unread ? t("thread.markRead") : t("thread.markUnread")}
             </Stack.Toolbar.MenuAction>
-            <Stack.Toolbar.MenuAction icon={Icons.link.ios} onPress={copyLink}>
+            <Stack.Toolbar.MenuAction icon={linkIcon} onPress={copyLink}>
               {t("thread.copyLink")}
             </Stack.Toolbar.MenuAction>
             {canDelete ? (
-              <Stack.Toolbar.MenuAction icon={Icons.trash.ios} destructive onPress={confirmDelete}>
+              <Stack.Toolbar.MenuAction icon={trashIcon} destructive onPress={confirmDelete}>
                 {t("thread.delete")}
               </Stack.Toolbar.MenuAction>
             ) : null}
