@@ -78,8 +78,11 @@ export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: st
  * identifier (its thread id), and its responses may come without a date, so identifier and date alone would make an
  * action on a new message look handled already.
  */
-export function responseKey(r: { identifier: string; date: number | null; message?: string; actionIdentifier: string; userText?: string | null }): string {
-  return `${r.identifier}|${r.date ?? ""}|${r.message ?? ""}|${r.actionIdentifier}|${r.userText ?? ""}`;
+export function responseKey(r: { identifier: string; date?: number | null; message?: string; actionIdentifier: string; userText?: string | null }): string {
+  // No date: the listener, `getLastNotificationResponse` and the Android task report it differently (or not at all)
+  // for the same tap, and they must agree (the reply's requestId comes from this key). The message tells a new
+  // notification of the same conversation apart.
+  return `${r.identifier}|${r.message ?? ""}|${r.actionIdentifier}|${r.userText ?? ""}`;
 }
 
 /** Which message a notification is about: its `messageId`, else the push's time (older pushes), else nothing. */

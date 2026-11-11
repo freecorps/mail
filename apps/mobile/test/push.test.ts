@@ -66,7 +66,11 @@ describe("actions", () => {
     expect(id).toMatch(/^push-[0-9a-f]{16}$/);
     expect(id.length).toBeLessThanOrEqual(64);
     expect(requestIdOf(key)).toBe(id);
-    expect(requestIdOf(responseKey({ identifier: "t1", date: 2, actionIdentifier: "reply", userText: "Oi" }))).not.toBe(id);
+    // The same tap reported with another date (or none) by another source: the same id, so the server sends it once.
+    expect(requestIdOf(responseKey({ identifier: "t1", date: 2, actionIdentifier: "reply", userText: "Oi" }))).toBe(id);
+    expect(requestIdOf(responseKey({ identifier: "t1", date: null, actionIdentifier: "reply", userText: "Oi" }))).toBe(id);
+    // A newer message of the conversation is another reply.
+    expect(requestIdOf(responseKey({ identifier: "t1", message: "m2", actionIdentifier: "reply", userText: "Oi" }))).not.toBe(id);
     const calls = actionCalls("reply", mailDataOf(data)!, { ...o, text: "Oi", requestId: id });
     expect(calls[0]).toMatchObject({ fn: "reply", args: { requestId: id } });
     // Read is idempotent: no id.
@@ -86,7 +90,8 @@ describe("actions", () => {
 
   it("each response runs once: the key tells taps apart, the memory keeps the newest", () => {
     const a = responseKey({ identifier: "t1", date: 1, actionIdentifier: "reply", userText: "oi" });
-    expect(a).not.toBe(responseKey({ identifier: "t1", date: 2, actionIdentifier: "reply", userText: "oi" }));
+    expect(a).toBe(responseKey({ identifier: "t1", date: 2, actionIdentifier: "reply", userText: "oi" }));
+    expect(a).not.toBe(responseKey({ identifier: "t1", message: "m2", actionIdentifier: "reply", userText: "oi" }));
     expect(a).not.toBe(responseKey({ identifier: "t1", date: 1, actionIdentifier: "archive" }));
     let keys: string[] = [];
     for (let i = 0; i < 40; i++) keys = remember(keys, `k${i}`);
