@@ -129,7 +129,9 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
       tagIndex,
       canAssign: (row) => !personal.has(row.mailbox),
       snoozeAt: (row, until) => (mark([row.threadId]), snoozer.run([{ threadId: row.threadId, until: row.snoozedUntil }], until)),
-      askSnooze: (row, custom) => (mark([row.threadId]), snoozer.ask([{ threadId: row.threadId, until: row.snoozedUntil }], custom ? { custom } : {})),
+      // Marked once a time is picked (`then` runs in the same tick as the snooze, before the list re-renders): a
+      // cancelled sheet leaves nothing behind.
+      askSnooze: (row, custom) => snoozer.ask([{ threadId: row.threadId, until: row.snoozedUntil }], { ...(custom ? { custom } : {}), then: () => mark([row.threadId]) }),
       snoozeChoices: snoozer.choices,
       tags: (row) => router.push({ pathname: "/tags", params: { threadId: row.threadId, mailbox: row.mailbox } }),
       toggleRead: (row) => quiet(row.unread ? markRead({ threadId: row.threadId }) : markUnread({ threadId: row.threadId })),
