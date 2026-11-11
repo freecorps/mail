@@ -188,3 +188,17 @@ export function SignatureLine({
     </div>
   );
 }
+
+/** The draft did not reach the server (offline, an error): said quietly, with a way to try again. Nothing otherwise. */
+export function DraftStatus({ failed, onRetry, className }: { failed: boolean; onRetry: () => void; className?: string }) {
+  const { t } = useI18n();
+  if (!failed) return null;
+  return (
+    <span role="status" className={cn("inline-flex items-center gap-1.5 px-1.5 text-xs text-destructive", className)}>
+      {t("composer.notSaved")}
+      <button type="button" onClick={onRetry} className="underline underline-offset-2 hover:text-foreground">
+        {t("composer.retrySave")}
+      </button>
+    </span>
+  );
+}

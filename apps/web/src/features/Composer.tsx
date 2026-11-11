@@ -15,14 +15,14 @@ import { htmlIsEmpty, textToHtml } from "@/lib/editorText";
 import { undoSendMs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { openComposerDialog } from "@/model/dock";
-import { holdDraft, releaseDraft, useAutosave, useHeldDrafts } from "@/model/drafts";
+import { holdForSend, useAutosave, useHeldDrafts } from "@/model/drafts";
 import { schedule, undoSend } from "@/model/outbox";
 import { composerMode } from "@/model/threads";
 import { filesOf, useUploads } from "@/model/uploads";
 import { useMeName } from "@/model/me";
 import { LazyEditor, type RichEditorHandle } from "./editor/LazyEditor";
 import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
-import { AttachButton, AttachmentTiles, SavedRepliesButton, SignatureLine } from "./composer/parts";
+import { AttachButton, AttachmentTiles, DraftStatus, SavedRepliesButton, SignatureLine } from "./composer/parts";
 
 export type ComposerMode = "reply" | "note";
 export interface ComposerHandle {
@@ -66,7 +66,14 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
   const others = p.others ?? [];
   const uploads = useUploads();
+  const filesNow = useRef(0);
+  useEffect(() => {
+    filesNow.current = uploads.items.length;
+  });
   const autosave = useAutosave();
+  // A send leaves once: set before anything waits, so a second click or ⌘Enter while the box is being cleared does not
+  // schedule the same message again. New content in the box (typed, or a send coming back) frees it.
+  const sending = useRef(false);
   const me = useMeName();
   const saved = useSavedReplies(p.mailbox, {
     nome: p.contact.name,
@@ -104,16 +111,22 @@ export function Composer({
   const restoring = useRef(false);
   const skipOnce = useRef(false);
   useEffect(() => {
-    if (restored.current || drafts.status !== "success" || !drafts.value) return;
+    if (restored.current) return;
+    // The drafts cannot be read: nothing to restore, and the box saves as usual.
+    if (drafts.status === "error") restored.current = true;
+    if (drafts.status !== "success" || !drafts.value) return;
     const d = drafts.value.find((x) => x.kind === "reply") ?? (p.notes === false ? undefined : drafts.value.find((x) => x.kind === "note"));
     if (d && held.has(d._id)) return;
     restored.current = true;
     if (!d) return;
-    // Released while the member already wrote something new here: what they wrote stays (and replaces the draft).
-    if (armed.current && !bodyNow.current.empty) return;
+    // Released while the member already put something new here (text or files): that stays (and replaces the draft).
+    if (armed.current && (!bodyNow.current.empty || filesNow.current > 0)) return;
+    // Whatever the box queued before the draft landed (an empty box asking to delete) is older than the draft.
+    autosave.cancel();
     autosave.adopt(d._id);
+    // The draft decides the mode (a toggle before it landed would otherwise move it to the other kind, deleting it).
     kind.current = d.kind === "note" ? "note" : "reply";
-    if (d.kind === "note") setMode("note");
+    setMode(kind.current);
     if (d.cc.length) setAll(true);
     uploads.restore(d.attachments);
     restoring.current = true;
@@ -124,6 +137,9 @@ export function Composer({
   const ready = uploads.ready;
   useEffect(() => {
     if (!armed.current) return;
+    // Nothing is saved before the draft on the server has been looked at, nor while it is still landing in the editor
+    // (the editor loads lazily): the box looks empty then, and an empty box asks to delete the draft.
+    if (!restored.current || restoring.current) return;
     // A save now would replace the draft a send holds (one reply and one note draft per conversation): wait for it.
     if (heldHere) return;
     if (skipOnce.current) {
@@ -209,32 +225,29 @@ export function Composer({
 
   const canSend = !body.empty && !uploads.busy;
   const send = () => {
-    if (body.empty) return;
+    if (body.empty || sending.current) return;
     if (uploads.busy) return void toast(t("composer.waitUploads"));
+    sending.current = true;
     const m = mode;
     const { html, text } = body;
     const files: AttachmentArg[] = m === "reply" ? ready : [];
     const cc = m === "reply" && all && others.length ? others : undefined;
     const sig = signature;
     // The draft the send consumes: the one known now, or the one a save already on its way creates (else it would
-    // outlive the send). Held until the send is undone or fails.
-    const known = autosave.id();
-    if (known) holdDraft(known);
-    const draft = autosave.forget().then((id) => {
-      if (id) holdDraft(id);
-      return id;
-    });
+    // outlive the send). Held until the send is confirmed, undone or fails.
+    const hold = holdForSend(autosave.id(), autosave.forget());
+    const draft = hold.draft;
     editor.current?.clear();
     uploads.clear();
     const restore = () => {
+      hold.release();
       void draft.then((id) => {
-        if (!id) return;
-        releaseDraft(id);
-        if (mounted.current) autosave.adopt(id);
+        if (id && mounted.current) autosave.adopt(id);
       });
       // Gone (another conversation opened): the draft is still on the server, released, so it comes back when the
       // conversation opens again.
       if (!mounted.current) return;
+      sending.current = false;
       setMode(m);
       setSignature(sig);
       uploads.restore(files);
@@ -257,7 +270,11 @@ export function Composer({
               })
             : note({ threadId: p.threadId, text, ...(draftId ? { draftId } : {}) }),
         )
-        .then(() => toast.success(m === "reply" ? t("thread.sent") : t("thread.noteSaved")))
+        .then(() => {
+          // Confirmed: the server deleted the draft with the send, so the hold goes.
+          hold.release();
+          toast.success(m === "reply" ? t("thread.sent") : t("thread.noteSaved"));
+        })
         .catch((e: unknown) => {
           restore();
           toast.error(t("thread.failed", { message: e instanceof Error ? e.message : String(e) }));
@@ -302,10 +319,12 @@ export function Composer({
               skipOnce.current = true;
             }
             armed.current = true;
+            if (!v.empty) sending.current = false;
             setBody(v);
           }}
           onSubmit={send}
-          onFiles={addFiles}
+          // A note takes no files: the editor then handles a paste as usual (its text, its image) instead of taking it.
+          onFiles={isNote ? undefined : addFiles}
           slash={saved.slash}
           onManageSlash={() => openComposerDialog({ kind: "saved", mailbox: p.mailbox })}
           className="max-h-72 overflow-y-auto"
@@ -385,7 +404,11 @@ export function Composer({
                 {t("thread.replyAll")}
               </label>
             )}
-            <span className="hidden text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
+            {autosave.failed ? (
+              <DraftStatus failed onRetry={autosave.retry} />
+            ) : (
+              <span className="hidden text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
+            )}
             <Button type="submit" size="sm" disabled={!canSend}>
               {isNote ? t("thread.addNote") : t("thread.send")}
             </Button>

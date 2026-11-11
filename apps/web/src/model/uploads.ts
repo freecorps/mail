@@ -1,7 +1,7 @@
 // Files dropped, pasted or picked into a composer (parity with mobile, apps/mobile/src/lib/uploads.ts): each goes
 // straight to R2 with a ticket from `inbox:generateUploadUrl` (Ember's `client.files.upload`: one presigned PUT, or
 // parallel multipart parts above 32 MiB) while the member keeps typing; sending waits until every file is ready.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useEmberClient } from "@freecorps/ember-react";
 import { COMPOSER_LIMITS } from "@freecorps/mail-email-html/compose";
 import type { AttachmentArg } from "@/lib/api";
@@ -36,13 +36,19 @@ export function useUploads() {
     const a = aborts.current;
     return () => a.forEach((c) => c.abort());
   }, []);
-  const patch = (id: string, p: Partial<Upload>) => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, ...p } : x)));
-
-  // The list as it is now, for `add` (uploads start outside any state updater: they call the server).
+  // The list as it is now, for `add` (uploads start outside any state updater: they call the server). Every change
+  // goes through `apply`, so it is never behind the state (a remove then an add counts the room right).
   const current = useRef<Upload[]>([]);
-  useEffect(() => {
-    current.current = items;
-  });
+  const apply = useCallback((f: (xs: Upload[]) => Upload[]) => {
+    current.current = f(current.current);
+    setItems(current.current);
+  }, []);
+  const patch = (id: string, p: Partial<Upload>) => apply((xs) => xs.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  /** Uploads still running whose tile goes away stop (nothing would show their result). */
+  const abortAll = useCallback(() => {
+    for (const c of aborts.current.values()) c.abort();
+    aborts.current.clear();
+  }, []);
 
   const add = useCallback(
     (files: readonly File[], tooLarge: (name: string) => string, tooMany: string) => {
@@ -60,8 +66,7 @@ export function useUploads() {
         added.push({ id, name: f.name, type, size: f.size, loaded: 0, status: "uploading" });
         start.push({ id, f, type, ac });
       });
-      current.current = [...current.current, ...added];
-      setItems((xs) => [...xs, ...added]);
+      apply((xs) => [...xs, ...added]);
       for (const { id, f, type, ac } of start)
         client.files
           .upload(f, {
@@ -80,18 +85,23 @@ export function useUploads() {
           })
           .finally(() => aborts.current.delete(id));
     },
-    [client],
+    [client, apply],
   );
 
-  const remove = useCallback((id: string) => {
-    aborts.current.get(id)?.abort();
-    setItems((xs) => xs.filter((x) => x.id !== id));
-  }, []);
+  const remove = useCallback(
+    (id: string) => {
+      aborts.current.get(id)?.abort();
+      aborts.current.delete(id);
+      apply((xs) => xs.filter((x) => x.id !== id));
+    },
+    [apply],
+  );
 
   /** Files already uploaded (a restored draft, an undone send) back in the list. */
-  const restore = useCallback((files: readonly AttachmentArg[]) => {
-    setItems(
-      files.map((f) => ({
+  const restore = useCallback(
+    (files: readonly AttachmentArg[]) => {
+      abortAll();
+      const next: Upload[] = files.map((f) => ({
         id: `u${++seq.current}`,
         name: f.filename,
         type: f.contentType,
@@ -99,14 +109,21 @@ export function useUploads() {
         loaded: 0,
         status: "ready",
         file: f.file,
-      })),
-    );
-  }, []);
+      }));
+      apply(() => next);
+    },
+    [apply, abortAll],
+  );
 
-  const clear = useCallback(() => setItems([]), []);
+  const clear = useCallback(() => {
+    abortAll();
+    apply(() => []);
+  }, [apply, abortAll]);
 
-  const ready: AttachmentArg[] = items.flatMap((x) =>
-    x.status === "ready" && x.file ? [{ file: x.file, filename: x.name, contentType: x.type }] : [],
+  // Same array until the list changes (the composers' autosave depends on it).
+  const ready: AttachmentArg[] = useMemo(
+    () => items.flatMap((x) => (x.status === "ready" && x.file ? [{ file: x.file, filename: x.name, contentType: x.type }] : [])),
+    [items],
   );
   return { items, ready, busy: items.some((x) => x.status === "uploading"), add, remove, restore, clear };
 }

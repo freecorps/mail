@@ -46,10 +46,19 @@ export function RecipientInput({
   const chips = useMemo(() => value.map(chipOf), [value]);
   const options = useMemo(() => (open ? suggest(contacts, text, value) : []), [open, contacts, text, value]);
 
+  // Once per address (case-insensitive, `chipEmail`): against the chips already there and within what is added, so a
+  // pasted "a@x.com, A@x.com" or a suggestion picked twice makes one chip.
   const add = (values: string[]) => {
     if (!values.length) return;
     const have = new Set(value.map(chipEmail));
-    onChange([...value, ...values.filter((v) => !have.has(chipEmail(v)))]);
+    const next: string[] = [];
+    for (const v of values) {
+      const key = chipEmail(v);
+      if (have.has(key)) continue;
+      have.add(key);
+      next.push(v);
+    }
+    if (next.length) onChange([...value, ...next]);
     setText("");
   };
   const commit = (raw: string) => add(toChips(raw).map((c) => c.value));

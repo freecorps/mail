@@ -64,11 +64,14 @@ function SignatureDialog({
   // A first signature starts from "Nome / Nome da caixa" (the plan's suggestion), not saved until the member saves.
   const suggestion = [me?.name ?? "", scope === DEFAULT ? "" : label(scope)].filter(Boolean).join("\n");
   const [text, setText] = useState<string | null>(null);
-  const value = text ?? current?.text ?? suggestion;
+  // Until the signatures are read, nothing shows and nothing saves: a save then would write the suggestion over a
+  // signature that exists.
+  const loading = list.value === undefined;
+  const value = loading ? "" : (text ?? current?.text ?? suggestion);
   const [busy, setBusy] = useState(false);
 
   const save = () => {
-    if (!value.trim()) return;
+    if (loading || !value.trim()) return;
     setBusy(true);
     setSig({ mailbox: scope === DEFAULT ? null : scope, text: value.trim() })
       .then(() => {
@@ -124,6 +127,8 @@ function SignatureDialog({
               value={value}
               maxLength={COMPOSER_LIMITS.signatureText}
               onChange={(e) => setText(e.target.value)}
+              disabled={loading}
+              aria-busy={loading || undefined}
               className="min-h-28 font-sans"
             />
           </div>
@@ -136,7 +141,7 @@ function SignatureDialog({
           ) : (
             <span />
           )}
-          <Button onClick={save} disabled={busy || !value.trim() || (current?.text === value && text === null)}>
+          <Button onClick={save} disabled={loading || busy || !value.trim() || (current?.text === value && text === null)}>
             {t("signature.save")}
           </Button>
         </DialogFooter>

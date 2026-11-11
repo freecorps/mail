@@ -8,9 +8,11 @@ import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ComposeDock } from "@/features/ComposeDock";
 import { RecipientInput } from "@/features/composer/RecipientInput";
-import { closeWindow, dockWindows, openWindow, type Restore } from "@/model/dock";
+import { closeWindow, dockWindows, minimizeWindow, openComposerDialog, openWindow, type Restore } from "@/model/dock";
+import { ComposerDialogs } from "@/features/composer/Dialogs";
 import { api } from "@/lib/api";
 import { useAutosave } from "@/model/drafts";
+import { useUploads } from "@/model/uploads";
 import { scheduledSends, undoSend } from "@/model/outbox";
 import { SignIn } from "@/features/SignIn";
 import { I18nProvider } from "@/i18n";
@@ -138,6 +140,66 @@ describe("compose window", () => {
     expect(dockWindows()).toHaveLength(4);
   });
 
+  it("a full dock changes nothing when one more window is asked for", () => {
+    for (let i = 0; i < 3; i++) openWindow({ kind: "compose" });
+    // Minimized windows stay minimized: a failed open has no side effect.
+    minimizeWindow(dockWindows().at(-1)!.key, true);
+    const before = dockWindows();
+    expect(openWindow({ kind: "compose" })).toBe(false);
+    expect(dockWindows()).toBe(before);
+  });
+
+  it("Send twice before the window goes schedules one message", () => {
+    const { wrapper } = setup();
+    act(() => void openWindow({ kind: "compose", restore }));
+    render(<Dock />, { wrapper });
+    const form = screen.getByRole("combobox", { name: "Para" }).closest("form")!;
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+    expect(scheduledSends()).toHaveLength(1);
+    for (const x of scheduledSends()) act(() => void undoSend(x.id));
+  });
+
+  it("a draft's Bcc is kept by the autosave though the field is hidden", async () => {
+    const { wrapper, client } = setup();
+    const { id } = await client.mutation(api.inbox.saveDraft, {
+      kind: "compose",
+      mailbox: "support",
+      to: ["ana@user.test"],
+      bcc: ["chefe@acme.test"],
+      subject: "Fatura",
+      text: "Segue.",
+    });
+    const draft = (await client.query(api.inbox.drafts, {})).find((d) => d._id === id)!;
+    act(() => void openWindow({ kind: "compose", draft }));
+    render(<Dock />, { wrapper });
+    fireEvent.change(screen.getByLabelText("Assunto"), { target: { value: "Fatura de março" } });
+    await waitFor(
+      async () => {
+        const d = (await client.query(api.inbox.drafts, {})).find((x) => x._id === id)!;
+        expect(d.subject).toBe("Fatura de março");
+        expect(d.bcc).toEqual(["chefe@acme.test"]);
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  it("pasted duplicates make one chip (the address in any case)", () => {
+    const { wrapper } = setup();
+    let chips: string[] = [];
+    function Field() {
+      const [value, setValue] = useState<string[]>(["bia@acme.test"]);
+      chips = value;
+      return <RecipientInput label="Para" value={value} onChange={setValue} contacts={[]} />;
+    }
+    render(<Field />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" });
+    fireEvent.paste(to, { clipboardData: { getData: () => "ana@user.test, ANA@user.test; Bia <BIA@acme.test>" } });
+    expect(chips).toEqual(["bia@acme.test", "ana@user.test"]);
+  });
+
   it("Enter in an empty To field does not send (after making a chip); ⌘Enter still does", () => {
     const { wrapper } = setup();
     act(() => void openWindow({ kind: "compose", mailbox: "support" }));
@@ -184,6 +246,7 @@ const restore: Restore = {
   to: ["ana@user.test"],
   cc: [],
   subject: "Fatura",
+  bcc: [],
   html: "<p>Segue a fatura.</p>",
   text: "Segue a fatura.",
   attachments: [],
@@ -224,6 +287,23 @@ describe("drafts", () => {
     expect((await client.query(api.inbox.drafts, {})).map((d) => d._id)).not.toContain(id);
   });
 
+  it("a save that fails is said (failed) and can be tried again; a good one clears it", async () => {
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useAutosave(), { wrapper });
+    // agent-1 is not a member of privacy: the server refuses.
+    act(() => {
+      result.current.update({ kind: "compose", mailbox: "privacy", to: [], cc: [], subject: "x", text: "y" });
+      result.current.flush();
+    });
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    act(() => {
+      result.current.update({ kind: "compose", mailbox: "support", to: [], cc: [], subject: "x", text: "y" });
+      result.current.retry();
+    });
+    await waitFor(() => expect(result.current.failed).toBe(false));
+    expect(result.current.id()).toBeTruthy();
+  });
+
   it("a save not started yet when the send happens is dropped (nothing to consume)", async () => {
     const { wrapper } = setup();
     const { result } = renderHook(() => useAutosave(), { wrapper });
@@ -243,5 +323,45 @@ describe("sign in", () => {
     expect(password().hasAttribute("minlength")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Criar uma conta" }));
     expect(password().minLength).toBe(8);
+  });
+});
+
+describe("uploads", () => {
+  it("removing a file makes room at once (the list it counts is never behind)", () => {
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useUploads(), { wrapper });
+    // Empty files fail at once (no upload), and still take a place in the list.
+    const empty = (n: number) => Array.from({ length: n }, (_, i) => new File([], `f${i}.txt`, { type: "text/plain" }));
+    act(() => result.current.add(empty(20), () => "too large", "too many"));
+    expect(result.current.items).toHaveLength(20);
+    act(() => {
+      result.current.remove(result.current.items[0]!.id);
+      result.current.add(empty(1), () => "too large", "too many");
+    });
+    expect(result.current.items).toHaveLength(20);
+    expect(result.current.items.at(-1)!.error).toBe("too large");
+  });
+});
+
+describe("signature dialog", () => {
+  afterEach(() => openComposerDialog(null));
+
+  it("while the signatures load, nothing shows and Save is off (a save would write the suggestion over one)", async () => {
+    const { wrapper, client } = setup();
+    await client.mutation(api.inbox.setSignature, { mailbox: null, text: "Bia — Acme" });
+    act(() => openComposerDialog({ kind: "signature", mailbox: null }));
+    render(
+      <TooltipProvider>
+        <ComposerDialogs mailboxes={boxes} />
+      </TooltipProvider>,
+      { wrapper },
+    );
+    const area = screen.getByLabelText("Texto da assinatura") as HTMLTextAreaElement;
+    const save = screen.getByRole("button", { name: "Salvar" }) as HTMLButtonElement;
+    expect(area.disabled).toBe(true);
+    expect(area.value).toBe("");
+    expect(save.disabled).toBe(true);
+    await waitFor(() => expect(area.value).toBe("Bia — Acme"));
+    expect(area.disabled).toBe(false);
   });
 });

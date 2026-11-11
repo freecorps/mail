@@ -22,6 +22,8 @@ export interface Restore {
   cc: string[];
   subject: string;
   html: string;
+  /** Kept as the draft had it, though the field is hidden until Ember sends `bcc` (ComposeDock `BCC_ENABLED`). */
+  bcc: string[];
   /** The body as text (what the send checks and sends; the editor does not report its initial content). */
   text: string;
   attachments: AttachmentArg[];
@@ -61,10 +63,8 @@ export function openWindow(seed: Seed, o: { always?: boolean } = {}): boolean {
     set(windows.map((w) => (w === same ? { ...w, minimized: false } : w)));
     return true;
   }
-  if (windows.length >= MAX_WINDOWS && !o.always) {
-    set(windows.map((w, i) => (i === windows.length - 1 ? { ...w, minimized: false } : w)));
-    return false;
-  }
+  // Full: nothing changes (the caller says so).
+  if (windows.length >= MAX_WINDOWS && !o.always) return false;
   set([...windows, { key: `w${++seq}`, seed, minimized: false }]);
   return true;
 }

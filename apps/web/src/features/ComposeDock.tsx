@@ -23,7 +23,7 @@ import {
   type Restore,
   type Seed,
 } from "@/model/dock";
-import { holdDraft, releaseDraft, useAutosave } from "@/model/drafts";
+import { holdForSend, useAutosave } from "@/model/drafts";
 import { forwardedFiles } from "@/model/forward";
 import { useMeName } from "@/model/me";
 import { schedule, undoSend } from "@/model/outbox";
@@ -31,7 +31,7 @@ import { chipOf, contactsFrom, type Contact } from "@/model/recipients";
 import { useUploads } from "@/model/uploads";
 import { LazyEditor, type RichEditorHandle } from "./editor/LazyEditor";
 import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
-import { AttachButton, AttachmentTiles, SavedRepliesButton, SignatureLine } from "./composer/parts";
+import { AttachButton, AttachmentTiles, DraftStatus, SavedRepliesButton, SignatureLine } from "./composer/parts";
 import { RecipientInput } from "./composer/RecipientInput";
 
 /**
@@ -78,7 +78,7 @@ export function ComposeDock({
 
 type Fields = { mailbox: string; to: string[]; cc: string[]; subject: string; html: string; text: string };
 
-function initial(seed: Seed, fallback: string): Fields & { draftId: string | null; signature: boolean } {
+function initial(seed: Seed, fallback: string): Fields & { draftId: string | null; signature: boolean; bcc: string[] } {
   const r = seed.restore;
   if (r)
     return {
@@ -90,6 +90,7 @@ function initial(seed: Seed, fallback: string): Fields & { draftId: string | nul
       text: r.text,
       draftId: r.draftId,
       signature: r.signature,
+      bcc: r.bcc,
     };
   const d = seed.draft;
   if (d)
@@ -102,6 +103,7 @@ function initial(seed: Seed, fallback: string): Fields & { draftId: string | nul
       text: d.text,
       draftId: d._id,
       signature: true,
+      bcc: d.bcc ?? [],
     };
   if (seed.kind === "forward")
     return {
@@ -113,8 +115,9 @@ function initial(seed: Seed, fallback: string): Fields & { draftId: string | nul
       text: seed.forward.text,
       draftId: null,
       signature: true,
+      bcc: [],
     };
-  return { mailbox: seed.mailbox ?? fallback, to: [], cc: [], subject: "", html: "", text: "", draftId: null, signature: true };
+  return { mailbox: seed.mailbox ?? fallback, to: [], cc: [], subject: "", html: "", text: "", draftId: null, signature: true, bcc: [] };
 }
 
 function ComposeWindow({
@@ -145,13 +148,15 @@ function ComposeWindow({
   const [fields, setFields] = useState<Fields>(start);
   const [empty, setEmpty] = useState(htmlIsEmpty(start.html));
   const [showCc, setShowCc] = useState(start.cc.length > 0);
-  const [bcc, setBcc] = useState<string[]>([]);
+  // Bcc stays what the draft (or the undone send) had, hidden or not: the autosave writes it back as it is.
+  const [bcc, setBcc] = useState<string[]>(start.bcc);
   const [signature, setSignature] = useState(start.signature);
   const [error, setError] = useState<{ message: string; field: "to" | "text" | null } | null>(null);
   const editor = useRef<RichEditorHandle>(null);
   const uploads = useUploads();
   const autosave = useAutosave(start.draftId);
   const armed = useRef(false);
+  const sending = useRef(false);
   const deleteDraft = useMutation(api.inbox.deleteDraft);
   const compose = useMutation(api.inbox.compose);
   const forward = useMutation(api.inbox.forward);
@@ -209,24 +214,25 @@ function ComposeWindow({
     if (!to.length) return setError({ message: t("compose.invalidTo"), field: "to" });
     if (empty || !fields.text.trim()) return setError({ message: t("compose.empty"), field: "text" });
     if (uploads.busy) return setError({ message: t("composer.waitUploads"), field: null });
+    // Once per window: a second click or ⌘Enter before the window goes would schedule the same message again. (An
+    // undone or failed send comes back in a new window, with its own.)
+    if (sending.current) return;
+    sending.current = true;
     setError(null);
     const files = ready;
-    // The draft the send consumes: the one known now, or the one a save already on its way creates. The send holds it
-    // (⌘K does not offer it meanwhile) until it is undone or fails.
-    const known = autosave.id();
-    if (known) holdDraft(known);
-    const draft = autosave.forget().then((id) => {
-      if (id) holdDraft(id);
-      return id;
-    });
+    // The draft the send consumes: the one known now, or the one a save already on its way creates. Held (⌘K does not
+    // offer it) until the send is confirmed, undone or fails.
+    const hold = holdForSend(autosave.id(), autosave.forget());
+    const draft = hold.draft;
     // An undone or failed send comes back in a window, even with three open (else its text would be lost).
     const reopen = () =>
       void draft.then((draftId) => {
-        if (draftId) releaseDraft(draftId);
+        hold.release();
         const restore: Restore = {
           mailbox: fields.mailbox,
           to: fields.to,
           cc: fields.cc,
+          bcc,
           subject: fields.subject,
           html: fields.html,
           text: fields.text,
@@ -253,11 +259,13 @@ function ComposeWindow({
             ? forward({ threadId: fwd.threadId, messageId: fwd.messageId, to: fields.to, ...extras, ...(draftId ? { draftId } : {}) })
             : compose({ mailbox: fields.mailbox, to: fields.to, ...extras, ...(draftId ? { draftId } : {}) }),
         )
-        .then((r) =>
+        .then((r) => {
+          // Confirmed: the server deleted the draft with the send, so the hold goes.
+          hold.release();
           toast.success(fwd ? t("forward.sent") : t("compose.sent"), {
             action: { label: `#${r.number}`, onClick: () => onOpenThread(r.threadId) },
-          }),
-        )
+          });
+        })
         .catch((e: unknown) => {
           reopen();
           toast.error(t("thread.failed", { message: e instanceof Error ? e.message : String(e) }));
@@ -449,7 +457,11 @@ function ComposeWindow({
           <Button type="submit" size="sm" disabled={uploads.busy}>
             {t("compose.send")}
           </Button>
-          <span className="hidden px-1.5 text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
+          {autosave.failed ? (
+            <DraftStatus failed onRetry={autosave.retry} />
+          ) : (
+            <span className="hidden px-1.5 text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
+          )}
           <span className="flex-1" />
           {fields.mailbox && (
             <SavedRepliesButton
