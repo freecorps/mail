@@ -164,6 +164,8 @@ export const api = {
     markUnread: q<"mutation", { threadId: string }, boolean>("inbox:markUnread"),
     setStatus: q<"mutation", { threadId: string; status: ThreadStatus }, ThreadStatus>("inbox:setStatus"),
     assign: q<"mutation", { threadId: string; userId: string | null }, string | null>("inbox:assign"),
+    /** For good (messages, notes, files): admins in a shared mailbox, the owner in a personal one. */
+    deleteThread: q<"mutation", { threadId: string }, { deleted: boolean; canceled?: number }>("inbox:deleteThread"),
     compose: q<
       "mutation",
       { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] },

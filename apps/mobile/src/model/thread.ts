@@ -75,6 +75,7 @@ export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?
   const assignTo = useMutation(api.inbox.assign);
   const replyM = useMutation(api.inbox.reply);
   const noteM = useMutation(api.inbox.note);
+  const deleteM = useMutation(api.inbox.deleteThread);
 
   const thread: Thread | null = s.value?.thread ?? null;
   const urls = urlsSnap.value;
@@ -98,6 +99,10 @@ export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?
     swallow(setStatus({ threadId, status: thread.status === "closed" ? "open" : "closed" }));
   }, [thread, threadId, setStatus]);
   const assign = useCallback((userId: string | null) => swallow(assignTo({ threadId, userId })), [threadId, assignTo]);
+  /** The header's status menu. */
+  const changeStatus = useCallback((status: ThreadStatus) => swallow(setStatus({ threadId, status })), [threadId, setStatus]);
+  /** Deletes the conversation for good (the screen closes first). */
+  const remove = useCallback(() => swallow(deleteM({ threadId })), [threadId, deleteM]);
   /** Puts threads back to a status (undo of an archive). */
   const restoreStatus = useCallback((id: string, status: ThreadStatus) => swallow(setStatus({ threadId: id, status })), [setStatus]);
   /** Resolves when the server confirmed (the optimistic message shows right away, also offline). */
@@ -111,6 +116,8 @@ export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?
   return {
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,
+    /** The server (or the optimistic delete) said there is no such conversation: gone, not failed. */
+    gone: s.status === "success" && s.value === null,
     source: (s.source ?? "server") as Source,
     thread,
     items,
@@ -120,6 +127,8 @@ export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?
     toggleRead,
     toggleArchive,
     restoreStatus,
+    changeStatus,
+    remove,
     assign,
     reply,
     note,

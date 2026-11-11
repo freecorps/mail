@@ -242,8 +242,48 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         if (!value || qa.mailbox !== args.mailbox || (qa.status !== undefined && qa.status !== "waiting")) continue;
         store.setQuery<any>("inbox:threads", qa, { ...value, page: [thread, ...value.page] });
       }
+      // The cross-mailbox views it belongs to (all, waiting) show it on top too, and their counts grow with it.
+      for (const { args: va, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
+        if (!value || !viewKeeps(va.view, va.status)(thread)) continue;
+        store.setQuery<any>("inbox:view", va, { ...value, page: [thread, ...value.page] });
+      }
+      const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
+      if (counts) {
+        const next = { ...counts };
+        for (const view of INBOX_VIEWS) if (viewKeeps(view, undefined)(thread)) next[view] = { ...counts[view], threads: counts[view].threads + 1 };
+        store.setQuery<any>("inbox:views", {}, next);
+      }
       sentNow(store, thread, at);
     },
+  };
+  // A deleted conversation leaves every loaded list at once (the conversation screen has already closed).
+  updates["inbox:deleteThread"] = (store, { threadId }: { threadId: string }) => {
+    const found = patchLoaded(store, threadId, (t) => t);
+    for (const name of ["inbox:threads", "inbox:view", "inbox:sent"] as const) {
+      for (const { args, value } of store.getAllQueries<any>(name) as Array<{ args: unknown; value: { page: Thread[] } | undefined }>) {
+        if (!value || !value.page.some((t) => t._id === threadId)) continue;
+        store.setQuery<any>(name, args as never, { ...value, page: value.page.filter((t) => t._id !== threadId) });
+      }
+    }
+    // Gone everywhere at once: search hits of it, and the conversation itself (its screen shows "not found").
+    for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: unknown; value: Array<{ threadId: string }> | undefined }>) {
+      if (value?.some((h) => h.threadId === threadId)) store.setQuery<any>("inbox:search", args as never, value.filter((h) => h.threadId !== threadId));
+    }
+    if (store.getQuery<any>("inbox:thread", { threadId } as never) !== undefined) store.setQuery<any>("inbox:thread", { threadId } as never, null);
+    dropped.delete(threadId);
+    if (found) {
+      const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
+      if (counts) {
+        const next = { ...counts };
+        for (const view of INBOX_VIEWS) {
+          if (!viewKeeps(view, undefined)(found.before)) continue;
+          const c = counts[view];
+          next[view] = { ...c, threads: Math.max(0, c.threads - 1), unread: Math.max(0, c.unread - found.before.unreadCount) };
+        }
+        store.setQuery<any>("inbox:views", {}, next);
+      }
+      if (found.before.unreadCount) adjustUnread(store, found.before.mailbox, -found.before.unreadCount);
+    }
   };
   // A forward is a new conversation from the forwarded thread's mailbox: it shows at the top as a compose does.
   updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string }, rec) => {

@@ -68,3 +68,25 @@ export interface LabeledPickerProps<T extends string | number> {
   options: Array<{ value: T; label: string }>;
   onChange(v: T): void;
 }
+
+export interface MenuItem {
+  key: string;
+  label: string;
+  icon?: IconSpec;
+  /** A choice in a set (status, assignee): shows the platform's checkmark when true. */
+  checked?: boolean;
+  destructive?: boolean;
+  disabled?: boolean;
+  onPress(): void;
+}
+
+export interface MenuButtonProps {
+  /** Visible text of a chip; the spoken name of an icon button. */
+  label: string;
+  icon?: IconSpec;
+  /** `chip`: a small tinted capsule with a chevron (status, assignee); `icon`: a bare glyph (a message's ⋯). */
+  variant?: "chip" | "icon";
+  items: MenuItem[];
+  /** Spoken name when it differs from `label` ("Status: Aberta"). */
+  accessibilityLabel?: string;
+}

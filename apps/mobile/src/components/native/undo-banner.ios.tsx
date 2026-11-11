@@ -27,26 +27,28 @@ export function UndoBanner({ reduced }: UndoBannerProps) {
         key={entry.id}
         entering={enter}
         exiting={FadeOut.duration(150)}
-        style={[styles.capsule, { backgroundColor: c.surface, shadowColor: "#000" }]}
+        style={[styles.capsule, { backgroundColor: c.surface, shadowColor: "#000" }, !entry.undo && styles.notice]}
         accessibilityLiveRegion="polite"
       >
         <ThemedText variant="subheadline" numberOfLines={1} style={styles.text}>
           {entry.message}
         </ThemedText>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={t("undo.action")}
-          hitSlop={spacing.sm}
-          onPress={() => {
-            haptics.light();
-            undoStore.undo();
-          }}
-          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
-        >
-          <ThemedText variant="subheadline" tone="tint" emphasized>
-            {t("undo.action")}
-          </ThemedText>
-        </Pressable>
+        {entry.undo ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("undo.action")}
+            hitSlop={spacing.sm}
+            onPress={() => {
+              haptics.light();
+              undoStore.undo();
+            }}
+            style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+          >
+            <ThemedText variant="subheadline" tone="tint" emphasized>
+              {t("undo.action")}
+            </ThemedText>
+          </Pressable>
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -68,6 +70,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
   },
   text: { flexShrink: 1 },
+  notice: { paddingRight: spacing.lg },
   action: { minHeight: minTouch, justifyContent: "center", paddingHorizontal: spacing.sm },
   pressed: { opacity: 0.5 },
 });

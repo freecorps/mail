@@ -4,6 +4,7 @@ import { getCalendars, getLocales } from "expo-localization";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { pickLocale, type Locale } from "./i18n";
 import { DEFAULT_LIST_PREFS, parseListPrefs, type ListPrefs } from "./model/list-actions";
+import { parseSenders, senderKey } from "./model/thread-view";
 
 export type LanguagePref = "system" | Locale;
 const KEY = "ember-mail:language";
@@ -82,4 +83,43 @@ export function setListPrefs(patch: Partial<ListPrefs>) {
   AsyncStorage.getItem(LIST_KEY)
     .then((raw) => AsyncStorage.setItem(LIST_KEY, JSON.stringify({ ...parseListPrefs(raw), ...listEdits })))
     .catch(() => {});
+}
+
+// Remote images: the senders whose images load without asking ("Sempre deste remetente"). Per device, addresses only.
+const IMAGES_KEY = "ember-mail:image-senders";
+let imageSenders: ReadonlySet<string> = new Set();
+let imagesLoaded = false;
+const imageListeners = new Set<() => void>();
+const emitImages = () => imageListeners.forEach((l) => l());
+
+const subscribeImages = (l: () => void) => {
+  if (!imagesLoaded) {
+    imagesLoaded = true;
+    AsyncStorage.getItem(IMAGES_KEY)
+      .then((raw) => {
+        const stored = parseSenders(raw);
+        const merged = new Set([...stored, ...imageSenders]);
+        // A sender remembered before this read finished was written over the stored list: write the union back.
+        if (merged.size !== stored.size) AsyncStorage.setItem(IMAGES_KEY, JSON.stringify([...merged])).catch(() => {});
+        imageSenders = merged;
+        emitImages();
+      })
+      .catch(() => {});
+  }
+  imageListeners.add(l);
+  return () => void imageListeners.delete(l);
+};
+const getImages = () => imageSenders;
+
+export function useImageSenders(): ReadonlySet<string> {
+  return useSyncExternalStore(subscribeImages, getImages, getImages);
+}
+
+/** Remembers a sender: their remote images load by themselves from now on (on this device). */
+export function allowImagesFrom(email: string) {
+  const key = senderKey(email);
+  if (!key.includes("@") || imageSenders.has(key)) return;
+  imageSenders = new Set([...imageSenders, key]);
+  emitImages();
+  AsyncStorage.setItem(IMAGES_KEY, JSON.stringify([...imageSenders])).catch(() => {});
 }

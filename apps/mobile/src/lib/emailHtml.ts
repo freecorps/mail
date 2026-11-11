@@ -29,7 +29,7 @@ export function buildEmailDocument(html: string, o: EmailDocumentOptions = {}): 
 <meta name="color-scheme" content="light">
 <style>
 html,body{margin:0;padding:0;background:${paper.background};color:${paper.text};-webkit-text-size-adjust:100%;word-wrap:break-word;overflow-wrap:anywhere}
-body{font:-apple-system-body;font-family:-apple-system,system-ui,Roboto,"Helvetica Neue",sans-serif;font-size:${size}px;line-height:1.45;padding:12px 14px}
+body{font:-apple-system-body;font-family:-apple-system,system-ui,Roboto,"Helvetica Neue",sans-serif;font-size:${size}px;line-height:1.45;padding:0 16px 12px}
 img{max-width:100%!important;height:auto!important}
 table{max-width:100%!important}
 pre,code{white-space:pre-wrap}

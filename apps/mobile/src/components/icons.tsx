@@ -77,6 +77,22 @@ export const Icons = {
   unselected: icon("circle", "radio_button_unchecked"),
   readUnread: icon("envelope", "mark_email_read"),
   more: icon("ellipsis.circle", "more_vert"),
+  moreBare: icon("ellipsis", "more_vert"),
+  dropDown: icon("chevron.down", "arrow_drop_down"),
+  previous: icon("chevron.up", "keyboard_arrow_up"),
+  next: icon("chevron.down", "keyboard_arrow_down"),
+  reply: icon("arrowshape.turn.up.left", "reply"),
+  replyAll: icon("arrowshape.turn.up.left.2", "reply_all"),
+  trash: icon("trash", "delete"),
+  link: icon("link", "link"),
+  copy: icon("doc.on.doc", "content_copy"),
+  sent: icon("arrow.up.right", "north_east"),
+  expand: icon("arrow.up.and.down", "unfold_more"),
+  status: icon("circle.dashed", "radio_button_unchecked"),
+  statusOpen: icon("circle", "radio_button_unchecked"),
+  statusWaiting: icon("clock", "schedule"),
+  statusArchived: icon("archivebox", "archive"),
+  statusSpamMenu: icon("xmark.bin", "report"),
 } satisfies Record<string, IconSpec>;
 
 /** A decorative glyph (hidden from screen readers; the surrounding control carries the label). */

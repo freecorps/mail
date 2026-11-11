@@ -19,9 +19,12 @@ const MINI = 16;
 
 const CHECK = 22;
 
-/** Where the text column starts: separators are inset to it (Mail.app). Mirrors `styles.check` and `styles.lead`. */
+/**
+ * Where the text column starts: separators are inset to it (Mail.app). Mirrors `styles.lead`. In Edit mode the
+ * checkmark takes the unread dot's place (both would crowd the leading edge), so the column moves by the difference.
+ */
 export function textInset(avatars: boolean, editing = false): number {
-  return (editing ? spacing.md + CHECK : 0) + spacing.sm + DOT + (avatars ? spacing.xs + AVATAR : 0) + spacing.md;
+  return (editing ? spacing.md + CHECK : spacing.sm + DOT) + (avatars ? spacing.xs + AVATAR : 0) + spacing.md;
 }
 
 export interface ThreadRowContentProps {
@@ -41,13 +44,14 @@ export function ThreadRowContent({ row, when, avatars, previewLines, showAssigne
   const status = row.status === "waiting" ? Icons.waiting : row.status === "closed" ? Icons.statusClosed : row.status === "spam" ? Icons.statusSpam : null;
   return (
     <View style={styles.row}>
-      {editing ? (
-        <View style={styles.check}>
-          <Symbol icon={selected ? Icons.selected : Icons.unselected} size={CHECK} color={selected ? c.tint : c.tertiaryLabel} />
-        </View>
-      ) : null}
-      <View style={styles.lead}>
-        <UnreadDot visible={row.unread} />
+      <View style={[styles.lead, editing && styles.leadEditing]}>
+        {editing ? (
+          <View style={styles.check}>
+            <Symbol icon={selected ? Icons.selected : Icons.unselected} size={CHECK} color={selected ? c.tint : c.tertiaryLabel} />
+          </View>
+        ) : (
+          <UnreadDot visible={row.unread} />
+        )}
         {avatars ? <Avatar name={row.title} size={AVATAR} /> : null}
       </View>
       <View style={styles.body}>
@@ -141,7 +145,9 @@ export function SkeletonRows({ count = 8, avatars, previewLines }: { count?: num
 
 const styles = StyleSheet.create({
   row: { flexDirection: "row", paddingVertical: spacing.md, paddingRight: screenEdge },
-  check: { justifyContent: "center", paddingLeft: spacing.md, alignSelf: "stretch" },
+  check: { width: CHECK, alignItems: "center", justifyContent: "center" },
+  // With the checkmark, the leading column centers on the row like Mail's selection circles.
+  leadEditing: { alignSelf: "center", paddingTop: 0, paddingLeft: spacing.md },
   lead: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingLeft: spacing.sm, paddingRight: spacing.md, alignSelf: "flex-start", paddingTop: spacing.xxs },
   body: { flex: 1, gap: spacing.xxs, minWidth: 0 },
   line: { flexDirection: "row", alignItems: "center", gap: spacing.sm },

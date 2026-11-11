@@ -2,9 +2,10 @@
 export { EmptyState } from "./empty-state";
 export { IconButton } from "./icon-button";
 export { LabeledPicker } from "./labeled-picker";
+export { MenuButton } from "./menu-button";
 export { ListActions, ListFilters } from "./list-chrome";
 export { NativeIcon } from "./native-icon";
 export { RowMenu } from "./row-menu";
 export { Segmented } from "./segmented";
 export { UndoBanner } from "./undo-banner";
-export type { EmptyStateProps, IconButtonProps, LabeledPickerProps, ListActionsProps, ListFilterProps, RowMenuAction, RowMenuProps, SegmentedProps, UndoBannerProps } from "./types";
+export type { EmptyStateProps, IconButtonProps, LabeledPickerProps, ListActionsProps, MenuButtonProps, MenuItem, ListFilterProps, RowMenuAction, RowMenuProps, SegmentedProps, UndoBannerProps } from "./types";

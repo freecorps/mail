@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { Linking, PixelRatio, StyleSheet, View } from "react-native";
 import { WebView, type WebViewMessageEvent, type WebViewNavigation } from "react-native-webview";
 import { buildEmailDocument, HEIGHT_PROBE, isExternalLink, isInitialLoad } from "../lib/emailHtml";
-import { corner, paper, radius, type } from "../theme";
+import { paper, type } from "../theme";
 
 export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; loadImages: boolean; cid: Record<string, string>; label: string }) {
   const [height, setHeight] = useState(80);
@@ -65,6 +65,7 @@ export function EmailHtmlView({ html, loadImages, cid, label }: { html: string; 
 const NO_DATA_DETECTORS: ["none"] = ["none"];
 
 const styles = StyleSheet.create({
-  box: { overflow: "hidden", ...corner(radius.sm), backgroundColor: paper.background },
+  // Full width, square: the message is a sheet of paper on the page, not a card.
+  box: { overflow: "hidden", backgroundColor: paper.background },
   web: { flex: 1, backgroundColor: "transparent" },
 });
