@@ -25,11 +25,11 @@ export function NotMember({ userId, error }: { userId: string | null; error: str
       <div className="w-full max-w-md space-y-6">
         <Logo className="size-9" />
         <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("notMember.title")}</h1>
+          <h1 className="text-xl font-semibold">{t("notMember.title")}</h1>
           <p className="text-sm leading-relaxed text-muted-foreground">{t("notMember.body")}</p>
         </div>
         <div className="flex items-center gap-2 rounded-lg border bg-card p-2 pl-3">
-          <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{id}</code>
+          <code className="min-w-0 flex-1 truncate font-mono text-ui">{id}</code>
           <Button
             size="sm"
             variant="secondary"

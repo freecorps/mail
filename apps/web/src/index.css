@@ -4,13 +4,27 @@
 @import "@fontsource-variable/geist-mono";
 
 @custom-variant dark (&:is(.dark *));
+/* `compact:` styles apply under the compact density (account menu → Density; `data-density` on <html>). */
+@custom-variant compact (&:where([data-density="compact"] *));
 
 /*
- * One system: warm stone neutrals, one accent (ember orange, used for unread, focus and the primary action),
- * status tints, a 4px spacing grid, radius scale from --radius. Light and dark share the same roles.
+ * One system ("quiet tool"): warm stone neutrals, one accent (ember orange: unread, focus, the primary action), status
+ * tints, a 4px spacing grid. Light and dark share the same roles. Everything below is a token; components use the
+ * Tailwind utilities generated from @theme (text-ui, shadow-raised, rounded-lg, py-(--row-y), ease-out, ...).
+ *
+ *   Type      xs 12, ui 13, sm 14, base 16, lg 20, xl 24; each with its line height and tracking (Geist runs
+ *             wide at small sizes and tight at large ones). No other sizes exist: the default scale is cleared.
+ *   Radius    controls 8 (rounded-md: buttons, inputs, rows, menu items), panes 12 (rounded-lg: cards, menus,
+ *             dialogs, the composer; a menu is its item radius plus its 4px padding), pills full (rounded-full).
+ *             rounded-sm (4) is for glyph-sized bits only (keys, checkboxes).
+ *   Elevation two levels, shadows tinted with the stone hue: raised (menus, popovers, tooltips, toasts) and overlay
+ *             (dialogs, the command palette). Panes sit flat and are separated by hairlines.
+ *   Density   comfortable (default) / compact: row padding and item height.
+ *   Motion    ease-out for enter/exit, ease-in-out for on-screen movement, durations by kind; keyboard actions are
+ *             never animated, pointer feedback stays under 300ms, reduced motion keeps fades and drops movement.
  */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
   --background: oklch(0.985 0.002 75);
   --foreground: oklch(0.2 0.01 60);
   --card: oklch(1 0 0);
@@ -39,9 +53,32 @@
   --status-waiting: oklch(0.62 0.13 75);
   --status-closed: oklch(0.55 0.01 60);
   --status-spam: oklch(0.56 0.2 27);
+  --scrim: oklch(0.2 0.015 55 / 0.32);
 
-  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Elevation: stone-tinted shadows (never pure black on a warm page). */
+  --elevation-hairline: 0 1px 2px 0 oklch(0.35 0.03 55 / 0.05);
+  --elevation-raised:
+    0 0 0 1px oklch(0.35 0.03 55 / 0.04), 0 2px 4px -1px oklch(0.35 0.03 55 / 0.06), 0 8px 20px -4px oklch(0.35 0.03 55 / 0.1);
+  --elevation-overlay:
+    0 0 0 1px oklch(0.35 0.03 55 / 0.05), 0 4px 8px -2px oklch(0.35 0.03 55 / 0.06), 0 24px 56px -12px oklch(0.35 0.03 55 / 0.24);
+
+  /* Density (comfortable). */
+  --row-y: 0.625rem; /* thread rows */
+  --row-x: 0.75rem;
+  --item-h: 2rem; /* sidebar and menu items */
+
+  /* Motion. */
+  --motion-press: 140ms; /* button/row press feedback */
+  --motion-hover: 120ms; /* hover color */
+  --motion-popover: 150ms; /* tooltips, menus, selects */
+  --motion-modal: 200ms; /* dialogs */
+  --motion-exit: 100ms; /* anything leaving: faster than it came */
+}
+
+:root[data-density="compact"] {
+  --row-y: 0.375rem;
+  --row-x: 0.625rem;
+  --item-h: 1.75rem;
 }
 
 .dark {
@@ -73,15 +110,56 @@
   --status-waiting: oklch(0.78 0.13 80);
   --status-closed: oklch(0.65 0.01 70);
   --status-spam: oklch(0.68 0.18 25);
+  --scrim: oklch(0.06 0.01 50 / 0.6);
+
+  /* On a dark page a shadow alone disappears: a faint light edge on top carries the elevation. */
+  --elevation-hairline: 0 1px 2px 0 oklch(0.08 0.01 50 / 0.4);
+  --elevation-raised: inset 0 1px 0 oklch(1 0 0 / 0.04), 0 0 0 1px oklch(0.08 0.01 50 / 0.5), 0 8px 24px -4px oklch(0.08 0.01 50 / 0.55);
+  --elevation-overlay: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 0 0 1px oklch(0.08 0.01 50 / 0.6), 0 24px 64px -12px oklch(0.06 0.01 50 / 0.75);
+}
+
+/* The type scale: only these sizes exist (`--text-*: initial` drops Tailwind's defaults). */
+@theme {
+  --text-*: initial;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-xs--letter-spacing: 0.01em;
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.125rem;
+  --text-ui--letter-spacing: 0.002em;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-sm--letter-spacing: -0.003em;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-base--letter-spacing: -0.011em;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.75rem;
+  --text-lg--letter-spacing: -0.017em;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 2rem;
+  --text-xl--letter-spacing: -0.021em;
+
+  --radius-*: initial;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+
+  --ease-*: initial;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --default-transition-duration: 150ms;
+  --default-transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @theme inline {
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, monospace;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --shadow-*: initial;
+  --shadow-xs: var(--elevation-hairline);
+  --shadow-raised: var(--elevation-raised);
+  --shadow-overlay: var(--elevation-overlay);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -110,6 +188,7 @@
   --color-status-waiting: var(--status-waiting);
   --color-status-closed: var(--status-closed);
   --color-status-spam: var(--status-spam);
+  --color-scrim: var(--scrim);
 }
 
 @layer base {
@@ -126,6 +205,10 @@
     font-feature-settings: "ss01", "cv11";
     text-rendering: optimizeLegibility;
   }
+  /* One stroke for every lucide icon (CSS beats the presentation attribute). */
+  svg.lucide {
+    stroke-width: 1.75;
+  }
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
@@ -139,20 +222,31 @@
 @layer components {
   .pressable {
     transition:
-      transform 140ms var(--ease-out),
-      background-color 140ms ease,
-      color 140ms ease;
+      transform var(--motion-press) var(--ease-out),
+      background-color var(--motion-hover) ease,
+      color var(--motion-hover) ease;
   }
   .pressable:active:not(:disabled) {
     transform: scale(0.97);
   }
 }
 
+/* Reduced motion: fewer and gentler, not none. Fades stay (they explain what appeared); scale, slide and press
+   movement go. The enter/exit variables are tw-animate-css's. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    --tw-enter-scale: 1 !important;
+    --tw-exit-scale: 1 !important;
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    scroll-behavior: auto !important;
+  }
+  .pressable:active,
+  [data-slot="button"]:active {
+    transform: none !important;
   }
 }

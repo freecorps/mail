@@ -70,7 +70,7 @@ export function Overview(p: { server: ServerInfo | null; serverError: string | n
                   className="pressable block h-full w-full rounded-lg border bg-card p-4 text-left hover:border-foreground/20"
                 >
                   <span className="block text-xs text-muted-foreground">{x.label}</span>
-                  <span className="mt-1 block text-2xl font-semibold tracking-tight tabular-nums">{nf.format(x.value)}</span>
+                  <span className="mt-1 block text-xl font-semibold tabular-nums">{nf.format(x.value)}</span>
                   {x.sub && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{x.sub}</span>}
                 </button>
               </li>

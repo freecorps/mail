@@ -156,7 +156,7 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
 | Tarefa | Status |
 |---|---|
 | M3 lista mobile | todo |
-| W1 fundação web | todo |
+| W1 fundação web | review (#34) |
 | W2 shell web | todo |
 | W3 sidebar + ⌘K | todo |
 

@@ -157,7 +157,7 @@ export function ThreadView({
     <Pane onBack={onBack}>
       <header className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b px-4 py-3.5 sm:px-6">
         <div className="min-w-0 flex-1">
-          <h2 className="text-lg leading-snug font-semibold tracking-tight text-balance">{th.subject}</h2>
+          <h2 className="text-base font-semibold text-balance sm:text-lg">{th.subject}</h2>
           <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             {th.number > 0 && <span className="font-mono tabular-nums">#{th.number}</span>}
             <span>{contactOf(th)}</span>
@@ -206,7 +206,7 @@ export function ThreadView({
                 <DropdownMenuLabel className="text-xs text-muted-foreground">{t("assign.title")}</DropdownMenuLabel>
                 {members.members.map((m) => (
                   <DropdownMenuItem key={m.userId} onSelect={() => vm.assign(m.userId)}>
-                    <Avatar name={m.name} seed={m.userId} className="size-5 text-[9px]" />
+                    <Avatar name={m.name} seed={m.userId} className="size-5" />
                     <span className="flex-1 truncate">{m.name}</span>
                     {th.assignee === m.userId && <Check aria-label="✓" />}
                   </DropdownMenuItem>
@@ -319,7 +319,7 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
 
   if (m.direction === "note") {
     return (
-      <article className="rounded-xl border border-note-border bg-note px-4 py-3 text-note-foreground" aria-label={t("thread.note")}>
+      <article className="rounded-lg border border-note-border bg-note px-4 py-3 text-note-foreground" aria-label={t("thread.note")}>
         <header className="mb-1.5 flex items-center gap-2 text-xs">
           <StickyNote className="size-3.5" aria-hidden="true" />
           <span className="font-medium">{t("thread.note")}</span>
@@ -335,7 +335,7 @@ function MessageCard({ item, urls, onForward }: { item: MessageItem; urls: Recor
   return (
     <article
       className={cn(
-        "rounded-xl border bg-card",
+        "rounded-lg border bg-card",
         outbound && "border-primary/20 bg-primary/[0.035] dark:bg-primary/[0.06]",
         item.pending && "opacity-75",
       )}
@@ -406,7 +406,7 @@ function DeliveryMarker({ message }: { message: Message }) {
   const label = (
     <span
       className={cn(
-        "inline-flex items-center gap-1 text-[11px]",
+        "inline-flex items-center gap-1 text-xs",
         bad ? "text-destructive" : state === "delivered" ? "text-primary" : "text-muted-foreground",
       )}
       data-delivery={state}
@@ -464,8 +464,8 @@ function Attachments({ files, urls }: { files: Attachment[]; urls: Record<string
                 <FileText className="size-4" aria-hidden="true" />
               </span>
               <span className="min-w-0">
-                <span className="block max-w-48 truncate text-[13px] font-medium">{a.filename}</span>
-                <span className="block text-[11px] text-muted-foreground">{fileSize(a.size, locale) || a.contentType}</span>
+                <span className="block max-w-48 truncate text-ui font-medium">{a.filename}</span>
+                <span className="block text-xs text-muted-foreground">{fileSize(a.size, locale) || a.contentType}</span>
               </span>
               {url && <Download className="size-4 text-muted-foreground" aria-hidden="true" />}
             </>

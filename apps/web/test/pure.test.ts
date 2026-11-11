@@ -22,7 +22,8 @@ import {
 import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
 import { formatWhen, parseRecipients } from "@/lib/format";
 import { inboxOptimisticUpdates, isOptimisticId } from "@/lib/optimistic";
-import { resolveTheme } from "@/lib/prefs";
+import { parsePrefs, resolveTheme } from "@/lib/prefs";
+import { cn } from "@/lib/utils";
 import { checkCompose, composeErrorField } from "@/model/compose";
 import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
 import { formatRoute, parseRoute } from "@/model/route";
@@ -224,6 +225,20 @@ describe("theme", () => {
     expect(resolveTheme("system", true)).toBe("dark");
     expect(resolveTheme("system", false)).toBe("light");
     expect(resolveTheme("light", true)).toBe("light");
+  });
+
+  it("parses stored prefs field by field, with defaults for anything unknown", () => {
+    expect(parsePrefs(null)).toEqual({ theme: "system", locale: null, density: "comfortable" });
+    expect(parsePrefs({ theme: "dark", locale: "en", density: "compact" })).toEqual({ theme: "dark", locale: "en", density: "compact" });
+    expect(parsePrefs({ theme: "neon", locale: "fr", density: 3 })).toEqual({ theme: "system", locale: null, density: "comfortable" });
+  });
+});
+
+describe("cn", () => {
+  it("knows the theme's own sizes and shadows", () => {
+    expect(cn("text-ui", "text-foreground")).toBe("text-ui text-foreground");
+    expect(cn("text-sm", "text-ui")).toBe("text-ui");
+    expect(cn("shadow-raised", "shadow-overlay")).toBe("shadow-overlay");
   });
 });
 

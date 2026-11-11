@@ -1,4 +1,4 @@
-import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, Settings, Sun } from "lucide-react";
+import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, Rows2, Rows3, Settings, Sun } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import {
   DropdownMenu,
@@ -13,7 +13,7 @@ import {
 import { useI18n } from "@/i18n/context";
 import type { Me } from "@/lib/api";
 import { authClient } from "@/lib/auth";
-import { usePrefs, type ThemePref } from "@/lib/prefs";
+import { usePrefs, type Density, type ThemePref } from "@/lib/prefs";
 import type { Locale } from "@/i18n/strings";
 
 export function AccountMenu({
@@ -62,6 +62,18 @@ export function AccountMenu({
           <DropdownMenuRadioItem value="dark">
             <Moon aria-hidden="true" />
             {t("account.theme.dark")}
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-muted-foreground">{t("account.density")}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={prefs.density} onValueChange={(v) => prefs.setDensity(v as Density)}>
+          <DropdownMenuRadioItem value="comfortable">
+            <Rows2 aria-hidden="true" />
+            {t("account.density.comfortable")}
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="compact">
+            <Rows3 aria-hidden="true" />
+            {t("account.density.compact")}
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />

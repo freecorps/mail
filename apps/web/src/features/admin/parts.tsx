@@ -25,7 +25,7 @@ export function SectionHeader(p: { title: string; intro?: string; actions?: Reac
   return (
     <header className="flex flex-wrap items-start justify-between gap-3 pb-5">
       <div className="min-w-0 max-w-prose">
-        <h2 className="text-lg font-semibold tracking-tight text-foreground">{p.title}</h2>
+        <h2 className="text-lg font-semibold text-foreground">{p.title}</h2>
         {p.intro && <p className="mt-1 text-sm text-pretty text-muted-foreground">{p.intro}</p>}
       </div>
       {p.actions && <div className="flex shrink-0 items-center gap-2">{p.actions}</div>}
@@ -46,7 +46,7 @@ export function Pill({ tone = "muted", children, className }: { tone?: Tone; chi
   return (
     <span
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium whitespace-nowrap",
         TONE[tone],
         className,
       )}

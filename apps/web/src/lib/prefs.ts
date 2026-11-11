@@ -1,21 +1,30 @@
-// Per-browser preferences (theme, language): localStorage, read defensively (private windows may throw).
+// Per-browser preferences (theme, language, density): localStorage, read defensively (private windows may throw).
+// Only how the app looks lives here, never mail content.
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { pickLocale, type Locale } from "@/i18n/strings";
 
 export type ThemePref = "system" | "light" | "dark";
-type Prefs = { theme: ThemePref; locale: Locale | null };
+export type Density = "comfortable" | "compact";
+export type Prefs = { theme: ThemePref; locale: Locale | null; density: Density };
 
 const KEY = "ember-mail:prefs";
 const listeners = new Set<() => void>();
 
+/** Stored JSON → prefs, every field validated (anything unknown falls back to its default). */
+export function parsePrefs(raw: unknown): Prefs {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    theme: r.theme === "light" || r.theme === "dark" ? r.theme : "system",
+    locale: r.locale === "en" || r.locale === "pt-BR" ? r.locale : null,
+    density: r.density === "compact" ? "compact" : "comfortable",
+  };
+}
+
 function read(): Prefs {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Partial<Prefs>;
-    const theme = raw.theme === "light" || raw.theme === "dark" ? raw.theme : "system";
-    const locale = raw.locale === "en" || raw.locale === "pt-BR" ? raw.locale : null;
-    return { theme, locale };
+    return parsePrefs(JSON.parse(localStorage.getItem(KEY) ?? "{}"));
   } catch {
-    return { theme: "system", locale: null };
+    return parsePrefs({});
   }
 }
 
@@ -65,7 +74,11 @@ export function usePrefs() {
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
+  useEffect(() => {
+    document.documentElement.dataset.density = prefs.density;
+  }, [prefs.density]);
   const setTheme = useCallback((t: ThemePref) => write({ ...current, theme: t }), []);
   const setLocale = useCallback((l: Locale) => write({ ...current, locale: l }), []);
-  return { themePref: prefs.theme, theme, locale, setTheme, setLocale };
+  const setDensity = useCallback((d: Density) => write({ ...current, density: d }), []);
+  return { themePref: prefs.theme, theme, locale, density: prefs.density, setTheme, setLocale, setDensity };
 }

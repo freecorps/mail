@@ -142,8 +142,8 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const title = current?.displayName ?? mailbox ?? t("mailboxes.title");
   const picker = (
     <DropdownMenu>
-      <h1 className="hidden truncate text-base font-semibold tracking-tight md:block">{title}</h1>
-      <DropdownMenuTrigger className="flex items-center gap-1 text-base font-semibold tracking-tight md:hidden">
+      <h1 className="hidden truncate text-base font-semibold md:block">{title}</h1>
+      <DropdownMenuTrigger className="flex items-center gap-1 text-base font-semibold md:hidden">
         {title}
         <ChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
@@ -247,7 +247,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       </div>
       {!route.thread && !adminSection && (
         <Button
-          className="fixed right-4 bottom-4 size-12 rounded-full shadow-lg md:hidden"
+          className="fixed right-4 bottom-4 size-12 rounded-full shadow-raised md:hidden"
           size="icon"
           aria-label={t("threads.compose")}
           onClick={() => setComposeOpen(true)}
