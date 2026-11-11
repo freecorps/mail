@@ -23,11 +23,11 @@ export function UndoBanner(_: UndoBannerProps) {
       // Compose snackbars can't be dismissed from outside, so they keep their own clock: "long" (10 s, stretched by
       // Compose for accessibility services) is never shorter than the store's window; the undo stays valid until it
       // closes, whatever the store shows meanwhile.
-      ?.showSnackbar({ message: entry.message, actionLabel: t("undo.action"), duration: "long" })
+      ?.showSnackbar({ message: entry.message, ...(entry.undo ? { actionLabel: t("undo.action") } : {}), duration: entry.undo ? "long" : "short" })
       .then((r) => {
         if (r === "actionPerformed") {
           undoStore.dismiss(entry.id);
-          entry.undo();
+          entry.undo?.();
         } else undoStore.dismiss(entry.id);
       })
       .catch(() => {});

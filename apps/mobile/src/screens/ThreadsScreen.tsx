@@ -6,7 +6,7 @@
 // archiving offers "Desfazer". The chrome follows the platform: on iOS the filter menu, "Editar" and compose in the
 // navigation bar and the header search bar; on Android FilterChips, a select action in the top app bar and a FAB.
 import { useMutation } from "@freecorps/ember-react-native";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useIsFocused, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { BackHandler, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
@@ -23,6 +23,7 @@ import { haptics } from "../lib/haptics";
 import { hideTabBar } from "../model/chrome";
 import { actionable, archivable, bulkReadTarget, keepsArchived, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
 import { filterLabelKey, filtersFor, useDebounced, useMailboxes, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
+import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { useListPrefs } from "../prefs";
 import { screenEdge, spacing, useColors, type Palette } from "../theme";
@@ -85,6 +86,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const { mailboxes } = useMailboxes();
   const group = useSwipeGroup();
   const showRows = !searchOnly || vm.searching;
+  const android = process.env.EXPO_OS === "android";
 
   // In your own (personal) mailbox there is nobody to assign to.
   const personal = useMemo(() => new Set(mailboxes.filter((b) => b.personal).map((b) => b.name)), [mailboxes]);
@@ -131,8 +133,9 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     setPicks(new Set());
   }, []);
   const toggle = useCallback((threadId: string) => setPicks((p) => toggleSelected(p, threadId)), []);
-  // The tab bar gives way to the edit toolbar; Android's Back leaves Edit mode first.
-  useEffect(() => (editing ? hideTabBar() : undefined), [editing]);
+  // iOS: the tab bar gives way to the edit toolbar (Android keeps it: its actions are in the contextual top bar).
+  // Android's Back leaves Edit mode first.
+  useEffect(() => (editing && process.env.EXPO_OS === "ios" ? hideTabBar() : undefined), [editing]);
   useEffect(() => {
     if (!editing) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => (stopEditing(), true));
@@ -146,6 +149,12 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const readTarget = bulkReadTarget(selectedRows);
   const oneMailbox = selectedRows.length > 0 && selectedRows.every((r) => r.mailbox === selectedRows[0]!.mailbox);
   const canBulkAssign = oneMailbox && ops.canAssign(selectedRows[0]!);
+
+  // The conversation opened from here steps through these rows with its previous / next arrows.
+  const focused = useIsFocused();
+  useEffect(() => {
+    if (focused && showRows) setThreadOrder(vm.rows.filter((r) => !r.pending).map((r) => ({ threadId: r.threadId, mailbox: r.mailbox })));
+  }, [focused, showRows, vm.rows]);
 
   // ---- Pull to refresh -------------------------------------------------------------------------------------------
   const [refreshing, setRefreshing] = useState(false);
@@ -204,14 +213,19 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
 
   return (
     <SwipeGroupProvider value={group}>
-      <Stack.Screen options={{ title: editing ? (selected.size ? t("threads.selected", { count: selected.size }) : t("threads.selectNone")) : title }} />
-      <Stack.SearchBar
-        placeholder={searchOnly || source.view ? t("search.placeholder") : t("threads.search")}
-        hideWhenScrolling={false}
-        autoCapitalize="none"
-        onChangeText={(e) => setQuery(e.nativeEvent.text)}
-        onCancelButtonPress={() => setQuery("")}
+      {/* Android's contextual app bar has room for the count only (Material: "3" beside the close button). */}
+      <Stack.Screen
+        options={{ title: editing ? (android ? String(selected.size) : selected.size ? t("threads.selected", { count: selected.size }) : t("threads.selectNone")) : title }}
       />
+      {android && editing && !query ? null : (
+        <Stack.SearchBar
+          placeholder={searchOnly || source.view ? t("search.placeholder") : t("threads.search")}
+          hideWhenScrolling={false}
+          autoCapitalize="none"
+          onChangeText={(e) => setQuery(e.nativeEvent.text)}
+          onCancelButtonPress={() => setQuery("")}
+        />
+      )}
       <Animated.FlatList
         style={{ backgroundColor: c.background }}
         contentInsetAdjustmentBehavior="automatic"
@@ -277,8 +291,9 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
 }
 
 /**
- * Edit mode chrome: "Selecionar tudo" and "OK" in the navigation bar (iOS) / close and select-all in the top app bar
- * (Android), and a bottom toolbar with archive, read/unread and assign in place of the tab bar.
+ * Edit mode chrome. iOS (Mail): "Selecionar tudo" and "OK" in the navigation bar and a bottom toolbar with archive,
+ * read/unread and assign in place of the tab bar. Android (Material 3): a contextual top app bar with close, the count
+ * and the same actions plus select-all.
  */
 function EditChrome(p: {
   allSelected: boolean;
@@ -304,27 +319,40 @@ function EditChrome(p: {
   const selectAllLabel = p.allSelected ? t("threads.deselectAll") : t("threads.selectAll");
   // Android: header items need a Material Symbol image, which loads asynchronously; mount them once it has.
   if (!archive || !read || !assign || (!ios && (!close || !all))) return null;
-  return (
-    <>
-      <Stack.Toolbar placement="left">
-        {ios ? (
-          <Stack.Toolbar.Button onPress={p.onSelectAll}>{selectAllLabel}</Stack.Toolbar.Button>
-        ) : (
+  if (!ios)
+    // Material 3: a contextual top app bar while selecting (close, the count as title, then the actions), no bottom bar.
+    return (
+      <>
+        <Stack.Toolbar placement="left">
           <Stack.Toolbar.Button icon={close} accessibilityLabel={t("common.done")} onPress={p.onDone}>
             {t("common.done")}
           </Stack.Toolbar.Button>
-        )}
-      </Stack.Toolbar>
-      <Stack.Toolbar placement="right">
-        {ios ? (
-          <Stack.Toolbar.Button variant="done" onPress={p.onDone}>
-            {t("common.done")}
+        </Stack.Toolbar>
+        <Stack.Toolbar placement="right">
+          <Stack.Toolbar.Button icon={archive} accessibilityLabel={t("thread.archive")} disabled={none} onPress={p.onArchive}>
+            {t("thread.archive")}
           </Stack.Toolbar.Button>
-        ) : (
+          <Stack.Toolbar.Button icon={read} accessibilityLabel={p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")} disabled={none} onPress={p.onRead}>
+            {p.readTarget === "read" ? t("thread.markRead") : t("thread.markUnread")}
+          </Stack.Toolbar.Button>
+          <Stack.Toolbar.Button icon={assign} accessibilityLabel={t("thread.assign")} disabled={none || !p.canAssign} onPress={p.onAssign}>
+            {t("thread.assign")}
+          </Stack.Toolbar.Button>
           <Stack.Toolbar.Button icon={all} accessibilityLabel={selectAllLabel} onPress={p.onSelectAll}>
             {selectAllLabel}
           </Stack.Toolbar.Button>
-        )}
+        </Stack.Toolbar>
+      </>
+    );
+  return (
+    <>
+      <Stack.Toolbar placement="left">
+        <Stack.Toolbar.Button onPress={p.onSelectAll}>{selectAllLabel}</Stack.Toolbar.Button>
+      </Stack.Toolbar>
+      <Stack.Toolbar placement="right">
+        <Stack.Toolbar.Button variant="done" onPress={p.onDone}>
+          {t("common.done")}
+        </Stack.Toolbar.Button>
       </Stack.Toolbar>
       <Stack.Toolbar placement="bottom">
         <Stack.Toolbar.Button icon={archive} accessibilityLabel={t("thread.archive")} disabled={none} onPress={p.onArchive}>

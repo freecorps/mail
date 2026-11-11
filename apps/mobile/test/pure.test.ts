@@ -260,6 +260,52 @@ describe("optimistic updates", () => {
     expect(s.get("inbox:threads", all).page[0]).toMatchObject({ contact: "bia@user.test", subject: "Fwd: Oi", mailbox: "support" });
   });
 
+  it("compose and forward: on top of the loaded views that keep a new waiting thread, and their counts grow", () => {
+    setReplicaUser("u2");
+    const zero = { threads: 0, unread: 0, capped: false };
+    const viewPage = (ts: Thread[]) => ({ page: ts, isDone: true, partial: false });
+    const s = fakeStore([
+      ["inbox:thread", { threadId: "email$threads_1" }, { thread: thread(), messages: [] }],
+      ["inbox:view", { view: "all" }, viewPage([thread()])],
+      ["inbox:view", { view: "waiting" }, viewPage([])],
+      ["inbox:view", { view: "all", status: "closed" }, viewPage([])],
+      ["inbox:view", { view: "unread" }, viewPage([])],
+      ["inbox:view", { view: "assigned" }, viewPage([])],
+      ["inbox:views", {}, { all: { ...zero, threads: 1 }, assigned: zero, unread: zero, waiting: zero }],
+    ]);
+    up["inbox:compose"]!(s.store, { mailbox: "support", to: ["Lia <lia@user.test>"], subject: "Oi", text: "Tudo bem?" }, rec);
+    expect(s.get("inbox:view", { view: "all" }).page[0]).toMatchObject({ contact: "lia@user.test", status: "waiting" });
+    expect(s.get("inbox:view", { view: "all" }).page).toHaveLength(2);
+    expect(s.get("inbox:view", { view: "waiting" }).page).toHaveLength(1);
+    // Not archived, not unread, not assigned: those lists stay as they were.
+    expect(s.get("inbox:view", { view: "all", status: "closed" }).page).toEqual([]);
+    expect(s.get("inbox:view", { view: "unread" }).page).toEqual([]);
+    expect(s.get("inbox:view", { view: "assigned" }).page).toEqual([]);
+    expect(s.get("inbox:views", {})).toMatchObject({ all: { threads: 2 }, waiting: { threads: 1 }, unread: { threads: 0 }, assigned: { threads: 0 } });
+    up["inbox:forward"]!(s.store, { threadId: "email$threads_1", to: ["bia@user.test"], subject: "Fwd: Oi", text: "Veja." }, rec);
+    expect(s.get("inbox:view", { view: "waiting" }).page[0]).toMatchObject({ contact: "bia@user.test", subject: "Fwd: Oi" });
+    expect(s.get("inbox:views", {})).toMatchObject({ all: { threads: 3 }, waiting: { threads: 2 } });
+    setReplicaUser(null);
+  });
+
+  it("delete: the thread leaves every loaded list, and the counts drop with it", () => {
+    const zero = { threads: 0, unread: 0, capped: false };
+    const t = thread({ unreadCount: 2, status: "open" });
+    const s = fakeStore([
+      ["inbox:threads", all, page([t])],
+      ["inbox:view", { view: "all" }, { page: [t], isDone: true, partial: false }],
+      ["inbox:sent", { mailbox: "support", limit: 30 }, { page: [{ ...t, lastSentAt: 1 }], isDone: true }],
+      ["inbox:views", {}, { all: { ...zero, threads: 1, unread: 2 }, assigned: zero, unread: { ...zero, threads: 1, unread: 2 }, waiting: zero }],
+      ["inbox:mailboxes", {}, boxes],
+    ]);
+    up["inbox:deleteThread"]!(s.store, { threadId: t._id }, rec);
+    expect(s.get("inbox:threads", all).page).toEqual([]);
+    expect(s.get("inbox:view", { view: "all" }).page).toEqual([]);
+    expect(s.get("inbox:sent", { mailbox: "support", limit: 30 }).page).toEqual([]);
+    expect(s.get("inbox:views", {})).toMatchObject({ all: { threads: 0, unread: 0 }, unread: { threads: 0, unread: 0 } });
+    expect(s.get("inbox:mailboxes", {})[0].unread).toBe(3);
+  });
+
   it("Sent: a reply or a new conversation goes on top of its mailbox's Sent lists, once; notes do not; status patches in place", () => {
     const sent = { mailbox: "support", limit: 30 };
     const old = { ...thread({ _id: "email$threads_0" }), lastSentAt: 5 };

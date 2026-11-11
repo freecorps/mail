@@ -7,8 +7,8 @@ import type { ArchiveRecord } from "./list-actions";
 export interface UndoEntry {
   id: number;
   message: string;
-  /** Runs once, when the person taps "Desfazer". */
-  undo(): void;
+  /** Runs once, when the person taps "Desfazer". Absent for a plain notice ("Link copiado"), which has no action. */
+  undo?: (() => void) | undefined;
 }
 
 type Timer = ReturnType<typeof setTimeout>;
@@ -34,7 +34,7 @@ export function createUndoStore(opts: { ms?: number; setTimeout?: (fn: () => voi
   };
   return {
     /** Offers an undo for `ms` (longer for screen reader users, who need time to reach the button). */
-    show(message: string, undo: () => void, ms = defaultMs): number {
+    show(message: string, undo: (() => void) | undefined, ms = defaultMs): number {
       stop();
       const id = ++seq;
       current = { id, message, undo };
@@ -47,7 +47,7 @@ export function createUndoStore(opts: { ms?: number; setTimeout?: (fn: () => voi
       const e = current;
       if (!e) return;
       dismiss(e.id);
-      e.undo();
+      e.undo?.();
     },
     dismiss,
     /** How long an undo stays offered (the app sets 10 s while a screen reader runs). */
@@ -75,6 +75,11 @@ export function useUndo(store: UndoStore = undoStore): UndoEntry | null {
  * Offers "Desfazer" for an archive: undo puts each thread back to the status it had (optimistic, like the archive).
  * `restore` is the setStatus mutation of the caller.
  */
+/** A short notice in the same slot, without "Desfazer" (2.5 s). */
+export function notify(message: string, store: UndoStore = undoStore): number {
+  return store.show(message, undefined, 2500);
+}
+
 export function offerUndoArchive(message: string, records: readonly ArchiveRecord[], restore: (threadId: string, status: ThreadStatus) => void, store: UndoStore = undoStore): number | null {
   if (!records.length) return null;
   return store.show(message, () => {
