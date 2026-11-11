@@ -13,6 +13,7 @@ import { ComposerDialogs } from "@/features/composer/Dialogs";
 import { api } from "@/lib/api";
 import { useAutosave } from "@/model/drafts";
 import { useUploads } from "@/model/uploads";
+import { sendLaterCheck } from "@/model/schedule";
 import { scheduledSends, undoSend } from "@/model/outbox";
 import { SignIn } from "@/features/SignIn";
 import { I18nProvider } from "@/i18n";
@@ -357,6 +358,24 @@ describe("uploads", () => {
     });
     expect(result.current.items).toHaveLength(20);
     expect(result.current.items.at(-1)!.error).toBe("too large");
+  });
+
+  it("a restored draft's files keep their stored size (Enviar mais tarde knows when they would go as links)", () => {
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useUploads(), { wrapper });
+    const big = 11 * 1024 * 1024;
+    act(() =>
+      result.current.restore([
+        { file: "f1", filename: "big.pdf", contentType: "application/pdf", size: big },
+        { file: "f2", filename: "old.txt", contentType: "text/plain" },
+      ]),
+    );
+    expect(result.current.items.map((x) => x.size)).toEqual([big, 0]);
+    expect(result.current.ready).toEqual([
+      { file: "f1", filename: "big.pdf", contentType: "application/pdf", size: big },
+      { file: "f2", filename: "old.txt", contentType: "text/plain" },
+    ]);
+    expect(sendLaterCheck(result.current.items.map((x) => x.size))).toEqual({ ok: false, total: big });
   });
 });
 

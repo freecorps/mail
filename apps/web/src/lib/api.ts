@@ -228,7 +228,8 @@ export type PageOpts = { numItems: number; cursor: string | null };
 // ---------------------------------------------------------------------------------------------- composer (#38)
 
 /** A file the member uploaded (`inbox:generateUploadUrl`), sent with a reply, a new conversation or a forward. */
-export type AttachmentArg = { file: string; filename: string; contentType: string };
+/** A file of a send or draft. `size`: its bytes when known (a draft's files carry the server's; the server ignores a client's). */
+export type AttachmentArg = { file: string; filename: string; contentType: string; size?: number };
 /** What every send takes from the composer: the HTML body (sanitized by Ember; `text` stays the text/plain part), the
  * signature (default on), and the draft the send consumes. */
 export type ComposerArgs = { bodyHtml?: string; signature?: boolean; draftId?: string; attachments?: AttachmentArg[] };

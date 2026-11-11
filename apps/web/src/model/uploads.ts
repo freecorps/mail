@@ -105,8 +105,9 @@ export function useUploads() {
         id: `u${++seq.current}`,
         name: f.filename,
         type: f.contentType,
-        size: 0,
-        loaded: 0,
+        // A draft's files carry their stored size (apps/api `saveDraft`); 0 when not known (an older draft).
+        size: f.size ?? 0,
+        loaded: f.size ?? 0,
         status: "ready",
         file: f.file,
       }));
@@ -122,7 +123,13 @@ export function useUploads() {
 
   // Same array until the list changes (the composers' autosave depends on it).
   const ready: AttachmentArg[] = useMemo(
-    () => items.flatMap((x) => (x.status === "ready" && x.file ? [{ file: x.file, filename: x.name, contentType: x.type }] : [])),
+    // With the size when known, so an undone send's files come back with it (the scheduling check reads it).
+    () =>
+      items.flatMap((x) =>
+        x.status === "ready" && x.file
+          ? [{ file: x.file, filename: x.name, contentType: x.type, ...(x.size ? { size: x.size } : {}) }]
+          : [],
+      ),
     [items],
   );
   return { items, ready, busy: items.some((x) => x.status === "uploading"), add, remove, restore, clear };
