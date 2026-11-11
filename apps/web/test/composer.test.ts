@@ -5,7 +5,8 @@ import type { Message, Thread } from "@/lib/api";
 import { docToText, htmlIsEmpty, textToHtml } from "@/lib/editorText";
 import { quoteHeader } from "@/lib/format";
 import { schedule, scheduledSends, undoSend } from "@/model/outbox";
-import { chipEmail, contactsFrom, suggest, toChips } from "@/model/recipients";
+import { hasSeparator, splitRecipients } from "@/lib/format";
+import { chipEmail, chipOf, contactsFrom, formatContact, suggest, toChips } from "@/model/recipients";
 
 const p = (...content: object[]) => ({ type: "paragraph", content });
 const txt = (text: string, marks?: object[]) => ({ type: "text", text, ...(marks ? { marks } : {}) });
@@ -55,6 +56,22 @@ describe("recipients", () => {
       { value: "nope", valid: false },
     ]);
     expect(chipEmail("Bia <BIA@acme.test>")).toBe("bia@acme.test");
+  });
+
+  it("a name with a comma stays one recipient: quoted when formatted, never split again", () => {
+    const caio = formatContact({ name: "Lima, Caio", email: "caio@user.test" });
+    expect(caio).toBe('"Lima, Caio" <caio@user.test>');
+    expect(formatContact({ name: "Bia", email: "bia@acme.test" })).toBe("Bia <bia@acme.test>");
+    expect(toChips(`${caio}, ana@user.test`)).toEqual([
+      { value: caio, valid: true },
+      { value: "ana@user.test", valid: true },
+    ]);
+    // A chip made earlier (an unquoted name from a saved draft) is checked whole.
+    expect(chipOf("Lima, Caio <caio@user.test>")).toEqual({ value: "Lima, Caio <caio@user.test>", valid: true });
+    // Typing: a comma inside the open quote is not a separator yet.
+    expect(hasSeparator('"Lima,')).toBe(false);
+    expect(hasSeparator('"Lima, Caio" <caio@user.test>,')).toBe(true);
+    expect(splitRecipients("a@x.com;<b,c@y.com>")).toEqual(["a@x.com", "<b,c@y.com>"]);
   });
 
   it("contacts from recent mail: newest name wins, own addresses left out; suggestions by word prefix", () => {

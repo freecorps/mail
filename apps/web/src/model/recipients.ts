@@ -1,7 +1,7 @@
 // Recipients as chips (pure; tested): what a typed or pasted entry becomes, and who to suggest while typing, from the
 // people in recent conversations (`inbox:recent`: contacts, senders and everyone copied).
 import type { Address, Message, Thread } from "@/lib/api";
-import { parseRecipients } from "@/lib/format";
+import { isRecipient, splitRecipients } from "@/lib/format";
 
 export interface Contact {
   email: string;
@@ -14,23 +14,26 @@ export interface Chip {
   valid: boolean;
 }
 
-/** Text typed or pasted into a recipient field → chips (split on commas, semicolons, new lines). */
+/** Text typed or pasted into a recipient field → chips (split on commas, semicolons, new lines; not in a quoted name). */
 export function toChips(input: string): Chip[] {
-  const { valid, invalid } = parseRecipients(input);
-  const ok = new Set(valid);
-  // Keep the typed order.
-  return input
-    .split(/[,;\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((value) => ({ value, valid: ok.has(value) && !invalid.includes(value) }));
+  return splitRecipients(input).map(chipOf);
 }
+
+/** A chip already made (one recipient, never split again: a name may hold a comma). */
+export const chipOf = (value: string): Chip => ({ value, valid: isRecipient(value) });
 
 /** The address inside a chip ("Bia <b@x.com>" → b@x.com), lower case. */
 export const chipEmail = (value: string) => (/<([^>]+)>\s*$/.exec(value)?.[1] ?? value).trim().toLowerCase();
 
-/** "Name <email>", or the address alone. */
-export const formatContact = (c: Contact) => (c.name?.trim() ? `${c.name.trim()} <${c.email}>` : c.email);
+/**
+ * "Name <email>", or the address alone. A name with a separator or a quote in it is quoted (`"Lima, Caio" <c@x.com>`,
+ * as Ember writes it), so typed lists and pasted ones keep it whole.
+ */
+export function formatContact(c: Contact): string {
+  const name = c.name?.trim();
+  if (!name) return c.email;
+  return /[,;"<>]/.test(name) ? `"${name.replace(/["\\]/g, "")}" <${c.email}>` : `${name} <${c.email}>`;
+}
 
 /** Everyone in recent conversations, newest first, once each (the name the latest message gave them). */
 export function contactsFrom(

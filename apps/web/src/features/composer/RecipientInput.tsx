@@ -5,7 +5,8 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useI18n } from "@/i18n/context";
 import { cn } from "@/lib/utils";
-import { chipEmail, formatContact, suggest, toChips, type Contact } from "@/model/recipients";
+import { hasSeparator } from "@/lib/format";
+import { chipEmail, chipOf, formatContact, suggest, toChips, type Contact } from "@/model/recipients";
 
 export function RecipientInput({
   id,
@@ -42,18 +43,19 @@ export function RecipientInput({
     // Only when the field first shows.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const chips = useMemo(() => value.map((v) => ({ value: v, valid: toChips(v)[0]?.valid ?? false })), [value]);
+  const chips = useMemo(() => value.map(chipOf), [value]);
   const options = useMemo(() => (open ? suggest(contacts, text, value) : []), [open, contacts, text, value]);
 
-  const commit = (raw: string) => {
-    const add = toChips(raw).map((c) => c.value);
-    if (!add.length) return;
+  const add = (values: string[]) => {
+    if (!values.length) return;
     const have = new Set(value.map(chipEmail));
-    onChange([...value, ...add.filter((v) => !have.has(chipEmail(v)))]);
+    onChange([...value, ...values.filter((v) => !have.has(chipEmail(v)))]);
     setText("");
   };
+  const commit = (raw: string) => add(toChips(raw).map((c) => c.value));
+  // A suggestion is one recipient as it is (never split: its name may hold a comma).
   const pick = (c: Contact) => {
-    commit(formatContact(c));
+    add([formatContact(c)]);
     setOpen(false);
     input.current?.focus();
   };
@@ -63,7 +65,8 @@ export function RecipientInput({
       <div className="flex max-h-32 min-h-9 flex-wrap items-center gap-1 overflow-y-auto py-1">
         {chips.map((c, i) => {
           const m = /^(.*?)\s*<([^>]+)>\s*$/.exec(c.value);
-          const shown = m?.[1]?.trim() || c.value;
+          // The name as written, without the quotes a name with a comma gets.
+          const shown = m?.[1]?.trim().replace(/^"(.*)"$/, "$1") || c.value;
           return (
             <span
               key={`${c.value}:${i}`}
@@ -105,7 +108,7 @@ export function RecipientInput({
           placeholder={value.length ? undefined : t("compose.toPlaceholder")}
           onChange={(e) => {
             const v = e.target.value;
-            if (/[,;\n]/.test(v)) commit(v);
+            if (hasSeparator(v)) commit(v);
             else {
               setText(v);
               setOpen(true);
@@ -114,7 +117,7 @@ export function RecipientInput({
           }}
           onPaste={(e) => {
             const v = e.clipboardData.getData("text");
-            if (/[,;\n]/.test(v)) {
+            if (hasSeparator(v)) {
               e.preventDefault();
               commit(text + v);
             }
@@ -130,6 +133,10 @@ export function RecipientInput({
               } else if (text.trim()) {
                 e.preventDefault();
                 commit(text);
+              } else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
+                // An empty field: Enter is not "send" (it would submit the form right after making a chip).
+                // ⌘/Ctrl+Enter still sends.
+                e.preventDefault();
               }
             } else if (e.key === "Escape" && open && options.length) {
               e.stopPropagation();

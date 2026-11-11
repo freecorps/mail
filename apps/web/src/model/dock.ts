@@ -22,6 +22,8 @@ export interface Restore {
   cc: string[];
   subject: string;
   html: string;
+  /** The body as text (what the send checks and sends; the editor does not report its initial content). */
+  text: string;
   attachments: AttachmentArg[];
   signature: boolean;
   draftId: string | null;
@@ -48,15 +50,18 @@ const set = (next: DockWindow[]) => {
   for (const l of listeners) l();
 };
 
-/** Opens a window (or shows the one already holding that draft). False when three are open already. */
-export function openWindow(seed: Seed): boolean {
+/**
+ * Opens a window (or shows the one already holding that draft). False when three are open already, except with
+ * `always`: an undone or failed send comes back even then (its content would be lost otherwise).
+ */
+export function openWindow(seed: Seed, o: { always?: boolean } = {}): boolean {
   const draftId = seed.draft?._id ?? seed.restore?.draftId ?? null;
   const same = draftId ? windows.find((w) => (w.seed.draft?._id ?? w.seed.restore?.draftId) === draftId) : undefined;
   if (same) {
     set(windows.map((w) => (w === same ? { ...w, minimized: false } : w)));
     return true;
   }
-  if (windows.length >= MAX_WINDOWS) {
+  if (windows.length >= MAX_WINDOWS && !o.always) {
     set(windows.map((w, i) => (i === windows.length - 1 ? { ...w, minimized: false } : w)));
     return false;
   }

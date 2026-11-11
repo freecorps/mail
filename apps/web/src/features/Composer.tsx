@@ -15,7 +15,7 @@ import { htmlIsEmpty, textToHtml } from "@/lib/editorText";
 import { undoSendMs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { openComposerDialog } from "@/model/dock";
-import { useAutosave } from "@/model/drafts";
+import { holdDraft, releaseDraft, useAutosave, useHeldDrafts } from "@/model/drafts";
 import { schedule, undoSend } from "@/model/outbox";
 import { composerMode } from "@/model/threads";
 import { filesOf, useUploads } from "@/model/uploads";
@@ -57,6 +57,10 @@ export function Composer({
   const mode = composerMode(picked, p.notes);
   const editor = useRef<RichEditorHandle>(null);
   const [body, setBody] = useState<Body>(EMPTY);
+  const bodyNow = useRef(body);
+  useEffect(() => {
+    bodyNow.current = body;
+  });
   const [all, setAll] = useState(false);
   const [signature, setSignature] = useState(true);
   const [dragging, setDragging] = useState(false);
@@ -89,6 +93,10 @@ export function Composer({
   const kind = useRef<ComposerMode>("reply");
   // The member's draft on this conversation comes back once, when the composer opens.
   const drafts = useQuerySnapshot(api.inbox.drafts, { threadId: p.threadId });
+  // A draft a send still holds (opened again during its undo window) is not this box's: it waits until the send is
+  // undone or fails (then it comes back here), or goes with it.
+  const held = useHeldDrafts();
+  const heldHere = !!drafts.value?.some((x) => held.has(x._id));
   const restored = useRef(false);
   // Autosave starts with the first edit (or the restored draft landing in the editor, which it does not re-save):
   // until then an empty box says nothing about the draft on the server.
@@ -97,9 +105,12 @@ export function Composer({
   const skipOnce = useRef(false);
   useEffect(() => {
     if (restored.current || drafts.status !== "success" || !drafts.value) return;
-    restored.current = true;
     const d = drafts.value.find((x) => x.kind === "reply") ?? (p.notes === false ? undefined : drafts.value.find((x) => x.kind === "note"));
+    if (d && held.has(d._id)) return;
+    restored.current = true;
     if (!d) return;
+    // Released while the member already wrote something new here: what they wrote stays (and replaces the draft).
+    if (armed.current && !bodyNow.current.empty) return;
     autosave.adopt(d._id);
     kind.current = d.kind === "note" ? "note" : "reply";
     if (d.kind === "note") setMode("note");
@@ -107,12 +118,14 @@ export function Composer({
     uploads.restore(d.attachments);
     restoring.current = true;
     editor.current?.setContent(d.bodyHtml && !htmlIsEmpty(d.bodyHtml) ? d.bodyHtml : textToHtml(d.text));
-  }, [drafts.status, drafts.value, autosave, uploads, p.notes]);
+  }, [drafts.status, drafts.value, held, autosave, uploads, p.notes]);
 
   // Autosave: what the box holds now, a second after the last change (an empty box removes the draft).
   const ready = uploads.ready;
   useEffect(() => {
     if (!armed.current) return;
+    // A save now would replace the draft a send holds (one reply and one note draft per conversation): wait for it.
+    if (heldHere) return;
     if (skipOnce.current) {
       skipOnce.current = false;
       return;
@@ -139,7 +152,7 @@ export function Composer({
     autosave.update(args);
     // `others` is derived from the thread; a change of it alone is not an edit.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [body, ready, all, mode, p.threadId, autosave]);
+  }, [body, ready, all, mode, p.threadId, autosave, heldHere]);
 
   const addFiles = (files: File[]) => {
     if (mode === "note") return toast(t("composer.noAttachInNote"));
@@ -202,34 +215,48 @@ export function Composer({
     const { html, text } = body;
     const files: AttachmentArg[] = m === "reply" ? ready : [];
     const cc = m === "reply" && all && others.length ? others : undefined;
-    const draftId = autosave.id() ?? undefined;
     const sig = signature;
-    autosave.forget();
+    // The draft the send consumes: the one known now, or the one a save already on its way creates (else it would
+    // outlive the send). Held until the send is undone or fails.
+    const known = autosave.id();
+    if (known) holdDraft(known);
+    const draft = autosave.forget().then((id) => {
+      if (id) holdDraft(id);
+      return id;
+    });
     editor.current?.clear();
     uploads.clear();
     const restore = () => {
-      if (!mounted.current) return; // the draft is still on the server: it comes back when the conversation opens
+      void draft.then((id) => {
+        if (!id) return;
+        releaseDraft(id);
+        if (mounted.current) autosave.adopt(id);
+      });
+      // Gone (another conversation opened): the draft is still on the server, released, so it comes back when the
+      // conversation opens again.
+      if (!mounted.current) return;
       setMode(m);
       setSignature(sig);
       uploads.restore(files);
-      if (draftId) autosave.adopt(draftId);
       editor.current?.setContent(html);
     };
+    const quoteHeader = p.quoteHeader;
     const run = () =>
-      void (
-        m === "reply"
-          ? reply({
-              threadId: p.threadId,
-              text,
-              bodyHtml: html,
-              signature: sig,
-              ...(cc ? { cc } : {}),
-              ...(files.length ? { attachments: files } : {}),
-              ...(p.quoteHeader ? { quoteHeader: p.quoteHeader } : {}),
-              ...(draftId ? { draftId } : {}),
-            })
-          : note({ threadId: p.threadId, text, ...(draftId ? { draftId } : {}) })
-      )
+      void draft
+        .then((draftId): Promise<unknown> =>
+          m === "reply"
+            ? reply({
+                threadId: p.threadId,
+                text,
+                bodyHtml: html,
+                signature: sig,
+                ...(cc ? { cc } : {}),
+                ...(files.length ? { attachments: files } : {}),
+                ...(quoteHeader ? { quoteHeader } : {}),
+                ...(draftId ? { draftId } : {}),
+              })
+            : note({ threadId: p.threadId, text, ...(draftId ? { draftId } : {}) }),
+        )
         .then(() => toast.success(m === "reply" ? t("thread.sent") : t("thread.noteSaved")))
         .catch((e: unknown) => {
           restore();

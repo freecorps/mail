@@ -23,10 +23,11 @@ import {
   type Restore,
   type Seed,
 } from "@/model/dock";
-import { useAutosave } from "@/model/drafts";
+import { holdDraft, releaseDraft, useAutosave } from "@/model/drafts";
+import { forwardedFiles } from "@/model/forward";
 import { useMeName } from "@/model/me";
 import { schedule, undoSend } from "@/model/outbox";
-import { contactsFrom, toChips, type Contact } from "@/model/recipients";
+import { chipOf, contactsFrom, type Contact } from "@/model/recipients";
 import { useUploads } from "@/model/uploads";
 import { LazyEditor, type RichEditorHandle } from "./editor/LazyEditor";
 import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
@@ -86,7 +87,7 @@ function initial(seed: Seed, fallback: string): Fields & { draftId: string | nul
       cc: r.cc,
       subject: r.subject,
       html: r.html,
-      text: "",
+      text: r.text,
       draftId: r.draftId,
       signature: r.signature,
     };
@@ -132,6 +133,14 @@ function ComposeWindow({
   const { t } = useI18n();
   const ids = { from: useId(), to: useId(), cc: useId(), bcc: useId(), subject: useId(), error: useId() };
   const fwd = w.seed.kind === "forward" ? w.seed.forward : null;
+  // A forward reopened from ⌘K (a saved draft) does not know the original's files: read them from the conversation.
+  const fwdThread = useQuerySnapshot(api.inbox.thread, fwd && !fwd.files.length && fwd.threadId ? { threadId: fwd.threadId } : "skip");
+  const fwdFiles = useMemo(() => {
+    if (!fwd) return [];
+    if (fwd.files.length) return fwd.files;
+    const m = fwdThread.value?.messages.find((x) => x._id === fwd.messageId);
+    return m ? forwardedFiles(m.attachments).map((a) => a.filename) : [];
+  }, [fwd, fwdThread.value]);
   const [start] = useState(() => initial(w.seed, defaultMailbox ?? mailboxes[0]?.name ?? ""));
   const [fields, setFields] = useState<Fields>(start);
   const [empty, setEmpty] = useState(htmlIsEmpty(start.html));
@@ -192,8 +201,9 @@ function ComposeWindow({
   };
 
   const send = () => {
-    const to = toChips(fields.to.join(","));
-    const cc = toChips(fields.cc.join(","));
+    // Each chip is one recipient already (joining and splitting again would cut a name with a comma).
+    const to = fields.to.map(chipOf);
+    const cc = fields.cc.map(chipOf);
     const bad = [...to, ...cc].filter((c) => !c.valid).map((c) => c.value);
     if (bad.length) return setError({ message: t("compose.invalidList", { list: bad.join(", ") }), field: "to" });
     if (!to.length) return setError({ message: t("compose.invalidTo"), field: "to" });
@@ -201,20 +211,32 @@ function ComposeWindow({
     if (uploads.busy) return setError({ message: t("composer.waitUploads"), field: null });
     setError(null);
     const files = ready;
-    const draftId = autosave.id();
-    const restore: Restore = {
-      mailbox: fields.mailbox,
-      to: fields.to,
-      cc: fields.cc,
-      subject: fields.subject,
-      html: fields.html,
-      attachments: files,
-      signature,
-      draftId,
-      ...(fwd ? { forward: fwd } : {}),
-    };
-    const reopen = () => openWindow(fwd ? { kind: "forward", forward: fwd, restore } : { kind: "compose", restore });
-    autosave.forget();
+    // The draft the send consumes: the one known now, or the one a save already on its way creates. The send holds it
+    // (⌘K does not offer it meanwhile) until it is undone or fails.
+    const known = autosave.id();
+    if (known) holdDraft(known);
+    const draft = autosave.forget().then((id) => {
+      if (id) holdDraft(id);
+      return id;
+    });
+    // An undone or failed send comes back in a window, even with three open (else its text would be lost).
+    const reopen = () =>
+      void draft.then((draftId) => {
+        if (draftId) releaseDraft(draftId);
+        const restore: Restore = {
+          mailbox: fields.mailbox,
+          to: fields.to,
+          cc: fields.cc,
+          subject: fields.subject,
+          html: fields.html,
+          text: fields.text,
+          attachments: files,
+          signature,
+          draftId,
+          ...(fwd ? { forward: fwd } : {}),
+        };
+        openWindow(fwd ? { kind: "forward", forward: fwd, restore } : { kind: "compose", restore }, { always: true });
+      });
     closeWindow(w.key);
     const extras = {
       ...(fields.cc.length ? { cc: fields.cc } : {}),
@@ -223,14 +245,14 @@ function ComposeWindow({
       bodyHtml: fields.html,
       signature,
       ...(files.length ? { attachments: files } : {}),
-      ...(draftId ? { draftId } : {}),
     };
     const run = () =>
-      void (
-        fwd
-          ? forward({ threadId: fwd.threadId, messageId: fwd.messageId, to: fields.to, ...extras })
-          : compose({ mailbox: fields.mailbox, to: fields.to, ...extras })
-      )
+      void draft
+        .then((draftId) =>
+          fwd
+            ? forward({ threadId: fwd.threadId, messageId: fwd.messageId, to: fields.to, ...extras, ...(draftId ? { draftId } : {}) })
+            : compose({ mailbox: fields.mailbox, to: fields.to, ...extras, ...(draftId ? { draftId } : {}) }),
+        )
         .then((r) =>
           toast.success(fwd ? t("forward.sent") : t("compose.sent"), {
             action: { label: `#${r.number}`, onClick: () => onOpenThread(r.threadId) },
@@ -254,10 +276,11 @@ function ComposeWindow({
   };
 
   const discard = () => {
-    const id = autosave.id();
-    autosave.forget();
+    // Also the draft a save already on its way creates.
+    void autosave.forget().then((id) => {
+      if (id) void deleteDraft({ id }).catch(() => {});
+    });
     closeWindow(w.key);
-    if (id) void deleteDraft({ id }).catch(() => {});
     toast(t("compose.discarded"));
   };
 
@@ -389,7 +412,8 @@ function ComposeWindow({
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LazyEditor
             handle={editor}
-            initialHtml={start.html}
+            // The body as it is now: the editor is built again when a minimized window comes back.
+            initialHtml={fields.html}
             label={t("compose.body")}
             placeholder={t("compose.body")}
             onChange={(v) => {
@@ -403,8 +427,8 @@ function ComposeWindow({
             onManageSlash={fields.mailbox ? () => openComposerDialog({ kind: "saved", mailbox: fields.mailbox }) : undefined}
             className="min-h-40"
           />
-          {fwd && fwd.files.length > 0 && (
-            <p className="px-3.5 pb-2 text-xs text-muted-foreground">{t("forward.files", { list: fwd.files.join(", ") })}</p>
+          {fwdFiles.length > 0 && (
+            <p className="px-3.5 pb-2 text-xs text-muted-foreground">{t("forward.files", { list: fwdFiles.join(", ") })}</p>
           )}
           <AttachmentTiles
             items={uploads.items}
