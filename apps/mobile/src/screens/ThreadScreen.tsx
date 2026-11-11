@@ -130,6 +130,8 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     setOpenBar(null);
     setSuppress(true);
   }, []);
+  // To the full composer: the bar hides without suppressing its draft, so it shows again once the composer is dismissed.
+  const expandBar = useCallback(() => setOpenBar(null), []);
   const reopenBar = useCallback(() => {
     setSuppress(false);
     setOpenBar("focus");
@@ -374,7 +376,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         keyboardShouldPersistTaps="handled"
       />
       {preview ? null : barOpen ? (
-        <QuickReply thread={thread} messages={vm.items.map((i) => i.message)} others={others} notes={!!box && !personal} focus={opened_ === "focus"} onClose={closeBar} onUndone={reopenBar} />
+        <QuickReply thread={thread} messages={vm.items.map((i) => i.message)} others={others} notes={!!box && !personal} focus={opened_ === "focus"} onClose={closeBar} onExpand={expandBar} onUndone={reopenBar} />
       ) : !vm.canReply ? (
         // Android: above the floating toolbar, which covers the bottom of the screen; iOS: above the home indicator.
         <ThemedText variant="subheadline" tone="secondary" style={[styles.spam, { paddingBottom: !ios && thread && icons ? 96 : insets.bottom + spacing.lg }]}>

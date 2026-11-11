@@ -26,6 +26,8 @@ import { addressOf, contactsFrom, insertText, quoteHeader, quotedMessage, replyS
 import { createDraftSaver, draftHasContent, replyDraftArgs } from "../model/draft-saver";
 import { isPersonal } from "../model/threads";
 import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "../model/forward";
+import type { AttachmentArg } from "../lib/uploads";
+import { keepUndoneCompose, takeUndoneCompose } from "../model/undone-compose";
 import { useSendLater } from "../model/send";
 import { RECENT_THREADS } from "../offline/replica";
 import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
@@ -37,7 +39,7 @@ import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
  */
 const BCC_SUPPORTED = false;
 
-type Params = { threadId?: string; mode?: string; forwardThread?: string; forwardMessage?: string; mailbox?: string; to?: string; draftId?: string };
+type Params = { threadId?: string; mode?: string; forwardThread?: string; forwardMessage?: string; mailbox?: string; to?: string; draftId?: string; restore?: string };
 
 /** What the composer writes, and where it goes. */
 type Init = {
@@ -53,10 +55,14 @@ type Init = {
   draft: Draft | null;
   /** A forward: the original's files, which go along. */
   files?: string[];
+  /** An undone new message whose draft had no id yet: its files, already uploaded. */
+  attachments?: AttachmentArg[];
 };
 
 export function ComposeScreen() {
   const p = useLocalSearchParams<Params>();
+  // "Desfazer" on a new message whose draft had no id yet: what it had, read once when the sheet opens.
+  const [undone] = useState(() => takeUndoneCompose(p.restore));
   const threadId = p.threadId ?? p.forwardThread ?? null;
   const detail = useQuery(api.inbox.thread, threadId ? { threadId } : "skip");
   // The member's drafts: of this thread (reply/note/forward), or all of them (a new message, or `draftId`).
@@ -105,15 +111,17 @@ export function ComposeScreen() {
     init = { kind, mode, threadId: detail.thread._id, mailbox: detail.thread.mailbox, to: [], cc: draft?.cc ?? [], subject: replySubject(detail.thread.subject), text: draft?.text ?? "", draft };
   } else {
     const draft = p.draftId ? (list.find((d) => d._id === p.draftId) ?? null) : null;
+    const back = draft ? null : undone;
     init = {
       kind: "compose",
       mode: "reply",
-      mailbox: draft?.mailbox ?? p.mailbox ?? null,
-      to: draft?.to ?? (p.to ? [p.to] : []),
-      cc: draft?.cc ?? [],
-      subject: draft?.subject ?? "",
-      text: draft?.text ?? "",
+      mailbox: draft?.mailbox ?? back?.mailbox ?? p.mailbox ?? null,
+      to: draft?.to ?? back?.to ?? (p.to ? [p.to] : []),
+      cc: draft?.cc ?? back?.cc ?? [],
+      subject: draft?.subject ?? back?.subject ?? "",
+      text: draft?.text ?? back?.text ?? "",
       draft,
+      ...(back?.attachments.length ? { attachments: back.attachments } : {}),
     };
   }
   const key = `${p.draftId ?? ""}:${init.draft?._id ?? ""}`;
@@ -190,7 +198,8 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   }, [leaving]);
   useEffect(() => {
     if (init.draft?.attachments.length) uploads.restore(init.draft.attachments);
-  }, [init.draft, uploads.restore]);
+    else if (init.attachments?.length) uploads.restore(init.attachments);
+  }, [init.draft, init.attachments, uploads.restore]);
 
   const contacts = useMemo(() => contactsFrom([...(recent?.threads ?? []), ...(thread ? [thread] : [])], [...(recent?.messages ?? []), ...messages], own), [recent, thread, messages, own]);
   const signature = useQuery(api.inbox.signature, from && !note ? { mailbox: from } : "skip");
@@ -319,8 +328,11 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
           saver.sent(id);
         },
         () => {
+          // Its draft's id may not be known yet (first save on its way, or queued offline): what it had comes back from
+          // memory then, so the sheet never opens empty.
           const id = saver.id();
-          router.push({ pathname: "/compose", params: id ? { draftId: id } : { mailbox: from } });
+          const restore = keepUndoneCompose({ mailbox: from, to: args.to, cc: cc, subject: args.subject, text, attachments: files });
+          router.push({ pathname: "/compose", params: id ? { draftId: id, restore } : { mailbox: from, restore } });
         },
       );
     }

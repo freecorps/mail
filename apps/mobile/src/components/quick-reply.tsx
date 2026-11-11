@@ -35,6 +35,7 @@ export function QuickReply({
   notes,
   focus,
   onClose,
+  onExpand,
   onUndone,
   onBarHeight,
 }: {
@@ -48,6 +49,8 @@ export function QuickReply({
   focus: boolean;
   /** Closed: sent, or left empty. */
   onClose(): void;
+  /** Moved to the full composer: the bar hides, but its draft brings it back when the composer is dismissed. */
+  onExpand(): void;
   /** "Desfazer" on a reply this bar sent: open the bar again (it reads the text back from the kept draft). */
   onUndone(): void;
   onBarHeight?(h: number): void;
@@ -119,6 +122,8 @@ export function QuickReply({
     holding.current = true;
     void uploads
       .add()
+      // A picked file is an edit: once uploaded it saves with the draft (the full composer finds it there).
+      .then(() => void (dirty.current = true))
       .catch(() => {})
       .finally(() => {
         holding.current = false;
@@ -134,9 +139,11 @@ export function QuickReply({
   };
   const setMode = (m: ReplyMode) => {
     // A note and a reply are different drafts: the one being left goes (its text moves to the new one).
-    if ((m === "note") !== (mode === "note") && saver.id()) {
-      const gone = saver.id()!;
-      void deleteDraft({ id: gone }).catch(() => {});
+    // Also when its first save is still on its way (no id yet): `sent()` drops that one once it answers, so the next
+    // save of the other kind never reuses its id.
+    if ((m === "note") !== (mode === "note")) {
+      const gone = saver.id();
+      if (gone) void deleteDraft({ id: gone }).catch(() => {});
       saver.sent();
     }
     setModeState(m);
@@ -193,7 +200,7 @@ export function QuickReply({
     holding.current = true;
     await Promise.race([saver.flush(), new Promise((r) => setTimeout(r, 1500))]);
     router.push({ pathname: "/compose", params: { threadId, mode } });
-    onClose();
+    onExpand();
   };
 
   const modes: Array<{ m: ReplyMode; label: string }> = [
@@ -245,7 +252,7 @@ export function QuickReply({
             />
           </View>
           <View style={styles.ctrl}>
-            <IconButton variant="plain" icon={Icons.expand} label={t("compose.expand")} onPress={() => void expand()} />
+            <IconButton variant="plain" icon={Icons.expand} label={t("compose.expand")} onPress={() => void expand()} disabled={uploads.busy} />
           </View>
           <View style={styles.ctrl}>
             <IconButton icon={mode === "note" ? Icons.note : Icons.send} label={mode === "note" ? t("thread.addNote") : t("thread.send")} onPress={send} disabled={!canSend} />

@@ -410,3 +410,13 @@ describe("delivery marker", () => {
     expect(deliveryState({ direction: "outbound" })).toBeNull();
   });
 });
+
+describe("undone new message", () => {
+  it("what it had comes back once (by key), then nothing", async () => {
+    const { keepUndoneCompose, takeUndoneCompose } = await import("../src/model/undone-compose");
+    const key = keepUndoneCompose({ mailbox: "support", to: ["ana@user.test"], cc: [], subject: "Oi", text: "Olá", attachments: [] });
+    expect(takeUndoneCompose(key)).toMatchObject({ mailbox: "support", subject: "Oi", text: "Olá" });
+    expect(takeUndoneCompose(key)).toBeNull();
+    expect(takeUndoneCompose(undefined)).toBeNull();
+  });
+});
