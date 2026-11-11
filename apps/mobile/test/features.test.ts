@@ -12,7 +12,7 @@ import { createPresence, effectiveState, presenceLine } from "../src/model/prese
 import { ATTACH_LIMIT, canSchedule, editPlan, isLinkRefusal, runScheduled, scheduledOf } from "../src/model/schedule";
 import { pruneForwards } from "../src/model/scheduled-forwards";
 import { menuEntryEnabled, menuEntryKind } from "../src/components/native/menu-items";
-import { canAddTag, moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
+import { canAddTag, createBlock, moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
 import { writtenText } from "../src/model/thread-view";
 import { filtersFor, threadRow } from "../src/model/threads";
 import { inboxOptimisticUpdates } from "../src/offline/optimistic";
@@ -128,6 +128,32 @@ describe("snooze: optimistic rules", () => {
     expect(s.get("inbox:mailboxes", {})[0]).toMatchObject({ unread: 1, threads: 1, snoozed: 0 });
   });
 
+  it("a re-snooze moves the thread to its new place in Adiadas, or out of the page when that place is past what is loaded", () => {
+    const z = (id: string, until: number) => thread({ _id: `email$threads_${id}`, snoozed: true, snoozedUntil: until, unreadCount: 0 });
+    const a = z("a", 100);
+    const b = z("b", 200);
+    const c = z("c", 300);
+    const done = { page: [a, b, c], isDone: true, partial: false };
+    const more = { page: [a, b, c], isDone: false, partial: false };
+    const s = fakeStore([
+      ["inbox:view", { view: "snoozed" }, done],
+      ["inbox:view", { view: "snoozed", limit: 3 }, more],
+      ["inbox:threads", { mailbox: "support", snoozed: true }, { page: [a, b, c], isDone: true, continueCursor: null }],
+    ]);
+    const upd = inboxOptimisticUpdates(() => 50);
+    upd["inbox:snooze"]!(s.store, { threadId: a._id, until: 250 }, rec);
+    expect(ids(s.get("inbox:view", { view: "snoozed" }))).toEqual([b._id, a._id, c._id]);
+    expect(ids(s.get("inbox:threads", { mailbox: "support", snoozed: true }))).toEqual([b._id, a._id, c._id]);
+    expect(s.get("inbox:view", { view: "snoozed" }).page[1].snoozedUntil).toBe(250);
+    // Earlier than all: first.
+    upd["inbox:snooze"]!(s.store, { threadId: c._id, until: 60 }, rec);
+    expect(ids(s.get("inbox:view", { view: "snoozed" }))).toEqual([c._id, b._id, a._id]);
+    // Past the last loaded row of a list with more pages: out of it (the next page has it); a complete list keeps it last.
+    upd["inbox:snooze"]!(s.store, { threadId: b._id, until: 9_000 }, rec);
+    expect(ids(s.get("inbox:view", { view: "snoozed", limit: 3 }))).not.toContain(b._id);
+    expect(ids(s.get("inbox:view", { view: "snoozed" })).at(-1)).toBe(b._id);
+  });
+
   it("the local twins' rules: snoozed only in its view and in inbox:threads with snoozed=true", () => {
     const z = thread({ snoozed: true, snoozedUntil: 5 });
     for (const v of ["all", "unread", "waiting", "assigned"] as const) expect(viewKeeps(v, undefined)(z)).toBe(false);
@@ -214,6 +240,11 @@ describe("tags: optimistic rules", () => {
     // Creating one inline is held to the same cap (checked before the mailbox gets the new tag).
     expect(canAddTag(full)).toBe(false);
     expect(canAddTag(full.slice(1))).toBe(true);
+    // Creating needs the server's id: offline it is blocked (button, row or Enter alike), and so is a full thread.
+    expect(createBlock({ online: false, current: [] })).toBe("offline");
+    expect(createBlock({ online: true, current: full })).toBe("max");
+    expect(createBlock({ online: true, current: full.slice(1) })).toBeNull();
+    expect(createBlock({ online: true })).toBeNull();
     const idx = tagIndex(tags);
     expect(threadTags(["t3", "gone", "tag1"], idx).map((x) => x._id)).toEqual(["tag1", "t3"]);
     expect(visibleChips([1, 2, 3, 4], 2)).toEqual({ shown: [1, 2], more: 2 });

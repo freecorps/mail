@@ -12,7 +12,7 @@ import { Icons } from "../components/icons";
 import { Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
-import { moveTag, TAG_NAME_MAX, tagColor } from "../model/tags";
+import { createBlock, moveTag, TAG_NAME_MAX, tagColor } from "../model/tags";
 import { notify } from "../model/undo";
 import { useColors, useTagColors } from "../theme";
 
@@ -64,6 +64,8 @@ export function TagEditScreen() {
   };
   const doCreate = async () => {
     if (problem || busy) return;
+    // Enter on the keyboard too: offline nothing is created, and the reason shows.
+    if (createBlock({ online })) return notify(t("tags.offlineCreate"));
     setBusy(true);
     try {
       await create({ mailbox, name: clean, color: shownColor });

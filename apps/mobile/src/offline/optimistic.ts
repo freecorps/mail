@@ -132,6 +132,22 @@ function rejoin(store: Store, t: Thread) {
   }
 }
 
+/**
+ * The page with row `i` replaced by `next` at its place in the list's `order`: where it now sorts among the loaded rows,
+ * or out of the page when that place is past the last loaded row of an unfinished list (the server's next page has it).
+ */
+function place(v: { page: Thread[]; isDone: boolean }, i: number, next: Thread, order: (a: Thread, b: Thread) => number): Thread[] {
+  const rest = v.page.filter((_, j) => j !== i);
+  if (!inLoadedRange({ isDone: v.isDone, page: rest }, next, order)) {
+    remember(next);
+    return rest;
+  }
+  // Stable: rows that sort the same keep their order, and an unchanged row stays where it was.
+  if ((i === 0 || order(v.page[i - 1]!, next) <= 0) && (i === v.page.length - 1 || order(next, v.page[i + 1]!) <= 0)) return v.page.map((t, j) => (j === i ? next : t));
+  const at = rest.findIndex((t) => order(next, t) < 0);
+  return at < 0 ? [...rest, next] : [...rest.slice(0, at), next, ...rest.slice(at)];
+}
+
 function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Thread): { before: Thread; after: Thread } | null {
   let original: Thread | null = null;
   const patch = (t: Thread) => ((original ??= t), rawPatch(t));
@@ -147,10 +163,9 @@ function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Th
     if (i < 0) continue;
     const next = patch(value.page[i]!);
     found ??= next;
-    // A filter the thread no longer matches (status, unread, tag, snoozed) drops it from that list.
-    const drop = !threadsKeeps(args)(next);
-    if (drop) remember(next);
-    const page = drop ? value.page.filter((_, j) => j !== i) : value.page.map((t, j) => (j === i ? next : t));
+    // A filter the thread no longer matches (status, unread, tag, snoozed) drops it from that list; otherwise it takes
+    // its place by the list's order ("Adiadas": a re-snooze moves it), or leaves when that is past what is loaded.
+    const page = threadsKeeps(args)(next) ? place(value, i, next, args.snoozed ? viewOrder("snoozed") : newerFirst) : (remember(next), value.page.filter((_, j) => j !== i));
     store.setQuery<any>("inbox:threads", args, { ...value, page });
   }
   // The cross-mailbox views: patched in place, or dropped when it no longer belongs (read in "unread", archived in
@@ -161,8 +176,7 @@ function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Th
     const next = patch(value.page[i]!);
     found ??= next;
     const keep = viewKeeps(args.view, args.status, args.tag)(next);
-    if (!keep) remember(next);
-    const page = keep ? value.page.map((t, j) => (j === i ? next : t)) : value.page.filter((_, j) => j !== i);
+    const page = keep ? place(value, i, next, viewOrder(args.view, args.tag)) : (remember(next), value.page.filter((_, j) => j !== i));
     store.setQuery<any>("inbox:view", args, { ...value, page });
   }
   // The Sent view lists it too, whatever its status: patched in place (its place is when the mailbox last wrote).

@@ -44,6 +44,16 @@ export function tagSearch(tags: readonly Tag[], query: string): { matches: Tag[]
 /** Whether one more tag fits on the thread (at most THREAD_TAGS_MAX), by toggling one or creating a new one. */
 export const canAddTag = (current: readonly string[]): boolean => current.length < THREAD_TAGS_MAX;
 
+/**
+ * Why a new tag can't be created now, or null when it can: it needs the server's id (so a connection), and on a thread
+ * there must be room for one more. The same rule for the button, the row and Enter on the keyboard.
+ */
+export function createBlock(o: { online: boolean; current?: readonly string[] }): "offline" | "max" | null {
+  if (!o.online) return "offline";
+  if (o.current && !canAddTag(o.current)) return "max";
+  return null;
+}
+
 /** The thread's tags after toggling one (at most THREAD_TAGS_MAX; null when the toggle is not allowed). */
 export function toggleTag(current: readonly string[], id: string): string[] | null {
   if (current.includes(id)) return current.filter((x) => x !== id);
