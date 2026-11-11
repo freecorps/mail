@@ -241,7 +241,8 @@ export function Composer({
     const hold = holdForSend(autosave.id(), autosave.forget());
     const draft = hold.draft;
     editor.current?.clear();
-    uploads.clear();
+    // A note takes no files: the reply's uploads (ready or still going) stay for the reply.
+    if (m === "reply") uploads.clear();
     // What was sent, as its draft: an undo or a failure after this composer is gone writes it back, so the text
     // comes back when the conversation opens again (the pending save was dropped by the send, and the server draft
     // may predate the last keystrokes).
