@@ -39,6 +39,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: true,
+    // iPad multitasking (Split View, Slide Over, resizable windows): every orientation on iPad, portrait on iPhone.
+    // `orientation: "portrait"` sets only UISupportedInterfaceOrientations; with a tablet and no full screen, Expo's
+    // prebuild (@expo/config-plugins, withRequiresFullScreen) writes all four into UISupportedInterfaceOrientations~ipad.
+    // The lists split into list and detail when wide.
+    requireFullScreen: false,
     infoPlist: {
       // Standard encryption only: HTTPS/TLS, and on iOS Apple's CryptoKit (HPKE, in the Notification Service Extension)
       // to open sealed pushes. Same declaration as Freecorps' Brigade app, which does the same; it skips the

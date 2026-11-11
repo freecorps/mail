@@ -39,6 +39,8 @@ export interface RowMenuProps {
   disabled?: boolean;
   /** iOS: show the destination as the context menu's preview (default true). */
   preview?: boolean;
+  /** A tap runs this instead of opening `href` (the iPad split: the row selects what the detail pane shows). */
+  onOpen?: (() => void) | undefined;
 }
 
 export interface IconButtonProps {
@@ -46,8 +48,11 @@ export interface IconButtonProps {
   label: string;
   onPress(): void;
   disabled?: boolean;
-  /** `filled` (default): the primary action (send). `plain`: a secondary glyph (attach, expand). */
-  variant?: "filled" | "plain";
+  /**
+   * `filled` (default): the primary action (send). `plain`: a secondary glyph (attach, expand). `toolbar`: a toolbar
+   * item in the accent (the iPad detail pane's bar).
+   */
+  variant?: "filled" | "plain" | "toolbar";
 }
 
 export interface ListFilterProps<T extends string> {

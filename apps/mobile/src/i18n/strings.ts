@@ -415,6 +415,16 @@ const ptBR = {
   "compose.scheduling": "Agendando…",
   "thread.scheduledPending": "Será agendada para {when} quando a conexão voltar",
   "when.yesterday": "Ontem",
+  "split.empty": "Nenhuma conversa selecionada",
+  "keys.compose": "Nova mensagem",
+  "keys.reply": "Responder",
+  "keys.replyAll": "Responder a todos",
+  "keys.archive": "Arquivar",
+  "keys.search": "Buscar",
+  "keys.next": "Próxima conversa",
+  "keys.previous": "Conversa anterior",
+  "keys.close": "Fechar",
+  "keys.send": "Enviar",
 };
 
 export type StringKey = keyof typeof ptBR;
@@ -832,6 +842,16 @@ const en: Record<StringKey, string> = {
   "compose.scheduling": "Scheduling…",
   "thread.scheduledPending": "Will be scheduled for {when} once online",
   "when.yesterday": "Yesterday",
+  "split.empty": "No conversation selected",
+  "keys.compose": "New Message",
+  "keys.reply": "Reply",
+  "keys.replyAll": "Reply All",
+  "keys.archive": "Archive",
+  "keys.search": "Search",
+  "keys.next": "Next Conversation",
+  "keys.previous": "Previous Conversation",
+  "keys.close": "Close",
+  "keys.send": "Send",
 };
 
 const TABLES: Record<Locale, Record<StringKey, string>> = { "pt-BR": ptBR, en };

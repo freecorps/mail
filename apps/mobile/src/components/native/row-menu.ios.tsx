@@ -3,11 +3,23 @@
 import { Link } from "expo-router";
 import type { RowMenuProps } from "./types";
 
-export function RowMenu({ children, title, actions, href, disabled, preview = true }: RowMenuProps) {
+export function RowMenu({ children, title, actions, href, disabled, preview = true, onOpen }: RowMenuProps) {
   // A disabled row (an optimistic thread not yet on the server) neither opens nor shows the menu.
   if (disabled) return <>{children}</>;
   return (
-    <Link href={href as never} asChild>
+    <Link
+      href={href as never}
+      asChild
+      // `onOpen` instead of navigating: a prevented press is not followed (expo-router's Link).
+      {...(onOpen
+        ? {
+            onPress: (e: { preventDefault(): void }) => {
+              e.preventDefault();
+              onOpen();
+            },
+          }
+        : {})}
+    >
       <Link.Trigger>{children}</Link.Trigger>
       {preview ? <Link.Preview /> : null}
       {actions.length ? (

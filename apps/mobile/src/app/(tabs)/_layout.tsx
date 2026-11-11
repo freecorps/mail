@@ -1,6 +1,9 @@
 // Native tabs (UITabBarController / Material 3 navigation bar): Caixas (views and mailboxes), Minhas (assigned to me),
 // Ajustes, and search (role "search": a separate button on iOS 26), each with its own native stack. A thread opens on
-// the root stack, above the tabs (no tab bar in a conversation, like Mail.app).
+// the root stack, above the tabs (no tab bar in a conversation, like Mail.app). On iPad the tab bar adapts into the
+// sidebar (UITabBarController's sidebar, shown or hidden by the member); the lists there split into list and detail
+// (src/model/split.ts). The sidebar lists the tabs only: expo-router has no tab groups, so the views and mailboxes
+// stay in the Caixas column.
 import { NativeTabs } from "expo-router/native-tabs";
 import { useEffect } from "react";
 import { Icons } from "../../components/icons";
@@ -36,7 +39,7 @@ export default function TabsLayout() {
   }, []);
 
   return (
-    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown" labelVisibilityMode="labeled" hidden={hidden}>
+    <NativeTabs tintColor={c.tint} minimizeBehavior="onScrollDown" labelVisibilityMode="labeled" hidden={hidden} sidebarAdaptable>
       <NativeTabs.Trigger name="(mailboxes)">
         <NativeTabs.Trigger.Icon sf={{ default: Icons.mailboxes.ios, selected: Icons.mailboxesSelected.ios }} md={Icons.mailboxes.android} />
         <NativeTabs.Trigger.Label>{t("tabs.mailboxes")}</NativeTabs.Trigger.Label>
