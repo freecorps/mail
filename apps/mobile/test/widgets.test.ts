@@ -2,7 +2,7 @@
 // (previews off: counts only; signed out: nothing of the inbox) and the throttled, deduplicated writer.
 import { describe, expect, it } from "vitest";
 import type { Mailbox, Thread, ViewCounts } from "../src/api";
-import { buildWidgetSnapshots, MINE_ROWS, signedOutSnapshots, snapshotWriter, UNREAD_ROWS, widgetUrls, type Timers, type WidgetInputs } from "../src/widgets/snapshot";
+import { buildWidgetSnapshots, MINE_ROWS, signedOutSnapshots, snapshotWriter, UNREAD_ROWS, widgetInputsReady, widgetUrls, type Timers, type WidgetInputs } from "../src/widgets/snapshot";
 
 const box = (name: string, unread: number, o: Partial<Mailbox> = {}): Mailbox => ({ name, address: `${name}@freecorps.com.br`, displayName: null, unread, threads: 10, ...o });
 const thread = (id: string, o: Partial<Thread> = {}): Thread => ({
@@ -55,7 +55,7 @@ describe("widget snapshots", () => {
   it("Minhas: the count of the Minhas tab, and the latest conversations (sender, subject) linking to them", () => {
     const assigned = [thread("t1", { unreadCount: 2 }), thread("t2", { contactName: undefined, contact: "bob@user.test" }), thread("t/3"), thread("t4")];
     const s = buildWidgetSnapshots(inputs({ counts: counts({ threads: 5 }), assigned })).mine;
-    expect([s.count, s.countText, s.caption]).toEqual([5, "5", "5 conversas abertas"]);
+    expect([s.count, s.countText, s.caption, s.label]).toEqual([5, "5", "5 conversas abertas", "abertas"]);
     expect(s.rows).toHaveLength(MINE_ROWS);
     expect(s.rows[0]).toEqual({ sender: "Ana", subject: "Assunto t1", unread: true, url: "embermail://thread/t1" });
     expect(s.rows[1]?.sender).toBe("bob@user.test");
@@ -72,9 +72,34 @@ describe("widget snapshots", () => {
       expect(s.rows).toEqual([]);
       expect(s.count).toBe(2);
       expect(s.message).toBe("Prévias desligadas");
+      expect(s.hidden).toBe(true);
       expect(JSON.stringify(s)).not.toMatch(/Ana|Assunto/);
     }
     expect(buildWidgetSnapshots(inputs({ counts: counts({ threads: 0 }) })).mine.message).toBe("Nada atribuído a você");
+  });
+
+  it("Minhas: no rows to list is not 'previews off' (the widget shows the count, not the eye-off line)", () => {
+    // Previews on, the count says 2 but the page has none (it failed, or lags the counts): no rows, nothing hidden.
+    for (const assigned of [[], null]) {
+      const s = buildWidgetSnapshots(inputs({ counts: counts({ threads: 2 }), assigned, preview: true })).mine;
+      expect([s.rows, s.hidden, s.message]).toEqual([[], false, ""]);
+    }
+    // Nothing assigned, whatever the preference: the empty state, never "hidden".
+    for (const preview of [true, false, null]) expect(buildWidgetSnapshots(inputs({ counts: counts({ threads: 0 }), preview })).mine.hidden).toBe(false);
+    expect(signedOutSnapshots("pt-BR").mine.hidden).toBe(false);
+  });
+
+  it("writes only once every input settled: not while the preference or the assigned page load", () => {
+    const c = counts({ threads: 2 });
+    const ok = { mailboxes: "success", counts: c, assigned: "success", notifications: "success" } as const;
+    expect(widgetInputsReady(ok)).toBe(true);
+    expect(widgetInputsReady({ ...ok, notifications: "loading" })).toBe(false);
+    expect(widgetInputsReady({ ...ok, assigned: "loading" })).toBe(false);
+    expect(widgetInputsReady({ ...ok, mailboxes: "loading" })).toBe(false);
+    expect(widgetInputsReady({ ...ok, counts: null })).toBe(false);
+    // A failed query is settled: its part is left out (counts only), which is what the widget can honestly show.
+    expect(widgetInputsReady({ ...ok, notifications: "error", assigned: "error" })).toBe(true);
+    expect(widgetInputsReady({ ...ok, mailboxes: "error" })).toBe(false);
   });
 
   it("signed out: no count, mailbox, sender or subject, only 'sign in' in the app's language", () => {

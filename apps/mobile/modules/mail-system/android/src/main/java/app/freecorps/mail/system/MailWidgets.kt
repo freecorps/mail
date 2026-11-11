@@ -236,8 +236,9 @@ private class MailMineWidget : MailWidget("mine") {
       Header(R.drawable.mail_widget_ic_mine, title)
       Spacer(GlanceModifier.defaultWeight())
       if (count > 0) {
+        // The number is right above: the label alone ("abertas").
         BigCount(snapshot.optString("countText"), caption)
-        Secondary(caption, lines = 2)
+        Secondary(snapshot.optString("label").ifEmpty { caption }, lines = 2)
       } else {
         Done(message)
       }
@@ -246,8 +247,9 @@ private class MailMineWidget : MailWidget("mine") {
     Header(R.drawable.mail_widget_ic_mine, title, snapshot.optString("countText"))
     Spacer(GlanceModifier.height(8.dp))
     if (rows.isEmpty()) {
-      // Previews off: counts only.
       Secondary(caption)
+      // Previews off: counts only, and it says so. No rows otherwise (none on the page): just the count.
+      if (!snapshot.optBoolean("hidden")) return
       Spacer(GlanceModifier.defaultWeight())
       Row(verticalAlignment = Alignment.CenterVertically) {
         Image(ImageProvider(R.drawable.mail_widget_ic_private), contentDescription = null, colorFilter = ColorFilter.tint(GlanceTheme.colors.onSurfaceVariant), modifier = GlanceModifier.size(16.dp))

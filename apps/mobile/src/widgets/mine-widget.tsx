@@ -1,7 +1,7 @@
 // iOS "Minhas" widget (WidgetKit through expo-widgets): the open conversations assigned to the member. Small: how many;
 // medium: that and the latest three (sender and subject), each a link to its conversation; lock screen (rectangular):
 // the count and the latest one. Senders and subjects are privacy-sensitive: iOS redacts them on a locked device. With
-// "Mostrar prévia" off the snapshot carries no rows at all (counts only). Self-contained like unread-widget.tsx.
+// "Mostrar prévia" off the snapshot carries no rows at all (counts only, `hidden`). Self-contained like unread-widget.tsx.
 import { HStack, Image, Link, Spacer, Text, VStack } from "@expo/ui/swift-ui";
 import { containerBackground, font, foregroundStyle, frame, lineLimit, minimumScaleFactor, monospacedDigit, privacySensitive, widgetURL } from "@expo/ui/swift-ui/modifiers";
 import { createWidget, type WidgetEnvironment } from "expo-widgets";
@@ -67,7 +67,7 @@ const MineWidget = (props: MineSnapshot, env: WidgetEnvironment) => {
       {header}
       <Spacer />
       {count > 0 ? big : <Image systemName="checkmark.circle" size={30} color={accent} />}
-      <Text modifiers={[font({ textStyle: "footnote" }), secondary, lineLimit(2)]}>{count > 0 ? (p.caption ?? "") : (p.message ?? "")}</Text>
+      <Text modifiers={[font({ textStyle: "footnote" }), secondary, lineLimit(2)]}>{count > 0 ? (p.label ?? p.caption ?? "") : (p.message ?? "")}</Text>
     </VStack>
   );
   if (family === "systemSmall") {
@@ -93,7 +93,7 @@ const MineWidget = (props: MineSnapshot, env: WidgetEnvironment) => {
           ))}
           <Spacer />
         </VStack>
-      ) : count > 0 && p.message ? (
+      ) : p.hidden ? (
         <VStack alignment="leading" spacing={4} modifiers={[frame({ maxWidth: Infinity, maxHeight: Infinity, alignment: "leading" })]}>
           <Image systemName="eye.slash" size={18} color={accent} />
           <Text modifiers={[font({ textStyle: "footnote" }), secondary, lineLimit(2)]}>{p.message}</Text>

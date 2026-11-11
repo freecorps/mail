@@ -77,10 +77,14 @@ export interface MineSnapshot {
   /** Open (and waiting) conversations assigned to the member: what the Minhas tab lists. */
   count: number;
   countText: string;
-  /** "3 conversas abertas". */
+  /** "3 conversas abertas" (lock screen, accessibility, medium). */
   caption: string;
-  /** The latest few; empty when previews are off (counts only). */
+  /** "abertas": under the big count of the small size (one word: it fits a 2x2 cell at the largest text sizes). */
+  label: string;
+  /** The latest few; empty when previews are off (counts only), or when the page has none to list. */
   rows: MineRow[];
+  /** Rows withheld because "Mostrar prévia" is off (or not known): the widget says so, instead of "nothing here". */
+  hidden: boolean;
   /** "Nada atribuído a você" / "Prévias desligadas" / "Entre no Ember Mail". */
   message: string;
   url: string;
@@ -116,6 +120,7 @@ export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
   const assigned = i.counts?.assigned;
   const count = assigned?.threads ?? i.assigned?.length ?? 0;
   const showRows = i.preview === true;
+  const hidden = count > 0 && !showRows;
   const rows = showRows
     ? (i.assigned ?? []).slice(0, MINE_ROWS).map((th) => ({ sender: contactOf(th), subject: th.subject, unread: th.unreadCount > 0, url: widgetUrls.thread(th._id) }))
     : [];
@@ -140,11 +145,25 @@ export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
       count,
       countText: badge(count, assigned?.capped ?? false),
       caption: count > 0 ? t("widget.mine.caption", { count }) : t("widget.mine.none"),
+      label: t("widget.mine.label", { count }),
       rows,
-      message: count === 0 ? t("widget.mine.none") : showRows ? "" : t("widget.mine.private"),
+      hidden,
+      message: count === 0 ? t("widget.mine.none") : hidden ? t("widget.mine.private") : "",
       url: widgetUrls.mine,
     },
   };
+}
+
+export type QueryStatus = "loading" | "success" | "error";
+
+/**
+ * Whether the inputs are settled enough to write: the mailboxes and counts loaded, and the "assigned" page and the
+ * preview preference no longer loading. A write before that would show a state the next one takes back ("Prévias
+ * desligadas" while the preference loads, no rows while the page loads). A query that failed counts as settled: its
+ * part is left out (no rows, counts only), which is true of what the widget can show.
+ */
+export function widgetInputsReady(s: { mailboxes: QueryStatus; counts: ViewCounts | null; assigned: QueryStatus; notifications: QueryStatus }): boolean {
+  return s.mailboxes === "success" && s.counts !== null && s.assigned !== "loading" && s.notifications !== "loading";
 }
 
 /** Signed out (or not a member): no count, name or subject of anyone's inbox, in the app's language. */
@@ -152,7 +171,7 @@ export function signedOutSnapshots(locale: Locale): WidgetSnapshots {
   const signIn = translate(locale, "widget.signIn");
   return {
     unread: { v: WIDGET_SNAPSHOT_VERSION, state: "signedOut", title: translate(locale, "widget.unread.title"), total: 0, totalText: "", caption: signIn, top: null, rows: [], message: signIn, url: widgetUrls.home },
-    mine: { v: WIDGET_SNAPSHOT_VERSION, state: "signedOut", title: translate(locale, "widget.mine.title"), count: 0, countText: "", caption: signIn, rows: [], message: signIn, url: widgetUrls.home },
+    mine: { v: WIDGET_SNAPSHOT_VERSION, state: "signedOut", title: translate(locale, "widget.mine.title"), count: 0, countText: "", caption: signIn, label: "", rows: [], hidden: false, message: signIn, url: widgetUrls.home },
   };
 }
 
