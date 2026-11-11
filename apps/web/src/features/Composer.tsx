@@ -2,7 +2,7 @@
 // them). A rich editor (lazy), files by drop, paste or the clip, the signature with a switch per message, saved
 // replies on "/" or the button. The draft lives on the server (autosaved, restored on open). Sending waits out the
 // undo window (Ajustes), then runs optimistically: the message shows with "Enviando…"; on failure it comes back.
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { Send, StickyNote } from "lucide-react";
 import { useMutation, useQuerySnapshot } from "@freecorps/ember-react";
 import { toast } from "sonner";
@@ -24,10 +24,17 @@ import { useMeName } from "@/model/me";
 import { LazyEditor, type RichEditorHandle } from "./editor/LazyEditor";
 import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
 import { AttachButton, AttachmentTiles, DraftStatus, SavedRepliesButton, SignatureLine } from "./composer/parts";
+import { RecipientInput } from "./composer/RecipientInput";
+import { SendLaterButton } from "./composer/SendLater";
+import { contactsFrom } from "@/model/recipients";
+import { isLinkRefusal, pickSendAt, sendLaterCheck } from "@/model/schedule";
+import { formatAt } from "@/lib/when";
 
 export type ComposerMode = "reply" | "note";
 export interface ComposerHandle {
   focus: (mode: ComposerMode) => void;
+  /** A canceled scheduled reply back in the box ("Editar"): its body, copies and files, as a reply. */
+  load: (c: { html: string; cc: string[]; bcc: string[]; attachments: AttachmentArg[] }) => void;
 }
 
 type Body = { html: string; text: string; empty: boolean };
@@ -50,8 +57,11 @@ export function Composer({
   notes?: boolean;
   /** The localized attribution line over the quoted message ("Em 5 de nov. de 2026 às 10:12, Marina escreveu:"). */
   quoteHeader?: string;
+  /** The member is writing here (focus inside the box, or something in it): presence says "respondendo". */
+  onActivity?: (replying: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const cancelScheduled = useMutation(api.inbox.cancelScheduled);
   const reply = useMutation(api.inbox.reply);
   const note = useMutation(api.inbox.note);
   const saveDraft = useMutation(api.inbox.saveDraft);
@@ -64,6 +74,28 @@ export function Composer({
     bodyNow.current = body;
   });
   const [all, setAll] = useState(false);
+  // Blind copies of a reply (never the conversation's contact: Ember drops those), shown with "Cco".
+  const [bcc, setBcc] = useState<string[]>([]);
+  const [showBcc, setShowBcc] = useState(false);
+  const recent = useQuerySnapshot(api.inbox.recent, showBcc ? { threads: 100 } : "skip");
+  const contacts = useMemo(() => contactsFrom(recent.value, [p.mailbox]), [recent.value, p.mailbox]);
+  const [focused, setFocused] = useState(false);
+  // Focus anywhere in the box (editor, Cco, buttons) counts as replying, for presence.
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const el = formRef.current;
+    if (!el) return;
+    const inn = () => setFocused(true);
+    const out = (e: FocusEvent) => {
+      if (!el.contains(e.relatedTarget as Node | null)) setFocused(false);
+    };
+    el.addEventListener("focusin", inn);
+    el.addEventListener("focusout", out);
+    return () => {
+      el.removeEventListener("focusin", inn);
+      el.removeEventListener("focusout", out);
+    };
+  }, [p.disabled]);
   const [signature, setSignature] = useState(true);
   const [dragging, setDragging] = useState(false);
   const others = p.others ?? [];
@@ -99,6 +131,17 @@ export function Composer({
   useImperativeHandle(ref, () => ({
     focus(m) {
       setMode(m);
+      editor.current?.focus();
+    },
+    load(c) {
+      armed.current = true;
+      sending.current = false;
+      setMode("reply");
+      setAll(c.cc.length > 0);
+      setBcc(c.bcc);
+      setShowBcc(c.bcc.length > 0);
+      uploads.restore(c.attachments);
+      editor.current?.setContent(c.html);
       editor.current?.focus();
     },
   }));
@@ -167,6 +210,10 @@ export function Composer({
     kind.current = d.kind === "note" ? "note" : "reply";
     setMode(kind.current);
     if (d.cc.length) setAll(true);
+    if (d.bcc?.length) {
+      setBcc(d.bcc);
+      setShowBcc(true);
+    }
     uploads.restore(d.attachments);
     const html = d.bodyHtml && !htmlIsEmpty(d.bodyHtml) ? d.bodyHtml : textToHtml(d.text);
     // The editor loads lazily: not there yet, it starts from the body (its initial HTML) instead.
@@ -207,12 +254,13 @@ export function Composer({
             text: body.text,
             bodyHtml: body.html,
             ...(all && others.length ? { cc: others } : {}),
+            ...(bcc.length ? { bcc } : {}),
             ...(ready.length ? { attachments: ready } : {}),
           };
     autosave.update(args);
     // `others` is derived from the thread; a change of it alone is not an edit.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [body, ready, all, mode, p.threadId, autosave, heldHere]);
+  }, [body, ready, all, bcc, mode, p.threadId, autosave, heldHere]);
 
   const addFiles = (files: File[]) => {
     if (mode === "note") return toast(t("composer.noAttachInNote"));
@@ -267,17 +315,23 @@ export function Composer({
 
   if (p.disabled) return <p className="border-t px-6 py-4 text-sm text-muted-foreground">{t("thread.spamNoReply")}</p>;
 
+  // Files whose size is known (fresh uploads; a restored draft's are not): "Enviar mais tarde" is blocked past 10 MB.
+  const laterCheck = sendLaterCheck(uploads.items.filter((x) => x.status !== "failed").map((x) => x.size));
+
   // A note takes no files: uploads still running from the reply never hold it back.
   const waitingFiles = mode === "reply" && uploads.busy;
   const canSend = !body.empty && !waitingFiles;
-  const send = () => {
+  /** `at`: a scheduled send (no undo window: it waits on the server, where "Cancelar envio" takes it back). */
+  const send = (at?: number) => {
     if (body.empty || sending.current) return;
+    if (at !== undefined && mode !== "reply") return;
     if (waitingFiles) return void toast(t("composer.waitUploads"));
     sending.current = true;
     const m = mode;
     const { html, text } = body;
     const files: AttachmentArg[] = m === "reply" ? ready : [];
     const cc = m === "reply" && all && others.length ? others : undefined;
+    const blind = m === "reply" && bcc.length ? bcc : undefined;
     const sig = signature;
     // The draft the send consumes: the one known now, or the one a save already on its way creates (else it would
     // outlive the send). Held until the send is confirmed, undone or fails.
@@ -298,11 +352,14 @@ export function Composer({
             text,
             bodyHtml: html,
             ...(cc ? { cc } : {}),
+            ...(blind ? { bcc: blind } : {}),
             ...(files.length ? { attachments: files } : {}),
           };
-    const restore = () =>
+    // `adopt`: the draft is still on the server (an undone or failed send); a canceled scheduled send consumed it, so
+    // the box starts a new one (and a write-back creates one).
+    const restore = (adopt = true) =>
       restoreSend({
-        draft,
+        draft: draft.then((id) => (adopt ? id : null)),
         // Decided again when the draft is known: the box may go (another conversation, spam) while it is on its way.
         here: () => mounted.current && !disabledNow.current,
         showHere: () => {
@@ -310,6 +367,10 @@ export function Composer({
           setMode(m);
           setAll(!!cc);
           setSignature(sig);
+          if (blind) {
+            setBcc(blind);
+            setShowBcc(true);
+          }
           // A note had no files: the reply's uploads, left alone by the send, stay as they are (restore replaces the
           // list).
           if (m === "reply") uploads.restore(files);
@@ -333,21 +394,46 @@ export function Composer({
                 bodyHtml: html,
                 signature: sig,
                 ...(cc ? { cc } : {}),
+                ...(blind ? { bcc: blind } : {}),
                 ...(files.length ? { attachments: files } : {}),
                 ...(quoteHeader ? { quoteHeader } : {}),
                 ...(draftId ? { draftId } : {}),
+                ...(at !== undefined ? { sendAt: at } : {}),
               })
             : note({ threadId: p.threadId, text, ...(draftId ? { draftId } : {}) }),
         )
-        .then(() => {
+        .then((r) => {
           // Confirmed: the server deleted the draft with the send, so the hold goes.
           hold.release();
-          toast.success(m === "reply" ? t("thread.sent") : t("thread.noteSaved"));
+          if (at === undefined) return void toast.success(m === "reply" ? t("thread.sent") : t("thread.noteSaved"));
+          // Scheduled: Desfazer cancels it on the server and puts it back here.
+          const emailId = (r as { emailId?: string } | undefined)?.emailId;
+          toast.success(t("schedule.done", { when: formatAt(at, Date.now(), locale) }), {
+            ...(emailId
+              ? {
+                  action: {
+                    label: t("common.undo"),
+                    onClick: () =>
+                      void cancelScheduled({ emailId })
+                        .then((c) => {
+                          if (!c.ok) return void toast(t("schedule.gone"));
+                          if (!mounted.current) return void toast(t("schedule.canceled"));
+                          restore(false);
+                          toast(t("schedule.editing"));
+                        })
+                        .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e))),
+                  },
+                }
+              : {}),
+          });
         })
         .catch((e: unknown) => {
           restore();
-          toast.error(t("thread.failed", { message: e instanceof Error ? e.message : String(e) }));
+          toast.error(
+            isLinkRefusal(e) ? t("schedule.blocked") : t("thread.failed", { message: e instanceof Error ? e.message : String(e) }),
+          );
         });
+    if (at !== undefined) return run();
     const delay = undoSendMs();
     const id = schedule({ threadId: p.threadId, kind: m, text }, delay, run, () => {
       restore();
@@ -362,6 +448,14 @@ export function Composer({
   };
 
   const isNote = mode === "note";
+  const later = () =>
+    !isNote &&
+    !body.empty &&
+    pickSendAt(
+      laterCheck,
+      (at) => send(at),
+      () => toast(t("schedule.blocked")),
+    );
   return (
     <form
       className="border-t bg-background px-4 pt-3 pb-4 sm:px-6"
@@ -369,7 +463,9 @@ export function Composer({
         e.preventDefault();
         send();
       }}
+      ref={formRef}
     >
+      <ReportActivity on={!isNote && (focused || !body.empty)} report={p.onActivity} />
       <div
         ref={box}
         className={cn(
@@ -393,7 +489,8 @@ export function Composer({
             if (!v.empty) sending.current = false;
             setBody(v);
           }}
-          onSubmit={send}
+          onSubmit={() => send()}
+          onSubmitLater={isNote ? undefined : later}
           // A note takes no files: the editor then handles a paste as usual (its text, its image) instead of taking it.
           onFiles={isNote ? undefined : addFiles}
           slash={saved.slash}
@@ -415,6 +512,24 @@ export function Composer({
             }}
             className="px-3 pb-2"
           />
+        )}
+        {!isNote && showBcc && (
+          <div className="flex min-w-0 items-center gap-2 border-t px-3 py-1" title={t("composer.bccHint")}>
+            <label htmlFor={`bcc-${p.threadId}`} className="w-8 shrink-0 text-ui text-muted-foreground">
+              {t("composer.bcc")}
+            </label>
+            <RecipientInput
+              id={`bcc-${p.threadId}`}
+              label={t("composer.bcc")}
+              value={bcc}
+              onChange={(next) => {
+                armed.current = true;
+                setBcc(next);
+              }}
+              contacts={contacts}
+              focusOnMount={!bcc.length}
+            />
+          </div>
         )}
         {!isNote && <SignatureLine mailbox={p.mailbox} on={signature} onToggle={setSignature} className="pb-2" />}
         <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-2">
@@ -461,6 +576,17 @@ export function Composer({
             <AttachButton onFiles={addFiles} disabled={isNote} />
           </div>
           <div className="flex items-center gap-3">
+            {!isNote && !showBcc && (
+              <button
+                type="button"
+                onClick={() => setShowBcc(true)}
+                title={t("composer.bccHint")}
+                aria-label={t("composer.bccAdd")}
+                className="h-6 rounded-sm px-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                {t("composer.bcc")}
+              </button>
+            )}
             {!isNote && others.length > 0 && (
               <label
                 className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground"
@@ -483,12 +609,30 @@ export function Composer({
             ) : (
               <span className="hidden text-xs text-muted-foreground sm:inline">{t("thread.sendHint")}</span>
             )}
-            <Button type="submit" size="sm" disabled={!canSend}>
-              {isNote ? t("thread.addNote") : t("thread.send")}
-            </Button>
+            {isNote ? (
+              <Button type="submit" size="sm" disabled={!canSend}>
+                {t("thread.addNote")}
+              </Button>
+            ) : (
+              <span className="flex">
+                <Button type="submit" size="sm" disabled={!canSend} className="rounded-r-none">
+                  {t("thread.send")}
+                </Button>
+                <SendLaterButton check={laterCheck} disabled={!canSend} onPick={(at) => send(at)} />
+              </span>
+            )}
           </div>
         </div>
       </div>
     </form>
   );
+}
+
+/** Tells the conversation whether the member is replying (for presence), only when it changes. */
+function ReportActivity({ on, report }: { on: boolean; report?: (replying: boolean) => void }) {
+  useEffect(() => {
+    report?.(on);
+  }, [on, report]);
+  useEffect(() => () => report?.(false), [report]);
+  return null;
 }

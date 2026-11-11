@@ -1,8 +1,14 @@
 // Icons and labels shared by the sidebar, its rail and the ⌘K palette.
-import { CircleUserRound, Clock, LifeBuoy, Mail, Mails, ShieldCheck, UserRoundCheck, type LucideIcon } from "lucide-react";
+import { AlarmClock, CircleUserRound, Clock, LifeBuoy, Mail, Mails, ShieldCheck, UserRoundCheck, type LucideIcon } from "lucide-react";
 import type { Mailbox, View } from "./api";
 
-export const VIEW_ICON: Record<View, LucideIcon> = { all: Mails, assigned: UserRoundCheck, unread: Mail, waiting: Clock };
+export const VIEW_ICON: Record<View, LucideIcon> = {
+  all: Mails,
+  assigned: UserRoundCheck,
+  unread: Mail,
+  waiting: Clock,
+  snoozed: AlarmClock,
+};
 const NAMED_ICON: Record<string, LucideIcon> = { support: LifeBuoy, privacy: ShieldCheck };
 /** A mailbox's icon, as on mobile (personal, support, privacy); null for the others (they get a monogram). */
 export const mailboxIcon = (b: Pick<Mailbox, "name" | "personal">): LucideIcon | null =>

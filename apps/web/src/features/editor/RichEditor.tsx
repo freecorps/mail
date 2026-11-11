@@ -1,6 +1,7 @@
 // The composer's editor (lazy chunk: TipTap and ProseMirror load on first use, see LazyEditor). StarterKit without
 // headings and rules (Ember's sanitizer keeps p, br, b/strong, i/em, u, s, a, lists, blockquote, code, pre), a
-// formatting bubble on selection, saved replies on "/", files by paste or drop, ⌘/Ctrl+Enter to send.
+// formatting bubble on selection, saved replies on "/", files by paste or drop, ⌘/Ctrl+Enter to send
+// (⌘/Ctrl+Shift+Enter to send later).
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { EditorContent, Extension, useEditor, useEditorState, type Editor } from "@tiptap/react";
@@ -36,6 +37,8 @@ export interface RichEditorProps {
   label: string;
   onChange: (v: { html: string; text: string; empty: boolean }) => void;
   onSubmit: () => void;
+  /** ⌘/Ctrl+Shift+Enter: "Enviar mais tarde" (the date and time to send at). */
+  onSubmitLater?: () => void;
   onFiles?: (files: File[]) => void;
   slash?: SlashItem[];
   /** "/" with no saved reply in this mailbox says so and offers to create one. */
@@ -137,7 +140,8 @@ export default function RichEditor(p: RichEditorProps) {
       handleKeyDown: (_view, e) => {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
           e.preventDefault();
-          latest.current.onSubmit();
+          if (e.shiftKey && latest.current.onSubmitLater) latest.current.onSubmitLater();
+          else latest.current.onSubmit();
           return true;
         }
         return false;

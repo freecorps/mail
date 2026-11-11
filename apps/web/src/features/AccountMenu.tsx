@@ -1,4 +1,19 @@
-import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, PenLine, Rows2, Rows3, Settings, Sun, Undo2 } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Keyboard,
+  Languages,
+  LogOut,
+  Monitor,
+  Moon,
+  PenLine,
+  Rows2,
+  Rows3,
+  Settings,
+  Sun,
+  Tags,
+  Undo2,
+} from "lucide-react";
+import { openPicker } from "@/model/picker";
 import { Avatar } from "@/components/Avatar";
 import {
   DropdownMenu,
@@ -118,6 +133,10 @@ export function AccountMenu({
         <DropdownMenuItem onSelect={() => openComposerDialog({ kind: "signature", mailbox: null })}>
           <PenLine aria-hidden="true" />
           {t("signature.menu")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => openPicker({ kind: "manageTags" })}>
+          <Tags aria-hidden="true" />
+          {t("tags.settings.menu")}
         </DropdownMenuItem>
         {me.admin && onAdmin && (
           <DropdownMenuItem onSelect={onAdmin}>

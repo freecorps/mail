@@ -2,14 +2,15 @@
 // mailboxes, with Sent and Spam (when it has any) under the current one; admin and the account menu at the bottom.
 // "Search or go to…" opens the ⌘K palette. Collapsed, it is an icon rail (52px) with the same destinations behind
 // tooltips. Collapsing is instant: `[` toggles it, and keyboard actions are never animated.
-import { PanelLeftClose, PanelLeftOpen, PenSquare, Search, Send, Settings, ShieldAlert, type LucideIcon } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PenSquare, Search, Send, Settings, Settings2, ShieldAlert, type LucideIcon } from "lucide-react";
+import { TagDot } from "@/components/TagChip";
 import { Kbd } from "@/components/Kbd";
 import { Logo } from "@/components/Logo";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/context";
-import { VIEWS, type Mailbox, type Me, type View, type ViewCount } from "@/lib/api";
+import { VIEWS, type Mailbox, type Me, type TagDoc, type View, type ViewCounts } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { modKey } from "@/model/keys";
 import { badge, viewBadge, type ThreadFilter } from "@/model/threads";
@@ -26,7 +27,13 @@ export interface SidebarProps {
   current: string | null;
   view: View | null;
   filter: ThreadFilter;
-  counts: Record<View, ViewCount> | null;
+  counts: ViewCounts | null;
+  /** Every tag the member sees (by mailbox, in order). */
+  tags: TagDoc[];
+  /** The tag whose threads the list shows. */
+  tag: string | null;
+  onTag: (tagId: string) => void;
+  onManageTags: () => void;
   /** The current mailbox has spam: Spam is listed under it. */
   hasSpam: boolean;
   /** The admin screen is open (nothing in the inbox is current). */
@@ -52,11 +59,12 @@ function current(p: SidebarProps) {
   const inbox = !p.inAdmin;
   const folder: Folder | null = p.filter === "sent" || p.filter === "spam" ? p.filter : null;
   return {
-    view: (v: View) => inbox && p.view === v,
-    mailbox: (name: string) => inbox && !p.view && p.current === name && !folder,
-    folder: (name: string, f: Folder) => inbox && !p.view && p.current === name && folder === f,
+    view: (v: View) => inbox && !p.tag && p.view === v,
+    tag: (id: string) => inbox && p.tag === id,
+    mailbox: (name: string) => inbox && !p.view && !p.tag && p.current === name && !folder,
+    folder: (name: string, f: Folder) => inbox && !p.view && !p.tag && p.current === name && folder === f,
     /** Sent and Spam are listed under the mailbox the list belongs to. */
-    expanded: (name: string) => inbox && !p.view && p.current === name,
+    expanded: (name: string) => inbox && !p.view && !p.tag && p.current === name,
   };
 }
 
@@ -115,6 +123,7 @@ function Full(p: SidebarProps) {
                 label={t(`views.${v}`)}
                 count={viewBadge(v, p.counts)}
                 accent={UNREAD_VIEWS.has(v)}
+                muted={v === "snoozed"}
                 active={cur.view(v)}
                 onClick={() => p.onView(v)}
               />
@@ -177,6 +186,7 @@ function Full(p: SidebarProps) {
             })}
           </ul>
         )}
+        <TagsSection {...p} cur={cur} />
       </nav>
 
       {p.me.admin && p.onAdmin && (
@@ -191,25 +201,89 @@ function Full(p: SidebarProps) {
   );
 }
 
+/**
+ * The tags of every mailbox the member sees, each with its unread count (`inbox:views` `tags`). A name that two
+ * mailboxes share says which mailbox. Nothing while there are none: the tag menu creates the first.
+ */
+function TagsSection(p: SidebarProps & { cur: ReturnType<typeof current> }) {
+  const { t, locale } = useI18n();
+  const nf = new Intl.NumberFormat(locale);
+  if (!p.tags.length) return null;
+  const names = new Map<string, number>();
+  for (const x of p.tags) names.set(x.name.toLowerCase(), (names.get(x.name.toLowerCase()) ?? 0) + 1);
+  const boxName = (m: string) => {
+    const b = p.mailboxes.find((x) => x.name === m);
+    return b?.displayName ?? b?.name ?? m;
+  };
+  return (
+    <section aria-labelledby="sidebar-tags" className="mt-4">
+      <div className="group/tags flex items-center pr-0.5 pb-1 pl-2">
+        <h2 id="sidebar-tags" className="flex-1 text-xs font-medium text-muted-foreground">
+          {t("tags.title")}
+        </h2>
+        <Hint label={t("palette.manageTags")}>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("palette.manageTags")}
+            onClick={p.onManageTags}
+            className="size-6 text-muted-foreground opacity-0 group-hover/tags:opacity-100 focus-visible:opacity-100"
+          >
+            <Settings2 aria-hidden="true" />
+          </Button>
+        </Hint>
+      </div>
+      <ul className="space-y-px">
+        {p.tags.map((x) => {
+          const c = p.counts?.tags?.[x._id];
+          const shared = (names.get(x.name.toLowerCase()) ?? 0) > 1;
+          const label = shared ? t("tags.inMailbox", { name: x.name, mailbox: boxName(x.mailbox) }) : x.name;
+          const threads = c?.threads ?? 0;
+          return (
+            <li key={x._id}>
+              <NavItem
+                icon={null}
+                dot={x.color}
+                label={label}
+                title={`${label}\n${t(threads === 1 ? "tags.settings.threads.one" : "tags.settings.threads.other", { count: nf.format(threads) })}`}
+                count={c && c.unread > 0 ? badge(c.unread) : null}
+                accent
+                active={p.cur.tag(x._id)}
+                onClick={() => p.onTag(x._id)}
+              />
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function NavItem({
   icon: Icon,
+  dot,
   monogram: mono,
   label,
   title,
   count,
   accent = false,
+  muted = false,
   active,
   indent = false,
   ariaLabel,
   onClick,
 }: {
   icon: LucideIcon | null;
+  /** A tag's color (instead of an icon). */
+  dot?: string;
   monogram?: string;
   label: string;
   title?: string;
   count?: string | null;
   /** The count is unread mail (accent color). */
   accent?: boolean;
+  /** The count is not mail to read (snoozed): never in the accent. */
+  muted?: boolean;
   active: boolean;
   indent?: boolean;
   ariaLabel?: string;
@@ -230,6 +304,10 @@ function NavItem({
     >
       {Icon ? (
         <Icon className={cn("size-4 shrink-0", active ? "text-foreground" : "text-muted-foreground")} aria-hidden="true" />
+      ) : dot ? (
+        <span aria-hidden="true" className="grid size-4 shrink-0 place-items-center">
+          <TagDot color={dot} />
+        </span>
       ) : (
         <span
           aria-hidden="true"
@@ -242,7 +320,7 @@ function NavItem({
         {label}
       </span>
       {count && (
-        <span className={cn("shrink-0 text-xs tabular-nums", accent ? "font-semibold text-primary" : "text-muted-foreground")}>
+        <span className={cn("shrink-0 text-xs tabular-nums", accent && !muted ? "font-semibold text-primary" : "text-muted-foreground")}>
           {count}
         </span>
       )}

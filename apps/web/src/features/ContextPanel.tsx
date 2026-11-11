@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/i18n/context";
 import { plural } from "@/i18n/strings";
-import { api, type Attachment, type Thread } from "@/lib/api";
+import { api, type ActivityEntry, type Attachment, type Thread } from "@/lib/api";
+import { ActivityLine } from "./ThreadState";
 import { contactOf, fileSize, formatWhen } from "@/lib/format";
 import { useNow } from "@/lib/now";
 import { cn } from "@/lib/utils";
@@ -24,9 +25,12 @@ export function ContextPanel({
   items,
   urls,
   overlay,
+  activity,
   onClose,
   onOpenThread,
 }: {
+  /** The timeline (`inbox:activity`), oldest first; null while it loads. */
+  activity?: ActivityEntry[] | null;
   thread: Thread;
   items: MessageItem[];
   urls: Record<string, string | null>;
@@ -133,6 +137,32 @@ export function ContextPanel({
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        <section aria-labelledby="context-activity">
+          <h4 id="context-activity" className="mb-1.5 text-xs font-medium text-muted-foreground">
+            {t("activity.title")}
+          </h4>
+          {activity === null || activity === undefined ? (
+            <div className="space-y-2 py-1" aria-hidden="true">
+              <Skeleton className="h-3.5 w-4/5" />
+              <Skeleton className="h-3.5 w-3/5" />
+            </div>
+          ) : !activity.length ? (
+            <p className="text-ui text-muted-foreground">{t("activity.empty")}</p>
+          ) : (
+            // Newest first here (the latest is what someone opening the panel wants), the last 30.
+            <ol className="space-y-0.5">
+              {[...activity]
+                .reverse()
+                .slice(0, 30)
+                .map((e) => (
+                  <li key={e._id}>
+                    <ActivityLine entry={e} />
+                  </li>
+                ))}
+            </ol>
           )}
         </section>
 

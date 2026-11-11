@@ -130,9 +130,10 @@ describe("format and i18n", () => {
       assigned: { threads: 3, unread: 1, capped: false },
       unread: { threads: 0, unread: 0, capped: false },
       waiting: { threads: 2, unread: 0, capped: true },
+      snoozed: { threads: 4, unread: 9, capped: false },
     };
-    // Unread messages for all/unread, threads for assigned/waiting (as on mobile); nothing at zero.
-    expect(VIEWS.map((v) => viewBadge(v, counts))).toEqual(["14", "3", null, "2+"]);
+    // Unread messages for all/unread, threads for assigned/waiting/snoozed (as on mobile); nothing at zero.
+    expect(VIEWS.map((v) => viewBadge(v, counts))).toEqual(["14", "3", null, "2+", "4"]);
     expect(viewBadge("all", null)).toBeNull();
   });
 
@@ -233,13 +234,25 @@ describe("compose", () => {
 describe("route", () => {
   it("round-trips through the URL and drops defaults", () => {
     const r = parseRoute("?m=support&f=waiting&t=email%24threads_1&q=fatura");
-    expect(r).toEqual({ admin: null, view: null, mailbox: "support", filter: "waiting", thread: "email$threads_1", query: "fatura" });
+    expect(r).toEqual({
+      admin: null,
+      view: null,
+      tag: null,
+      mailbox: "support",
+      filter: "waiting",
+      thread: "email$threads_1",
+      query: "fatura",
+    });
     expect(parseRoute(formatRoute(r))).toEqual(r);
-    expect(formatRoute({ admin: null, view: null, mailbox: null, filter: "all", thread: null, query: "" })).toBe("");
+    expect(formatRoute({ admin: null, view: null, tag: null, mailbox: null, filter: "all", thread: null, query: "" })).toBe("");
     // Views across mailboxes; Sent and Spam as a mailbox's lists; unknown values fall back.
     expect(parseRoute("?v=assigned&t=x")).toMatchObject({ view: "assigned", mailbox: null, thread: "x" });
     expect(formatRoute({ ...parseRoute(""), view: "unread", query: "boleto" })).toBe("?v=unread&q=boleto");
     expect(parseRoute("?v=bogus").view).toBeNull();
+    // "Adiadas" is a view; a tag's list is `g`.
+    expect(parseRoute("?v=snoozed").view).toBe("snoozed");
+    expect(formatRoute({ ...parseRoute(""), tag: "email$tags_1" })).toBe("?g=email%24tags_1");
+    expect(parseRoute("?g=email%24tags_1").tag).toBe("email$tags_1");
     expect(parseRoute("?m=support&f=spam").filter).toBe("spam");
     expect(parseRoute("?m=support&f=sent").filter).toBe("sent");
     expect(parseRoute("?f=bogus").filter).toBe("all");

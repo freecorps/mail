@@ -39,6 +39,15 @@ export interface Thread {
   snippet: string;
   assignee?: string;
   assigneeName?: string;
+  /** Ember 0.7: whether any message is unread (the `unread` index). */
+  hasUnread?: boolean;
+  /** Ids of its mailbox's tags (`inbox:tags`), at most 20. */
+  tags?: string[];
+  /** Snoozed until `snoozedUntil` (ms): out of every list and count but "Adiadas" until then. */
+  snoozed?: boolean;
+  snoozedUntil?: number;
+  /** Addresses this thread only ever blind-copied. */
+  blind?: string[];
 }
 
 /** `email$messages` document. */
@@ -55,6 +64,8 @@ export interface Message {
   fromEmail: string;
   to: Address[];
   cc: Address[];
+  /** Outbound only: blind copies (kept for the mailbox, never a header). */
+  bcc?: Address[];
   subject: string;
   text: string;
   html?: string;
@@ -68,6 +79,10 @@ export interface Message {
   autoSubmitted: boolean;
   emailId?: string;
   author?: string;
+  /** A pending scheduled send (`sendAt`): when it goes. Cleared once it is on its way. */
+  scheduledFor?: number;
+  /** An outbound message whose email never went out (canceled or suppressed before its time). */
+  unsent?: true;
   at: number;
   /** Outbound only: the status of the email it sent (`inbox:thread`), and why it was not delivered. */
   delivery?: { status: string; reason: string | null };
@@ -81,6 +96,8 @@ export interface Mailbox {
   personal?: boolean;
   unread: number;
   threads: number;
+  /** Snoozed threads (out of `threads` and `unread` until they wake). */
+  snoozed?: number;
 }
 
 export type Me =
@@ -124,14 +141,85 @@ export interface Member {
 export type SentThread = Thread & { lastSentAt: number };
 export type SentArgs = { mailbox: string; limit?: number };
 
-/** Lists across every mailbox the member sees (`inbox:view`), the home screen's views. */
-export const VIEWS = ["all", "assigned", "unread", "waiting"] as const;
+/** Lists across every mailbox the member sees (`inbox:view`), the home screen's views. `snoozed`: "Adiadas". */
+export const VIEWS = ["all", "assigned", "unread", "waiting", "snoozed"] as const;
 export type View = (typeof VIEWS)[number];
-export type ViewArgs = { view: View; status?: ThreadStatus; limit?: number };
+/** `tag`: only that tag's threads (in its mailbox). */
+export type ViewArgs = { view: View; status?: ThreadStatus; tag?: string; limit?: number };
 /** `partial`: some mailbox had more open/waiting threads than `assigned`/`unread` scan, so older matches may be missing. */
 export type ViewPage = { page: Thread[]; isDone: boolean; partial: boolean };
 /** A view's count (`inbox:views`); `capped` when a mailbox had more threads than the server counts. */
 export type ViewCount = { threads: number; unread: number; capped: boolean };
+/** `inbox:views`: one count per view, and per tag (its threads that are not snoozed; absent before Ember 0.7). */
+export type ViewCounts = Record<View, ViewCount> & { tags?: Record<string, ViewCount> };
+
+// ---------------------------------------------------------------------------------------------- conversation state (#45)
+
+/** Tag colors (`TAG_COLORS` of `@freecorps/ember-email/schema`). */
+export const TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "indigo", "purple", "pink"] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
+/** A mailbox's tag (`inbox:tags`): per mailbox, in its order. */
+export interface TagDoc {
+  _id: string;
+  _creationTime: number;
+  mailbox: string;
+  name: string;
+  nameKey: string;
+  color: string;
+  order: number;
+  createdAt: number;
+}
+
+/** Who did something on the timeline: a member, a name with no member (`userId: null`), or null (the system). */
+export type Actor = { userId: string | null; name: string } | null;
+
+type Entry<K extends string, D> = {
+  _id: string;
+  _creationTime: number;
+  threadId: string;
+  mailbox: string;
+  kind: K;
+  at: number;
+  author?: string;
+  data: D;
+  actor: Actor;
+};
+/** One entry of a thread's timeline (`inbox:activity`), oldest first. */
+export type ActivityEntry =
+  | Entry<"status", { from: ThreadStatus; to: ThreadStatus; messageId?: string }>
+  | Entry<"assigned", { from: string | null; fromName?: string; to: string | null; toName?: string }>
+  | Entry<"tag_added" | "tag_removed", { tag: string; name: string; color: string }>
+  | Entry<"delivery", { emailId: string; status: string; previous: string; messageId?: string; recipient?: string }>
+  | Entry<"snoozed", { until: number; previous?: number }>
+  | Entry<"unsnoozed", { reason: "time" | "inbound" | "manual"; until: number }>
+  | Entry<"scheduled", { emailId: string; messageId: string; sendAt: number }>
+  | Entry<"scheduled_canceled", { emailId: string; messageId?: string }>;
+export type ActivityKind = ActivityEntry["kind"];
+
+/** A send waiting for its `sendAt` (`inbox:scheduled`), soonest first. */
+export interface ScheduledEmail {
+  emailId: string;
+  sendAt: number;
+  subject: string;
+  to: string[];
+  cc?: string[];
+  messageId?: string;
+  author?: string;
+  snippet?: string;
+}
+
+export type PresenceState = "viewing" | "replying";
+/** Someone else on the thread now (`inbox:presence`), oldest first. */
+export interface PresenceRow {
+  userId: string;
+  name: string;
+  state: PresenceState;
+  since: number;
+}
+
+/** What a send takes on top of the composer's: when it goes (`sendAt`, ms, ≤ 366 days) and its blind copies. */
+export type SendExtras = { sendAt?: number; bcc?: string[] };
 
 export type PageOpts = { numItems: number; cursor: string | null };
 
@@ -201,6 +289,7 @@ export interface SavedReply {
 }
 
 type SendResult = { emailId: string; messageId: string; status: string };
+type CancelResult = { ok: true; status: "canceled"; messageId?: string; threadDeleted?: boolean } | { ok: false; status: string };
 type NewThreadResult = SendResult & { threadId: string; number: number };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
@@ -385,16 +474,18 @@ export const api = {
     threads: q<"query", ThreadsArgs, Page<Thread>>("inbox:threads"),
     sent: q<"query", SentArgs, { page: SentThread[]; isDone: boolean }>("inbox:sent"),
     view: q<"query", ViewArgs, ViewPage>("inbox:view"),
-    views: q<"query", Record<string, never>, Record<View, ViewCount>>("inbox:views"),
+    views: q<"query", Record<string, never>, ViewCounts>("inbox:views"),
     thread: q<"query", { threadId: string }, ThreadDetail>("inbox:thread"),
     search: q<"query", { query: string; mailbox?: string }, SearchHit[]>("inbox:search"),
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),
     members: q<"query", { mailbox: string }, Member[]>("inbox:members"),
     attachments: q<"query", { threadId: string }, Record<string, string | null>>("inbox:attachments"),
-    reply: q<"mutation", { threadId: string; text: string; cc?: string[]; quoteHeader?: string } & ComposerArgs, SendResult>("inbox:reply"),
+    reply: q<"mutation", { threadId: string; text: string; cc?: string[]; quoteHeader?: string } & ComposerArgs & SendExtras, SendResult>(
+      "inbox:reply",
+    ),
     forward: q<
       "mutation",
-      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string } & ComposerArgs,
+      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string } & ComposerArgs & SendExtras,
       NewThreadResult
     >("inbox:forward"),
     note: q<"mutation", { threadId: string; text: string; draftId?: string }, string>("inbox:note"),
@@ -403,9 +494,25 @@ export const api = {
     setStatus: q<"mutation", { threadId: string; status: ThreadStatus }, ThreadStatus>("inbox:setStatus"),
     deleteThread: q<"mutation", { threadId: string }, { deleted: boolean; canceled?: number }>("inbox:deleteThread"),
     assign: q<"mutation", { threadId: string; userId: string | null }, string | null>("inbox:assign"),
-    compose: q<"mutation", { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string } & ComposerArgs, NewThreadResult>(
-      "inbox:compose",
-    ),
+    compose: q<
+      "mutation",
+      { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string } & ComposerArgs & SendExtras,
+      NewThreadResult
+    >("inbox:compose"),
+    tags: q<"query", { mailbox?: string }, TagDoc[]>("inbox:tags"),
+    createTag: q<"mutation", { mailbox: string; name: string; color?: string; order?: number }, string>("inbox:createTag"),
+    updateTag: q<"mutation", { tagId: string; name?: string; color?: string; order?: number }, string>("inbox:updateTag"),
+    deleteTag: q<"mutation", { tagId: string }, { deleted: boolean }>("inbox:deleteTag"),
+    setTags: q<"mutation", { threadId: string; tags: string[] }, string[]>("inbox:setTags"),
+    addTag: q<"mutation", { threadId: string; tag: string }, string[]>("inbox:addTag"),
+    removeTag: q<"mutation", { threadId: string; tag: string }, string[]>("inbox:removeTag"),
+    activity: q<"query", { threadId: string; limit?: number }, ActivityEntry[]>("inbox:activity"),
+    snooze: q<"mutation", { threadId: string; until: number | null }, number | null>("inbox:snooze"),
+    unsnooze: q<"mutation", { threadId: string }, null>("inbox:unsnooze"),
+    scheduled: q<"query", { threadId: string }, ScheduledEmail[]>("inbox:scheduled"),
+    cancelScheduled: q<"mutation", { emailId: string }, CancelResult>("inbox:cancelScheduled"),
+    setPresence: q<"mutation", { threadId: string; state: PresenceState | null }, null>("inbox:setPresence"),
+    presence: q<"query", { threadId: string }, PresenceRow[]>("inbox:presence"),
     generateUploadUrl: q<"mutation", { contentType?: string; size: number; sha256?: string; multipart?: boolean }, unknown>(
       "inbox:generateUploadUrl",
     ),

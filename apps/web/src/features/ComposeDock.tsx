@@ -33,12 +33,9 @@ import { LazyEditor, type RichEditorHandle } from "./editor/LazyEditor";
 import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
 import { AttachButton, AttachmentTiles, DraftStatus, SavedRepliesButton, SignatureLine } from "./composer/parts";
 import { RecipientInput } from "./composer/RecipientInput";
-
-/**
- * Cco waits for Ember to take `bcc` on sends (drafts already store it). Flip this, pass `bcc` in `send()` and the
- * field below shows; nothing else changes.
- */
-const BCC_ENABLED = false;
+import { SendLaterButton } from "./composer/SendLater";
+import { formatAt } from "@/lib/when";
+import { isLinkRefusal, pickSendAt, sendLaterCheck } from "@/model/schedule";
 
 export function ComposeDock({
   mailboxes,
@@ -133,8 +130,9 @@ function ComposeWindow({
   contacts: readonly Contact[];
   onOpenThread: (threadId: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const ids = { from: useId(), to: useId(), cc: useId(), bcc: useId(), subject: useId(), error: useId() };
+  const cancelScheduled = useMutation(api.inbox.cancelScheduled);
   const fwd = w.seed.kind === "forward" ? w.seed.forward : null;
   // A forward reopened from ⌘K (a saved draft) does not know the original's files: read them from the conversation.
   const fwdThread = useQuerySnapshot(api.inbox.thread, fwd && !fwd.files.length && fwd.threadId ? { threadId: fwd.threadId } : "skip");
@@ -144,12 +142,19 @@ function ComposeWindow({
     const m = fwdThread.value?.messages.find((x) => x._id === fwd.messageId);
     return m ? forwardedFiles(m.attachments).map((a) => a.filename) : [];
   }, [fwd, fwdThread.value]);
+  // The original's files count toward what a scheduled send takes (unknown size: the server decides).
+  const fwdSizes = useMemo((): Array<number | undefined> => {
+    if (!fwd) return [];
+    if (fwd.sizes) return fwd.sizes;
+    const m = fwdThread.value?.messages.find((x) => x._id === fwd.messageId);
+    return m ? forwardedFiles(m.attachments).map((a) => a.size) : fwd.files.map(() => undefined);
+  }, [fwd, fwdThread.value]);
   const [start] = useState(() => initial(w.seed, defaultMailbox ?? mailboxes[0]?.name ?? ""));
   const [fields, setFields] = useState<Fields>(start);
   const [empty, setEmpty] = useState(htmlIsEmpty(start.html));
   const [showCc, setShowCc] = useState(start.cc.length > 0);
-  // Bcc stays what the draft (or the undone send) had, hidden or not: the autosave writes it back as it is.
   const [bcc, setBcc] = useState<string[]>(start.bcc);
+  const [showBcc, setShowBcc] = useState(start.bcc.length > 0);
   const [signature, setSignature] = useState(start.signature);
   const [error, setError] = useState<{ message: string; field: "to" | "text" | null } | null>(null);
   const editor = useRef<RichEditorHandle>(null);
@@ -215,17 +220,23 @@ function ComposeWindow({
     return more.length ? [...chips, ...more] : chips;
   };
 
-  const send = () => {
+  const laterCheck = sendLaterCheck([...uploads.items.filter((x) => x.status !== "failed").map((x) => x.size), ...fwdSizes]);
+
+  /** `at`: a scheduled send (no undo window: it waits on the server; Desfazer in the toast cancels it there). */
+  const send = (at?: number) => {
     const toList = withPending(fields.to, pending.current.to);
     const ccList = withPending(fields.cc, pending.current.cc);
+    const bccList = withPending(bcc, pending.current.bcc);
     // Each chip is one recipient already (joining and splitting again would cut a name with a comma).
     const to = toList.map(chipOf);
     const cc = ccList.map(chipOf);
-    const bad = [...to, ...cc].filter((c) => !c.valid).map((c) => c.value);
+    const blind = bccList.map(chipOf);
+    const bad = [...to, ...cc, ...blind].filter((c) => !c.valid).map((c) => c.value);
     if (bad.length) return setError({ message: t("compose.invalidList", { list: bad.join(", ") }), field: "to" });
     if (!to.length) return setError({ message: t("compose.invalidTo"), field: "to" });
     if (empty || !fields.text.trim()) return setError({ message: t("compose.empty"), field: "text" });
     if (uploads.busy) return setError({ message: t("composer.waitUploads"), field: null });
+    if (at !== undefined && !laterCheck.ok) return setError({ message: t("schedule.blocked"), field: null });
     // Once per window: a second click or ⌘Enter before the window goes would schedule the same message again. (An
     // undone or failed send comes back in a new window, with its own.)
     if (sending.current) return;
@@ -236,15 +247,17 @@ function ComposeWindow({
     // offer it) until the send is confirmed, undone or fails.
     const hold = holdForSend(autosave.id(), autosave.forget());
     const draft = hold.draft;
-    // An undone or failed send comes back in a window, even with three open (else its text would be lost).
-    const reopen = () =>
-      void draft.then((draftId) => {
+    // An undone or failed send comes back in a window, even with three open (else its text would be lost). A
+    // canceled scheduled send consumed its draft (`consumed`): it comes back without one.
+    const reopen = (consumed = false) =>
+      void draft.then((known) => {
+        const draftId = consumed ? null : known;
         hold.release();
         const restore: Restore = {
           mailbox: fields.mailbox,
           to: toList,
           cc: ccList,
-          bcc,
+          bcc: bccList,
           subject: fields.subject,
           html: fields.html,
           text: fields.text,
@@ -258,6 +271,8 @@ function ComposeWindow({
     closeWindow(w.key);
     const extras = {
       ...(ccList.length ? { cc: ccList } : {}),
+      ...(bccList.length ? { bcc: bccList } : {}),
+      ...(at !== undefined ? { sendAt: at } : {}),
       subject: fields.subject.trim(),
       text: fields.text,
       bodyHtml: fields.html,
@@ -274,14 +289,31 @@ function ComposeWindow({
         .then((r) => {
           // Confirmed: the server deleted the draft with the send, so the hold goes.
           hold.release();
-          toast.success(fwd ? t("forward.sent") : t("compose.sent"), {
-            action: { label: `#${r.number}`, onClick: () => onOpenThread(r.threadId) },
+          if (at === undefined)
+            return void toast.success(fwd ? t("forward.sent") : t("compose.sent"), {
+              action: { label: `#${r.number}`, onClick: () => onOpenThread(r.threadId) },
+            });
+          toast.success(t("schedule.done", { when: formatAt(at, Date.now(), locale) }), {
+            action: {
+              label: t("common.undo"),
+              onClick: () =>
+                void cancelScheduled({ emailId: r.emailId })
+                  .then((c) => {
+                    if (!c.ok) return void toast(t("schedule.gone"));
+                    reopen(true);
+                    toast(t("schedule.editing"));
+                  })
+                  .catch((e: unknown) => toast.error(e instanceof Error ? e.message : String(e))),
+            },
           });
         })
         .catch((e: unknown) => {
           reopen();
-          toast.error(t("thread.failed", { message: e instanceof Error ? e.message : String(e) }));
+          toast.error(
+            isLinkRefusal(e) ? t("schedule.blocked") : t("thread.failed", { message: e instanceof Error ? e.message : String(e) }),
+          );
         });
+    if (at !== undefined) return run();
     const delay = undoSendMs();
     const id = schedule({ threadId: null, kind: fwd ? "forward" : "compose", text: fields.text }, delay, run, () => {
       reopen();
@@ -402,14 +434,29 @@ function ComposeWindow({
               invalid={error?.field === "to"}
               focusOnMount={!start.to.length}
               trailing={
-                !showCc && (
-                  <button
-                    type="button"
-                    onClick={() => setShowCc(true)}
-                    className="h-7 shrink-0 px-1.5 text-ui text-muted-foreground hover:text-foreground"
-                  >
-                    {t("compose.cc")}
-                  </button>
+                (!showCc || !showBcc) && (
+                  <span className="flex shrink-0">
+                    {!showCc && (
+                      <button
+                        type="button"
+                        onClick={() => setShowCc(true)}
+                        className="h-7 px-1.5 text-ui text-muted-foreground hover:text-foreground"
+                      >
+                        {t("compose.cc")}
+                      </button>
+                    )}
+                    {!showBcc && (
+                      <button
+                        type="button"
+                        onClick={() => setShowBcc(true)}
+                        title={t("composer.bccHint")}
+                        aria-label={t("composer.bccAdd")}
+                        className="h-7 px-1.5 text-ui text-muted-foreground hover:text-foreground"
+                      >
+                        {t("compose.bcc")}
+                      </button>
+                    )}
+                  </span>
                 )
               }
             />
@@ -426,9 +473,21 @@ function ComposeWindow({
               />
             </Row>
           )}
-          {BCC_ENABLED && (
+          {showBcc && (
             <Row label={t("compose.bcc")} htmlFor={ids.bcc}>
-              <RecipientInput id={ids.bcc} label={t("compose.bcc")} value={bcc} onChange={setBcc} contacts={contacts} />
+              <RecipientInput
+                id={ids.bcc}
+                label={t("compose.bcc")}
+                value={bcc}
+                onChange={(next) => {
+                  armed.current = true;
+                  setBcc(next);
+                }}
+                onPending={(v) => void (pending.current.bcc = v)}
+                contacts={contacts}
+                invalid={error?.field === "to" && bcc.some((x) => !chipOf(x).valid)}
+                focusOnMount={!bcc.length}
+              />
             </Row>
           )}
           <Row label={t("compose.subject")} htmlFor={ids.subject}>
@@ -452,7 +511,14 @@ function ComposeWindow({
               setEmpty(v.empty);
               setFields((f) => ({ ...f, html: v.html, text: v.text }));
             }}
-            onSubmit={send}
+            onSubmit={() => send()}
+            onSubmitLater={() =>
+              pickSendAt(
+                laterCheck,
+                (at) => send(at),
+                () => setError({ message: t("schedule.blocked"), field: null }),
+              )
+            }
             onFiles={addFiles}
             slash={saved.slash}
             onManageSlash={fields.mailbox ? () => openComposerDialog({ kind: "saved", mailbox: fields.mailbox }) : undefined}
@@ -477,9 +543,12 @@ function ComposeWindow({
           </p>
         )}
         <footer className="flex items-center gap-1 border-t px-2 py-2 max-sm:pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <Button type="submit" size="sm" disabled={uploads.busy}>
-            {t("compose.send")}
-          </Button>
+          <span className="flex">
+            <Button type="submit" size="sm" disabled={uploads.busy} className="rounded-r-none">
+              {t("compose.send")}
+            </Button>
+            <SendLaterButton check={laterCheck} disabled={uploads.busy} onPick={(at) => send(at)} />
+          </span>
           {autosave.failed ? (
             <DraftStatus failed onRetry={autosave.retry} />
           ) : (
