@@ -11,7 +11,7 @@ import { keepsArchived, keepsSnoozed, parseListPrefs, swipeKinds } from "../src/
 import { createPresence, effectiveState, presenceLine } from "../src/model/presence";
 import { ATTACH_LIMIT, canSchedule, isLinkRefusal, runScheduled, scheduledOf } from "../src/model/schedule";
 import { menuEntryEnabled, menuEntryKind } from "../src/components/native/menu-items";
-import { moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
+import { canAddTag, moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
 import { writtenText } from "../src/model/thread-view";
 import { filtersFor, threadRow } from "../src/model/threads";
 import { inboxOptimisticUpdates } from "../src/offline/optimistic";
@@ -208,7 +208,11 @@ describe("tags: optimistic rules", () => {
     expect(tagSearch(tags, "x".repeat(41)).create).toBeNull();
     expect(tagSearch(tags, "").matches).toHaveLength(3);
     expect(toggleTag(["a"], "a")).toEqual([]);
-    expect(toggleTag(Array.from({ length: THREAD_TAGS_MAX }, (_, i) => `t${i}`), "new")).toBeNull();
+    const full = Array.from({ length: THREAD_TAGS_MAX }, (_, i) => `t${i}`);
+    expect(toggleTag(full, "new")).toBeNull();
+    // Creating one inline is held to the same cap (checked before the mailbox gets the new tag).
+    expect(canAddTag(full)).toBe(false);
+    expect(canAddTag(full.slice(1))).toBe(true);
     const idx = tagIndex(tags);
     expect(threadTags(["t3", "gone", "tag1"], idx).map((x) => x._id)).toEqual(["tag1", "t3"]);
     expect(visibleChips([1, 2, 3, 4], 2)).toEqual({ shown: [1, 2], more: 2 });
@@ -295,6 +299,41 @@ describe("scheduled sends", () => {
     expect(s.get("inbox:sent", sent).page).toEqual([]);
     up["inbox:compose"]!(s.store, { mailbox: "support", to: ["lia@user.test"], subject: "Agora", text: "Oi" }, rec);
     expect(s.get("inbox:sent", sent).page.map((t: Thread) => t.subject)).toEqual(["Agora"]);
+  });
+
+  it("a new conversation joins only the lists whose filters it passes: never a tag's, an unread, an assignee or a snoozed one", () => {
+    setReplicaUser("me");
+    const src = thread({ _id: "email$threads_src", tags: ["tag1"] });
+    const lists: Array<[string, Record<string, unknown>]> = [
+      ["inbox:view", { view: "all" }],
+      ["inbox:view", { view: "all", tag: "tag1" }],
+      ["inbox:view", { view: "waiting" }],
+      ["inbox:threads", { mailbox: "support" }],
+      ["inbox:threads", { mailbox: "support", status: "waiting" }],
+      ["inbox:threads", { mailbox: "support", tag: "tag1" }],
+      ["inbox:threads", { mailbox: "support", unread: true }],
+      ["inbox:threads", { mailbox: "support", assignee: "me" }],
+      ["inbox:threads", { mailbox: "support", snoozed: true }],
+      ["inbox:threads", { mailbox: "privacy" }],
+    ];
+    const s = fakeStore([["inbox:thread", { threadId: src._id }, { thread: src, messages: [] }], ...lists.map(([fn, a]) => [fn, a, fn === "inbox:view" ? viewPage([]) : page([])] as [string, Record<string, unknown>, unknown])]);
+    const upd = inboxOptimisticUpdates(() => 1000);
+    upd["inbox:compose"]!(s.store, { mailbox: "support", to: ["lia@user.test"], subject: "Novo", text: "Oi" }, rec);
+    // A forward from a tagged thread is a new conversation without its tags.
+    upd["inbox:forward"]!(s.store, { threadId: src._id, to: ["bia@user.test"], subject: "Fwd", text: "Veja" }, rec);
+    const got = lists.map(([fn, a]) => [JSON.stringify(a), (s.get(fn, a) as { page: Thread[] }).page.length]);
+    expect(got).toEqual([
+      ['{"view":"all"}', 2],
+      ['{"view":"all","tag":"tag1"}', 0],
+      ['{"view":"waiting"}', 2],
+      ['{"mailbox":"support"}', 2],
+      ['{"mailbox":"support","status":"waiting"}', 2],
+      ['{"mailbox":"support","tag":"tag1"}', 0],
+      ['{"mailbox":"support","unread":true}', 0],
+      ['{"mailbox":"support","assignee":"me"}', 0],
+      ['{"mailbox":"support","snoozed":true}', 0],
+      ['{"mailbox":"privacy"}', 0],
+    ]);
   });
 
   it("scheduled counts only once the server confirms; offline it is queued, then confirmed or refused", async () => {
@@ -465,6 +504,36 @@ describe("presence", () => {
     expect(sent.at(-1)).toEqual(["t1", "replying"]);
     expect(p.state("t1")).toBe("replying");
     expect(effectiveState(["viewing", null])).toBe("viewing");
+    vi.useRealTimers();
+  });
+
+  it("reconnect tells the server again at once, also what it was told before the socket dropped (that row may have expired)", () => {
+    vi.useFakeTimers();
+    const sent: Array<[string, string | null]> = [];
+    let up = true;
+    const p = createPresence({ send: (id, s) => sent.push([id, s]), connected: () => up });
+    p.set("t1", "view", "viewing");
+    p.set("t2", "bar", "replying");
+    expect(sent).toEqual([
+      ["t1", "viewing"],
+      ["t2", "replying"],
+    ]);
+    up = false;
+    vi.advanceTimersByTime(3_000);
+    up = true;
+    p.reconnected();
+    // Right away, not at the next 10 s tick.
+    expect(sent.slice(2)).toEqual([
+      ["t1", "viewing"],
+      ["t2", "replying"],
+    ]);
+    // Back from the background: told again at once too.
+    p.setActive(false);
+    p.setActive(true);
+    expect(sent.slice(-2)).toEqual([
+      ["t1", "viewing"],
+      ["t2", "replying"],
+    ]);
     vi.useRealTimers();
   });
 

@@ -416,12 +416,14 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         snippet: args.text.replace(/\s+/g, " ").trim().slice(0, 140),
       };
       for (const { args: qa, value } of store.getAllQueries<any>("inbox:threads") as Array<{ args: ThreadsArgs; value: Page<Thread> | undefined }>) {
-        if (!value || qa.mailbox !== args.mailbox || (qa.status !== undefined && qa.status !== "waiting")) continue;
+        // The list's own filters (status, unread, assignee, tag, snoozed), as the server's answer will apply them.
+        if (!value || !threadsKeeps(qa)(thread)) continue;
         store.setQuery<any>("inbox:threads", qa, { ...value, page: [thread, ...value.page] });
       }
       // The cross-mailbox views it belongs to (all, waiting) show it on top too, and their counts grow with it.
       for (const { args: va, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
-        if (!value || !viewKeeps(va.view, va.status)(thread)) continue;
+        // A tag's list too: a new conversation has no tags, so it never shows in one.
+        if (!value || !viewKeeps(va.view, va.status, va.tag)(thread)) continue;
         store.setQuery<any>("inbox:view", va, { ...value, page: [thread, ...value.page] });
       }
       const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;

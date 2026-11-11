@@ -10,7 +10,7 @@ import { Icons } from "../components/icons";
 import { Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
-import { TAG_NAME_MAX, tagColor, tagSearch, THREAD_TAGS_MAX, toggleTag } from "../model/tags";
+import { canAddTag, TAG_NAME_MAX, tagColor, tagSearch, THREAD_TAGS_MAX, toggleTag } from "../model/tags";
 import { notify } from "../model/undo";
 import { useColors, useTagColors } from "../theme";
 
@@ -39,11 +39,13 @@ export function TagsSheet() {
   // A new tag needs its server id before a thread can carry it: online only, then added at once.
   const create = async (name: string) => {
     if (creating) return;
+    // The thread's cap holds for a new tag too, before the mailbox gets a tag the thread could not carry.
+    if (!canAddTag(current)) return notify(t("tags.max", { count: THREAD_TAGS_MAX }));
     setCreating(true);
     try {
       const id = await createTag({ mailbox, name });
       haptics.success();
-      void addTag({ threadId, tag: id }).catch(() => {});
+      void addTag({ threadId, tag: id }).catch(() => notify(t("common.error")));
       field.current?.clear();
       setQuery("");
     } catch (e) {

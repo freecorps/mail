@@ -41,10 +41,13 @@ export function tagSearch(tags: readonly Tag[], query: string): { matches: Tag[]
   return { matches, create: name && !exists && Array.from(name).length <= TAG_NAME_MAX ? name : null };
 }
 
+/** Whether one more tag fits on the thread (at most THREAD_TAGS_MAX), by toggling one or creating a new one. */
+export const canAddTag = (current: readonly string[]): boolean => current.length < THREAD_TAGS_MAX;
+
 /** The thread's tags after toggling one (at most THREAD_TAGS_MAX; null when the toggle is not allowed). */
 export function toggleTag(current: readonly string[], id: string): string[] | null {
   if (current.includes(id)) return current.filter((x) => x !== id);
-  if (current.length >= THREAD_TAGS_MAX) return null;
+  if (!canAddTag(current)) return null;
   return [...current, id];
 }
 

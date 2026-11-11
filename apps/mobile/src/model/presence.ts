@@ -90,8 +90,12 @@ export function createPresence(o: {
       for (const id of new Set([...threads.keys(), ...told.keys()])) sync(id);
       schedule();
     },
-    /** The connection came back: say again what was not told while it was down. */
+    /**
+     * The connection came back: every thread this member is on is told again now, not at the next tick. What the server
+     * was told before may have expired while the socket was down (rows live 30 s), so nothing counts as told.
+     */
     reconnected() {
+      told.clear();
       for (const id of threads.keys()) sync(id);
     },
     /** For tests and the screen: what the server should know now. */
