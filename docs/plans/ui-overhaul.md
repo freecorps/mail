@@ -244,6 +244,9 @@ e contagens por caixa/status/responsável numa query `counts`. Release e bump.
 | UI de tags / atividade / soneca / agendamento / presença | web: review (#46); mobile: todo (camada própria) |
 | Ações na notificação + badge | todo |
 | Quick actions + widgets | todo |
+| Ações na notificação + badge (+ Notificações por caixa e prévia, do M5) | review (#44) |
+| Quick actions | review (#44) |
+| Widgets | todo |
 | iPad | todo |
 
 ### Onda 6: Polimento
