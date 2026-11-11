@@ -15,7 +15,7 @@ import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
-export { EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner, useDateTimePicker } from "./native";
+export { EmptyState, IconButton, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner, useDateTimePicker, useLabeledPicker } from "./native";
 
 /**
  * The trailing chevron of a row that opens another screen: iOS only (a Settings-style disclosure). Material 3 list
