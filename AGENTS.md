@@ -91,5 +91,12 @@ Kept custom on purpose (no native control on either platform): the composer's re
 UISearchToken is for search bars only), `Avatar`, `UnreadDot`, `StatusPill`/`Chip` (small
 tinted labels inside virtualized `FlatList` rows), `ConnectionBanner` in list headers (the mailbox list shows the
 same state as a native list row), attachment tiles and the message cards. The thread list stays a `FlatList`
-(`@expo/ui` `List` is for short fixed lists). Screenshots: `apps/mobile/docs/screenshots/`. Theme tokens live in
-`src/theme/` (no hex, font size or spacing literal outside it).
+(`@expo/ui` `List` is for short fixed lists). Screenshots: `apps/mobile/docs/screenshots/` (iPhone and iPad, light
+and dark, from the demo seed; the Android ones are from earlier waves). Theme tokens live in `src/theme/` (no hex,
+font size or spacing literal outside it).
+
+Motion (`src/theme/motion.ts`): only transform and opacity move on the UI thread (Reanimated); springs where a finger
+let go, a short ease-out for state; under 300 ms; Reduce Motion keeps fades only. Nothing animates in response to a
+hardware shortcut: read `useKeyStill()` (`src/keys.tsx`, `src/model/key-motion.ts`) where a list or banner would. Sizes
+a gesture depends on come from the view's own layout, not the window (the iPad split's list is a column). Worst-case
+data for `break-ui` only through the dev seed (`SEED_WORST=1`, `SEED_WORST_BULK=<n>`; `apps/mobile/README.md`).

@@ -27,6 +27,44 @@ export function quiet(e: Pick<ActivityEntry, "kind" | "data">): boolean {
   return true;
 }
 
+/** Tags put on (or taken off) by one person this close together are one change: one line, not one per tag. */
+export const TAG_RUN_MS = 2 * 60_000;
+
+/**
+ * Consecutive tag additions (or removals) by the same actor within `TAG_RUN_MS` of each other, nothing else between,
+ * as one entry whose `data.names` lists them (twelve tags applied at once would otherwise be twelve lines). The first
+ * entry's id and time stand for the run. Everything else passes through.
+ */
+export function groupTagRuns(entries: readonly ActivityEntry[]): ActivityEntry[] {
+  const out: ActivityEntry[] = [];
+  let run: { entry: ActivityEntry; names: string[]; last: number } | null = null;
+  const flush = () => {
+    if (!run) return;
+    out.push(run.names.length > 1 ? { ...run.entry, data: { ...run.entry.data, names: run.names } } : run.entry);
+    run = null;
+  };
+  for (const e of entries) {
+    const tagged = e.kind === "tag_added" || e.kind === "tag_removed";
+    if (tagged && run && run.entry.kind === e.kind && (run.entry.actor?.userId ?? null) === (e.actor?.userId ?? null) && Math.abs(e.at - run.last) <= TAG_RUN_MS) {
+      run.names.push(String(e.data?.name ?? ""));
+      run.last = e.at;
+      continue;
+    }
+    flush();
+    if (tagged) run = { entry: e, names: [String(e.data?.name ?? "")], last: e.at };
+    else out.push(e);
+  }
+  flush();
+  return out;
+}
+
+/** "Urgente", "Urgente e Cobrança", "Urgente, Cobrança e mais 10". */
+function tagList(names: readonly string[], t: T): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return t("activity.tagList.two", { a: names[0]!, b: names[1]! });
+  return t("activity.tagList.many", { a: names[0]!, b: names[1]!, count: names.length - 2 });
+}
+
 /** Who did it, as the line says it: "Você", the member's name, or nothing (the system). */
 function who(e: ActivityEntry, me: string | null, t: T): string | null {
   if (!e.actor) return null;
@@ -52,9 +90,10 @@ export function describe(e: ActivityEntry, o: { t: T; me: string | null; when(at
       return line("assign", t("activity.assigned", { who: by ?? t("activity.system"), name: o.me && d.to === o.me ? t("activity.you") : (d.toName ?? d.to) }));
     }
     case "tag_added":
-      return line("tag", t("activity.tagAdded", { who: by ?? t("activity.system"), tag: String(d.name ?? "") }));
-    case "tag_removed":
-      return line("tag", t("activity.tagRemoved", { who: by ?? t("activity.system"), tag: String(d.name ?? "") }));
+    case "tag_removed": {
+      const tag = Array.isArray(d.names) ? tagList(d.names.map(String), t) : String(d.name ?? "");
+      return line("tag", t(e.kind === "tag_added" ? "activity.tagAdded" : "activity.tagRemoved", { who: by ?? t("activity.system"), tag }));
+    }
     case "snoozed":
       return line("snooze", t("activity.snoozed", { who: by ?? t("activity.system"), when: o.when(Number(d.until)) }));
     case "unsnoozed":

@@ -101,7 +101,10 @@ export const ExpandedMessage = memo(function ExpandedMessage({
       ? t("thread.sending")
       : t("thread.queued")
     : m.direction === "inbound"
-      ? m.from.email
+      ? // No display name: the name line is already the address.
+        who === m.from.email
+        ? null
+        : m.from.email
       : note
         ? null
         : t("thread.to", { to: recipients || "—" });
@@ -112,13 +115,15 @@ export const ExpandedMessage = memo(function ExpandedMessage({
       <View style={styles.grow}>
         <View style={styles.line}>
           {outbound ? <Symbol icon={Icons.sent} size={12} color={c.secondaryLabel} weight="semibold" /> : null}
-          <ThemedText variant="subheadline" emphasized numberOfLines={1} style={styles.grow}>
+          {/* The open message is where a long name is read in full: two lines (a row and a folded message cut it). */}
+          <ThemedText variant="subheadline" emphasized numberOfLines={2} style={styles.grow}>
             {note ? `${t("thread.note")} · ${who}` : who}
           </ThemedText>
           {item.pending ? <Symbol icon={Icons.pending} size={13} color={c.secondaryLabel} /> : null}
         </View>
         {sub ? (
-          <ThemedText variant="footnote" tone="secondary" numberOfLines={1}>
+          // An address differs at its end (the domain) as much as at its start: cut in the middle.
+          <ThemedText variant="footnote" tone="secondary" numberOfLines={1} ellipsizeMode={m.direction === "inbound" && !item.pending ? "middle" : "tail"}>
             {sub}
           </ThemedText>
         ) : null}

@@ -1,16 +1,17 @@
 // iOS: "Conversa arquivada · Desfazer" as a floating capsule above the tab bar (iOS has no system toast; this is the
-// shape Mail and Photos use for their undo hints). It fades and rises in 220 ms, ease-out; Reduce Motion: fade only.
+// shape Mail and Photos use for their undo hints). It fades and rises in 220 ms, ease-out; Reduce Motion: fade only;
+// after a hardware shortcut (E): in place, no motion.
 import { Platform, Pressable, StyleSheet, View } from "react-native";
-import Animated, { Easing, FadeIn, FadeInDown, FadeOut } from "react-native-reanimated";
+import Animated, { FadeIn, FadeInDown, FadeOut } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useI18n } from "../../i18n";
+import { useKeyStill } from "../../keys";
 import { haptics } from "../../lib/haptics";
 import { undoStore, useUndo } from "../../model/undo";
-import { corner, minTouch, radius, spacing, useColors } from "../../theme";
+import { corner, EASE_OUT, minTouch, motion, radius, spacing, useColors } from "../../theme";
 import { ThemedText } from "../themed-text";
 import type { UndoBannerProps } from "./types";
 
-const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 /** The tab bar (or, in Edit mode, the bottom toolbar) it floats above: iOS 26's floating bar is taller. */
 const BAR = parseInt(String(Platform.Version), 10) >= 26 ? 62 : 49;
 
@@ -19,14 +20,19 @@ export function UndoBanner({ reduced }: UndoBannerProps) {
   const c = useColors();
   const { t } = useI18n();
   const insets = useSafeAreaInsets();
+  const still = useKeyStill();
   if (!entry) return null;
-  const enter = reduced ? FadeIn.duration(150) : FadeInDown.duration(220).easing(EASE_OUT).withInitialValues({ transform: [{ translateY: 12 }] });
+  const enter = still
+    ? undefined
+    : reduced
+      ? FadeIn.duration(motion.fast).easing(EASE_OUT)
+      : FadeInDown.duration(motion.base).easing(EASE_OUT).withInitialValues({ transform: [{ translateY: 12 }] });
   return (
     <View pointerEvents="box-none" style={[styles.wrap, { bottom: insets.bottom + BAR + spacing.sm }]}>
       <Animated.View
         key={entry.id}
         entering={enter}
-        exiting={FadeOut.duration(150)}
+        exiting={FadeOut.duration(motion.fast).easing(EASE_OUT)}
         style={[styles.capsule, { backgroundColor: c.surface, shadowColor: "#000" }, !entry.undo && styles.notice]}
         accessibilityLiveRegion="polite"
       >

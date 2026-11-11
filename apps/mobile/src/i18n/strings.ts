@@ -398,6 +398,8 @@ const ptBR = {
   "activity.unassigned": "{who} tirou a atribuição",
   "activity.tagAdded": "{who} adicionou {tag}",
   "activity.tagRemoved": "{who} removeu {tag}",
+  "activity.tagList.two": "{a} e {b}",
+  "activity.tagList.many": "{a}, {b} e mais {count}",
   "activity.snoozed": "{who} adiou até {when}",
   "activity.wokeTime": "Voltou da soneca",
   "activity.wokeInbound": "Voltou com uma resposta",
@@ -825,6 +827,8 @@ const en: Record<StringKey, string> = {
   "activity.unassigned": "{who} unassigned it",
   "activity.tagAdded": "{who} added {tag}",
   "activity.tagRemoved": "{who} removed {tag}",
+  "activity.tagList.two": "{a} and {b}",
+  "activity.tagList.many": "{a}, {b} and {count} more",
   "activity.snoozed": "{who} snoozed it until {when}",
   "activity.wokeTime": "Back from snooze",
   "activity.wokeInbound": "Back with an answer",
@@ -858,11 +862,24 @@ const TABLES: Record<Locale, Record<StringKey, string>> = { "pt-BR": ptBR, en };
 
 export type Vars = Record<string, string | number>;
 
-/** `{count}` strings may have a singular form under `<key>.one`, used when count is 1. */
+const counts: Partial<Record<Locale, Intl.NumberFormat>> = {};
+/** A count in the locale's digits and grouping: "10.482 não lidas", "10,482 unread" (never "10482"). */
+const formatCount = (locale: Locale, n: number) => (counts[locale] ??= new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })).format(n);
+
+/**
+ * `{count}` strings may have a singular form under `<key>.one`, used when count is 1. A numeric `{count}` is grouped
+ * for the locale; other numbers (a thread's #number) go in as they are.
+ */
 export function translate(locale: Locale, key: StringKey, vars?: Vars): string {
   const one = vars?.count === 1 ? (`${key}.one` as StringKey) : null;
   const s = (one && (TABLES[locale][one] ?? ptBR[one])) || (TABLES[locale][key] ?? ptBR[key] ?? key);
-  return vars ? s.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? String(vars[k]) : m)) : s;
+  return vars
+    ? s.replace(/\{(\w+)\}/g, (m, k: string) => {
+        if (!(k in vars)) return m;
+        const v = vars[k]!;
+        return k === "count" && typeof v === "number" ? formatCount(locale, v) : String(v);
+      })
+    : s;
 }
 
 /** Device language tags (most preferred first) → UI locale: English only when the device prefers it. */

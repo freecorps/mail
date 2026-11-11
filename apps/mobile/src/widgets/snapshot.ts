@@ -5,7 +5,7 @@
 // them. A tap opens one of the app's deep links (src/navigation.ts).
 import type { Mailbox, Thread, ViewCounts } from "../api";
 import { translate, type Locale } from "../i18n/strings";
-import { contactOf } from "../lib/format";
+import { contactOf, displaySubject } from "../lib/format";
 import { badge, ownFirst } from "../model/threads";
 
 /** The app's URL scheme (app.config.ts `scheme`). */
@@ -114,11 +114,25 @@ export interface WidgetInputs {
   preview: boolean | null;
 }
 
+/** Longest text a widget row carries: one line of a medium widget, with room to spare (it is cut there anyway). */
+const WIDGET_TEXT_MAX = 80;
+
+/**
+ * A name or subject as one widget line: whitespace and line breaks collapsed (a pasted subject keeps its newlines),
+ * capped by characters as the eye counts them (never half an emoji), `fallback` when nothing is left.
+ */
+export function widgetLine(s: string | null | undefined, fallback: string): string {
+  const one = (s ?? "").replace(/\s+/g, " ").trim();
+  if (!one) return fallback;
+  const chars = Array.from(one);
+  return chars.length > WIDGET_TEXT_MAX ? `${chars.slice(0, WIDGET_TEXT_MAX - 1).join("").trimEnd()}…` : one;
+}
+
 /** The member's inbox as the two widgets show it. */
 export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
   const t = (k: Parameters<typeof translate>[1], vars?: Parameters<typeof translate>[2]) => translate(i.locale, k, vars);
   const boxes = ownFirst(i.mailboxes).map((b, order) => ({ b, order }));
-  const rowOf = (b: Mailbox): UnreadRow => ({ label: b.displayName || b.name, count: badge(b.unread), unread: b.unread, url: widgetUrls.mailbox(b.name) });
+  const rowOf = (b: Mailbox): UnreadRow => ({ label: widgetLine(b.displayName, widgetLine(b.name, b.address)), count: badge(b.unread), unread: b.unread, url: widgetUrls.mailbox(b.name) });
   const ranked = [...boxes].sort((x, y) => y.b.unread - x.b.unread || x.order - y.order).map((x) => x.b);
   const total = boxes.reduce((n, x) => n + x.b.unread, 0);
   const top = ranked[0] && ranked[0].unread > 0 ? rowOf(ranked[0]) : undefined;
@@ -128,7 +142,9 @@ export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
   const showRows = i.preview === true;
   const hidden = count > 0 && !showRows;
   const rows = showRows
-    ? (i.assigned ?? []).slice(0, MINE_ROWS).map((th) => ({ sender: contactOf(th), subject: th.subject, unread: th.unreadCount > 0, url: widgetUrls.thread(th._id) }))
+    ? (i.assigned ?? [])
+        .slice(0, MINE_ROWS)
+        .map((th) => ({ sender: widgetLine(contactOf(th), th.contact), subject: widgetLine(displaySubject(th.subject, ""), t("threads.noSubject")), unread: th.unreadCount > 0, url: widgetUrls.thread(th._id) }))
     : [];
 
   return {

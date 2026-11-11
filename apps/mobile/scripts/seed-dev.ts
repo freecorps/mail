@@ -8,8 +8,11 @@
 //   bun scripts/seed-dev.ts                                            # terminal 2 (apps/mobile)
 //
 // Env: EMBER_URL (default http://127.0.0.1:8787), EMBER_ADMIN_TOKEN (dev-admin), SEED_EMAIL / SEED_PASSWORD.
-// SEED_WORST=1 adds break-ui worst cases for the thread list: a huge name, an unbreakable address with no name, a
-// one-letter name, emoji, CJK and Arabic names, an empty subject, an unbreakable subject.
+// SEED_WORST=1 adds break-ui worst cases (all plausible, all on `.test` addresses): a huge name, an unbreakable address
+// with no name, a one-letter name, emoji-first, CJK, Arabic and Vietnamese names, an empty subject, an unbreakable file
+// name as the subject, a long URL as the preview, and tags: twelve on one conversation, the longest name the server
+// accepts (40), an unbreakable German compound, an emoji. SEED_WORST_BULK=<n> also sends n short unread messages to
+// support@ (counts past 99 and the "99+" badges; 150 is enough). Development data only: nothing here ships in the app.
 const URL_ = (process.env.EMBER_URL ?? "http://127.0.0.1:8787").replace(/\/$/, "");
 const ADMIN = process.env.EMBER_ADMIN_TOKEN ?? "dev-admin";
 const EMAIL = process.env.SEED_EMAIL ?? "bia@acme.test";
@@ -145,11 +148,11 @@ const MAILS: Array<Parameters<typeof mime>[0] & { envelope: string; rcpt: string
   },
 ];
 
-const worst = (i: number, from: string, envelope: string, subject: string, text: string) => ({
+const worst = (i: number, from: string, envelope: string, subject: string, text: string, rcpt = `support@${DOMAIN}`) => ({
   envelope,
-  rcpt: `support@${DOMAIN}`,
+  rcpt,
   from,
-  to: `support@${DOMAIN}`,
+  to: rcpt,
   subject,
   text,
   id: `seed-worst-${i}@worst.test`,
@@ -158,12 +161,110 @@ const worst = (i: number, from: string, envelope: string, subject: string, text:
 });
 const WORST = [
   worst(1, '"Maximiliano Bartholomeu de Albuquerque Cavalcanti Figueiredo Sobrinho Júnior" <max@worst.test>', "max@worst.test", "Assunto muito longo que não cabe em uma linha de jeito nenhum, nem com a tela deitada, nem no iPad Pro de 13 polegadas", "Prévia longa ".repeat(30)),
-  worst(2, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbb@subdominio-muito-longo-mesmo.worst.test", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbb@subdominio-muito-longo-mesmo.worst.test", "Reembolso_" + "x".repeat(120), "https://worst.test/" + "a".repeat(200)),
-  worst(3, '"X" <x@worst.test>', "x@worst.test", "Oi", "."),
+  // No display name: the row, the header and the reply's To show the bare address, with nowhere to wrap.
+  worst(2, "bartholomew.fitzgerald+billing-notifications@northwind-industries-holdings.worst.test", "bartholomew.fitzgerald+billing-notifications@northwind-industries-holdings.worst.test", "Q3_Board_Deck_FINAL_revised_v12_approved_by_legal_and_finance_2026-11-10.pdf", "https://portal.northwind-industries-holdings.worst.test/workspaces/acme/projects/q3-launch/docs/9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f?tab=comments&filter=unresolved"),
+  worst(3, '"J" <j@worst.test>', "j@worst.test", "Oi", "."),
   worst(4, '"🔥🔥 Equipe Fogo 🚒" <fogo@worst.test>', "fogo@worst.test", "🎉🎉🎉 Promoção 🎉🎉🎉", "😀😃😄😁😆😅🤣😂🙂🙃😉😊😇🥰😍🤩😘😗☺️😚😙🥲😋😛😜🤪😝🤑🤗🤭🫢🫣🤫🤔"),
   worst(5, '"李小龙" <li@worst.test>', "li@worst.test", "", "这是一封没有主题的邮件。"),
   worst(6, '"محمد عبد الله" <m@worst.test>', "m@worst.test", "طلب استرداد", "مرحبا، أريد استرداد المبلغ."),
+  worst(7, '"Đặng Thị Ngọc Hân" <han@worst.test>', "han@worst.test", "Hóa đơn tháng Mười Một bị tính hai lần", "Xin chào, tôi bị trừ tiền hai lần cho cùng một hóa đơn. Ảnh chụp màn hình đính kèm."),
+  worst(8, '"Aleksandra Wiśniewska-Kowalczyk" <aleksandra.wisniewska-kowalczyk@sub.department.region.worst.test>', "aleksandra.wisniewska-kowalczyk@sub.department.region.worst.test", "Wniosek o usunięcie danych", "Dzień dobry, proszę o usunięcie moich danych osobowych zgodnie z RODO.", `privacy@${DOMAIN}`),
 ];
+
+/** Tags for the worst case (support@): twelve land on the long-name conversation, a few on the others. */
+const WORST_TAGS = [
+  ["Urgente", "red"],
+  ["Cobrança", "orange"],
+  ["feedback-do-onboarding-de-clientes-corps", "blue"], // 40: the server's limit
+  ["Benachrichtigungseinstellungen", "purple"],
+  ["🔥 VIP", "yellow"],
+  ["q3", "green"],
+  ["revisar", "teal"],
+  ["bug", "pink"],
+  ["LGPD", "indigo"],
+  ["reembolso", "gray"],
+  ["pós-venda", "gray"],
+  ["parceria", "blue"],
+] as const;
+
+/** Better Auth (bearer) → the Ember JWT, for calling the member's functions over HTTP. */
+async function jwt(): Promise<string> {
+  const r = await fetch(`${URL_}/api/auth/sign-in/email`, { method: "POST", headers: { origin: URL_, "content-type": "application/json" }, body: JSON.stringify({ email: EMAIL, password: PASSWORD }) });
+  const session = r.headers.get("set-auth-token");
+  if (!session) throw new Error(`sign-in for tags: ${r.status}`);
+  const t = await call("/api/auth/token", { headers: { authorization: `Bearer ${session}` } });
+  if (typeof t.body?.token !== "string") throw new Error(`token: ${t.status}`);
+  return t.body.token;
+}
+
+async function fn(kind: "query" | "mutation", name: string, args: unknown, token: string) {
+  const r = await call(`/api/${kind}`, { method: "POST", headers: { authorization: `Bearer ${token}` }, json: { fn: `inbox:${name}`, args, shard: "global:main" } });
+  if (r.status >= 300 || r.body?.error) throw new Error(`${name}: ${r.status} ${JSON.stringify(r.body?.error ?? r.body)}`);
+  return r.body?.value ?? r.body;
+}
+
+/** The demo's tags (always): two on the invoice, one on the LGPD request. */
+const DEMO_TAGS: Record<string, ReadonlyArray<readonly [string, string]>> = {
+  support: [
+    ["Urgente", "red"],
+    ["Cobrança", "orange"],
+  ],
+  privacy: [["LGPD", "indigo"]],
+};
+const DEMO_PLAN: Record<string, Array<[string, string[]]>> = {
+  support: [["marina@cliente.test", ["Urgente", "Cobrança"]]],
+  privacy: [["joao@pessoa.test", ["LGPD"]]],
+};
+
+/** Creates a mailbox's tags (reusing those a previous run made: names are unique per mailbox) and sets them on threads by contact. */
+async function tagMailbox(token: string, mailbox: string, tags: ReadonlyArray<readonly [string, string]>, plan: Array<[string, string[]]>) {
+  const existing = ((await fn("query", "tags", {}, token)) as Array<{ _id: string; name: string; mailbox: string }>).filter((x) => x.mailbox === mailbox);
+  const ids = new Map<string, string>();
+  for (const [name, color] of tags) {
+    const found = existing.find((x) => x.name.toLowerCase() === name.toLowerCase());
+    ids.set(name, found ? found._id : ((await fn("mutation", "createTag", { mailbox, name, color }, token)) as string));
+  }
+  const page = (await fn("query", "threads", { mailbox, paginationOpts: { numItems: 100, cursor: null } }, token)) as { page: Array<{ _id: string; contact: string }> };
+  let set = 0;
+  for (const [contact, names] of plan) {
+    const threadId = page.page.find((th) => th.contact === contact)?._id;
+    if (!threadId) continue;
+    await fn("mutation", "setTags", { threadId, tags: names.map((n) => ids.get(n)!).filter(Boolean) }, token);
+    set++;
+  }
+  console.log(`  tags: ${ids.size} in ${mailbox}@, set on ${set} conversations`);
+}
+
+async function seedTags(worstOn: boolean) {
+  const token = await jwt();
+  const names = WORST_TAGS.map(([n]) => n);
+  await tagMailbox(token, "support", worstOn ? [...DEMO_TAGS.support!, ...WORST_TAGS.filter(([n]) => !DEMO_TAGS.support!.some(([d]) => d === n))] : DEMO_TAGS.support!, [
+    ...DEMO_PLAN.support!,
+    ...(worstOn
+      ? ([
+          ["max@worst.test", names],
+          ["bartholomew.fitzgerald+billing-notifications@northwind-industries-holdings.worst.test", [names[2]!, names[3]!]],
+          ["fogo@worst.test", [names[4]!]],
+          ["m@worst.test", [names[8]!, names[9]!]],
+        ] as Array<[string, string[]]>)
+      : []),
+  ]);
+  await tagMailbox(token, "privacy", DEMO_TAGS.privacy!, DEMO_PLAN.privacy!);
+}
+
+/** n short unread messages from distinct senders (each its own conversation). */
+const bulk = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    envelope: `cliente${i + 1}@bulk.test`,
+    rcpt: `support@${DOMAIN}`,
+    from: `"Cliente ${i + 1}" <cliente${i + 1}@bulk.test>`,
+    to: `support@${DOMAIN}`,
+    subject: `Pedido #${10_000 + i}`,
+    text: "Olá, alguma novidade sobre o meu pedido?",
+    id: `seed-bulk-${i}@bulk.test`,
+    date: new Date(),
+    agoMin: 60 * 24 * 30 + i,
+  }));
 
 async function main() {
   console.log(`seeding ${URL_}`);
@@ -178,11 +279,13 @@ async function main() {
   const m = await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: userId, name: "Bia Santos", mailboxes: ["support", "privacy"] } });
   if (m.status >= 300) throw new Error(`member: ${m.status} ${JSON.stringify(m.body)}`);
   await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: "teammate-caio", name: "Caio Rocha", mailboxes: ["support"] } });
-  for (const mail of [...MAILS, ...(process.env.SEED_WORST === "1" ? WORST : [])].reverse()) {
+  const worstOn = process.env.SEED_WORST === "1";
+  for (const mail of [...MAILS, ...(worstOn ? WORST : []), ...bulk(Math.max(0, Math.floor(Number(process.env.SEED_WORST_BULK ?? 0) || 0)))].reverse()) {
     const raw = mime({ ...mail, date: new Date(Date.now() - mail.agoMin * 60_000) });
     const r = await fetch(`${URL_}/cdn-cgi/local/email?from=${encodeURIComponent(mail.envelope)}&to=${encodeURIComponent(mail.rcpt)}`, { method: "POST", body: raw });
     console.log(`  ${mail.rcpt} ← ${mail.envelope}: ${r.status} ${r.status >= 300 ? await r.text() : ""}`);
   }
+  await seedTags(worstOn);
   console.log(`member: ${EMAIL} / ${PASSWORD} (user id ${userId})`);
 }
 

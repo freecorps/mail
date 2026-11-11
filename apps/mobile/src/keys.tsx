@@ -2,9 +2,10 @@
 // (modules/mail-keys: UIKeyCommand, listed in the ⌘-hold overlay) and the hook screens register their handlers with.
 // Android and a build without the module: the hooks register, nothing ever dispatches.
 import { requireNativeView, requireOptionalNativeModule } from "expo";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StyleSheet, type ViewProps } from "react-native";
 import { useI18n } from "./i18n";
+import { keyMotion } from "./model/key-motion";
 import { actionOf, createShortcutRegistry, keyCommands, SHORTCUT_TITLES, type KeyCommandSpec, type ShortcutAction, type ShortcutHandlers } from "./model/shortcuts";
 
 type NativeKeysProps = ViewProps & { commands: KeyCommandSpec[]; onCommand(e: { nativeEvent: { id: string } }): void };
@@ -34,7 +35,10 @@ export function KeyCommandsRoot({ children }: { children: ReactNode }) {
       commands={commands}
       onCommand={(e) => {
         const a = actionOf(e.nativeEvent.id);
-        if (a) shortcuts.dispatch(a);
+        if (!a) return;
+        // Still first (what would animate re-renders without it), then the action, one frame later.
+        keyMotion.mark();
+        requestAnimationFrame(() => shortcuts.dispatch(a));
       }}
     >
       {children}
@@ -59,4 +63,9 @@ export function useShortcuts(handlers: ShortcutHandlers, active = true) {
   useEffect(() => {
     if (active) shortcuts.changed();
   }, [offered, active]);
+}
+
+/** A hardware shortcut ran just now: respond in place, without animating (src/model/key-motion.ts). */
+export function useKeyStill(): boolean {
+  return useSyncExternalStore(keyMotion.subscribe, () => keyMotion.still());
 }

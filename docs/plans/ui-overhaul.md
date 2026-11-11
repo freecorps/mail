@@ -77,7 +77,7 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
 
 | Tarefa | Status |
 |---|---|
-| Subir skills atualizadas (`.agents/skills`, `.claude/skills`, `skills-lock.json`) e este plano | doing |
+| Subir skills atualizadas (`.agents/skills`, `.claude/skills`, `skills-lock.json`) e este plano | done (#30) |
 
 ### Onda 1 (paralelo): Ember E1 + Mobile M1/M2
 
@@ -120,7 +120,7 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
 | Tarefa | Status |
 |---|---|
 | api: visões (`inbox:view`, `inbox:views`) | review |
-| E1 email liso + assinatura + HTML (Ember) | todo |
+| E1 email liso + assinatura + HTML (Ember) | done (Ember 0.6.0, #38) |
 | M1 fundação mobile | review (#32) |
 | M2 navegação mobile | review (#33) |
 
@@ -227,7 +227,7 @@ e contagens por caixa/status/responsável numa query `counts`. Release e bump.
 | Tarefa | Status |
 |---|---|
 | W4 lista web | review (#39) |
-| M5 ajustes + login mobile | todo |
+| M5 ajustes + login mobile | review (#44, #47) |
 | E2 tags, atividade, soneca, agendamento, presença (Ember) | done (ember#62, ember#63, v0.7.0) |
 | api/03 Ember 0.7 + wrappers | review (#45) |
 
@@ -241,15 +241,13 @@ e contagens por caixa/status/responsável numa query `counts`. Release e bump.
 
 | Tarefa | Status |
 |---|---|
-| UI de tags / atividade / soneca / agendamento / presença | web: review (#46); mobile: todo (camada própria) |
-| Ações na notificação + badge | todo |
-| Quick actions + widgets | todo |
+| UI de tags / atividade / soneca / agendamento / presença | web: review (#46); mobile: review (#47) |
 | UI de tags / atividade / soneca / agendamento / presença: mobile (+ Cco) | review (#47) |
 | Ações na notificação + badge (+ Notificações por caixa e prévia, do M5) | review (#44) |
 | Quick actions | review (#44) |
 | Badge certo depois de ler em outro aparelho (push silencioso com `badge` no `markRead`/arquivar) | todo |
-| Widgets | review |
-| iPad | todo |
+| Widgets | review (#51) |
+| iPad | review (#53) |
 
 ### Onda 6: Polimento
 
@@ -259,6 +257,6 @@ e contagens por caixa/status/responsável numa query `counts`. Release e bump.
 
 | Tarefa | Status |
 |---|---|
-| Passada de movimento + break-ui | web em review (`ui/web/08-polish`); mobile todo |
-| Admin + web no celular | web em review (`ui/web/08-polish`) |
-| Screenshots + READMEs | web em review (`ui/web/09-docs`); mobile todo |
+| Passada de movimento + break-ui | web review (#52); mobile review (#55) |
+| Admin + web no celular | review (#52) |
+| Screenshots + READMEs | web review (#54); mobile review (#55; Android screenshots na passada Android) |

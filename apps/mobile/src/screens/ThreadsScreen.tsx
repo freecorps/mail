@@ -12,7 +12,7 @@ import { router, Stack, useIsFocused, useLocalSearchParams, useNavigation } from
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, FlatList, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View, type ListViewToken } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
-import Animated, { LinearTransition } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { api, INBOX_VIEWS, type InboxView, type Tag } from "../api";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
 import { SwipeGroupProvider, SwipeRow, useSwipeGroup, type SwipeAction } from "../components/swipe-row";
@@ -22,7 +22,7 @@ import { ConnectionBanner, EmptyState, ListActions, ListFilters, NativeButton, R
 import type { RowMenuAction } from "../components/native";
 import { refreshNow } from "../ember";
 import { useI18n, type I18n } from "../i18n";
-import { formatWhen } from "../lib/format";
+import { displaySubject, formatWhen } from "../lib/format";
 import { haptics } from "../lib/haptics";
 import { hideTabBar } from "../model/chrome";
 import { actionable, archivable, bulkReadTarget, keepsArchived, keepsSnoozed, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
@@ -33,15 +33,18 @@ import { formatLater, type LaterChoice } from "../lib/when";
 import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
-import { useShortcuts } from "../keys";
+import { useKeyStill, useShortcuts } from "../keys";
 import { afterListChange, leaveFrom, paneLayout, stepFrom } from "../model/split";
 import { ThreadPane, type ThreadHost } from "./ThreadScreen";
-import { screenEdge, spacing, useColors, type Palette } from "../theme";
+import { EASE_IN_OUT, EASE_OUT, motion, screenEdge, spacing, useColors, type Palette } from "../theme";
 
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
 export function MailboxThreadsScreen() {
   const { mailbox, title } = useLocalSearchParams<{ mailbox: string; title?: string }>();
-  return <ThreadsScreen source={{ mailbox }} title={title ?? mailbox} />;
+  // A link from a widget or a notification carries only the name: the title is the mailbox's own once it is known.
+  const { mailboxes } = useMailboxes();
+  const box = mailboxes.find((b) => b.name === mailbox);
+  return <ThreadsScreen source={{ mailbox }} title={title ?? (box ? box.displayName?.trim() || box.address : mailbox)} />;
 }
 
 /** Route: `/view/[view]` (a view across the member's mailboxes). */
@@ -49,8 +52,12 @@ export function ViewThreadsScreen() {
   const { view, tag, title } = useLocalSearchParams<{ view: string; tag?: string; title?: string }>();
   const { t } = useI18n();
   const v: InboxView = (INBOX_VIEWS as string[]).includes(view) ? (view as InboxView) : "all";
-  // `tag`: one tag's conversations (from the home's Etiquetas), titled with the tag's name.
-  return <ThreadsScreen source={{ view: v, ...(tag ? { tag } : {}) }} title={tag && title ? title : t(`views.${v}`)} />;
+  // `tag`: one tag's conversations (from the home's Etiquetas), titled with the tag's name (a link without one: the
+  // tag's name once the tags are known).
+  // While the tags load, a link without a title says "Etiquetas", not the view's name it would then replace.
+  const { index, loading } = useTagIndex();
+  const tagName = tag ? (title ?? index.get(tag)?.name ?? (loading ? t("tags.title") : undefined)) : undefined;
+  return <ThreadsScreen source={{ view: v, ...(tag ? { tag } : {}) }} title={tagName ?? t(`views.${v}`)} />;
 }
 
 /** The "Minhas" tab: assigned to me. */
@@ -87,7 +94,14 @@ interface RowOps {
   assign(rows: ThreadRow[]): void;
 }
 
-const ROW_LAYOUT = LinearTransition.duration(200);
+/** Rows closing an archived row's gap (or making room): on-screen movement, ease-in-out. Off with Reduce Motion. */
+const ROW_LAYOUT = LinearTransition.duration(motion.base).easing(EASE_IN_OUT);
+/**
+ * The first answer replacing the skeleton: the placeholder fades out over the rows, an empty or error state fades in
+ * (opacity only, so it holds with Reduce Motion), so the first load does not cut.
+ */
+const SKELETON_OUT = FadeOut.duration(motion.fast).easing(EASE_OUT);
+const STATE_IN = FadeIn.duration(motion.base).easing(EASE_OUT);
 
 export function ThreadsScreen({ source, title, searchOnly = false }: { source: ListSource; title: string; searchOnly?: boolean }) {
   const c = useColors();
@@ -259,6 +273,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   );
 
   // ---- Pull to refresh -------------------------------------------------------------------------------------------
+  // Right after a hardware shortcut (E archives the open conversation), rows close the gap in place.
+  const still = useKeyStill();
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -302,17 +318,26 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     searchOnly && !vm.searching ? (
       <EmptyState icon={Icons.search} title={t("search.title")} body={t("search.hint")} />
     ) : vm.status === "loading" ? (
-      <SkeletonRows avatars={prefs.avatars} previewLines={prefs.previewLines} />
+      // Keyed per state: a different element, so the skeleton's exit and the next state's entrance run (the same
+      // Animated.View reused across states would do neither).
+      <Animated.View key="skeleton" exiting={SKELETON_OUT}>
+        <SkeletonRows avatars={prefs.avatars} previewLines={prefs.previewLines} />
+      </Animated.View>
     ) : vm.status === "error" ? (
-      <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
+      <Animated.View key="error" entering={STATE_IN} style={styles.state}>
+        <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
+      </Animated.View>
     ) : vm.searching ? (
+      // Typed: the answer to a query appears as it is, without a fade per keystroke.
       <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
     ) : (
-      <EmptyState
-        icon={source.view === "snoozed" ? Icons.snooze : Icons.empty}
-        title={source.view === "assigned" ? t("mine.empty") : source.view === "snoozed" ? t("snooze.empty") : t("threads.empty")}
-        body={source.view === "snoozed" ? t("snooze.emptyBody") : undefined}
-      />
+      <Animated.View key="empty" entering={STATE_IN} style={styles.state}>
+        <EmptyState
+          icon={source.view === "snoozed" ? Icons.snooze : Icons.empty}
+          title={source.view === "assigned" ? t("mine.empty") : source.view === "snoozed" ? t("snooze.empty") : t("threads.empty")}
+          body={source.view === "snoozed" ? t("snooze.emptyBody") : undefined}
+        />
+      </Animated.View>
     );
 
   const inset = textInset(prefs.avatars, editing);
@@ -348,7 +373,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         data={showRows ? vm.rows : []}
         keyExtractor={(r) => r.key}
         extraData={editing}
-        itemLayoutAnimation={ROW_LAYOUT}
+        itemLayoutAnimation={still ? undefined : ROW_LAYOUT}
         ListHeaderComponent={header}
         ItemSeparatorComponent={RowSeparator}
         renderItem={({ item }) => (
@@ -591,7 +616,7 @@ const ThreadItem = memo(function ThreadItem({
   }, [row, prefs, canAssign, ops]);
 
   const label =
-    t("threads.a11y", { from: row.title, subject: row.subject.trim() || t("threads.noSubject"), when, unread: row.unread ? t("threads.a11yUnread") : "" }) +
+    t("threads.a11y", { from: row.title, subject: displaySubject(row.subject, t("threads.noSubject")), when, unread: row.unread ? t("threads.a11yUnread") : "" }) +
     (row.status && row.status !== "open" ? t("threads.a11yStatus", { status: t(`status.${row.status}`) }) : "") +
     (showAssignee && row.assigneeName ? t("threads.a11yAssignee", { name: row.assigneeName }) : "");
   // `from=list`: opened from a list, so the conversation offers its previous / next (a push or a link does not).
@@ -634,7 +659,7 @@ const ThreadItem = memo(function ThreadItem({
     <SwipeRow leading={swipes.leading} trailing={swipes.trailing}>
       <RowMenu
         href={href}
-        title={menuTitle(row.subject.trim() || t("threads.noSubject"))}
+        title={menuTitle(displaySubject(row.subject, t("threads.noSubject")))}
         actions={actions}
         disabled={row.pending}
         // Split: no peek (its tap would open the conversation full screen over the pane that already shows it).
@@ -663,6 +688,7 @@ const ThreadItem = memo(function ThreadItem({
 
 const styles = StyleSheet.create({
   pressable: {},
+  state: { flex: 1 },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
   more: { alignItems: "center", paddingVertical: spacing.md },
 });

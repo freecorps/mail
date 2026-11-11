@@ -3,7 +3,7 @@ export { paletteFor, useColors, type Palette, type SemanticColor } from "./color
 export { minTouch, screenEdge, spacing } from "./spacing";
 export { corner, radius } from "./radius";
 export { emphasized, mono, tabular, type, type TextVariant } from "./typography";
-export { motion } from "./motion";
+export { EASE_IN_OUT, EASE_OUT, motion } from "./motion";
 export { paper } from "./paper";
 export { useHeaderColors, useListStackOptions } from "./header";
 export { tagHex, useTagColors } from "./tags";
