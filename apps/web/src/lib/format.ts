@@ -106,11 +106,57 @@ const ADDRESS = /^[^\s@<>()",;]+@[^\s@<>()",;]+\.[^\s@<>()",;]+$/;
 export function parseRecipients(input: string): { valid: string[]; invalid: string[] } {
   const valid: string[] = [];
   const invalid: string[] = [];
-  for (const raw of input.split(/[,;\n]/)) {
-    const s = raw.trim();
-    if (!s) continue;
-    const m = /<([^>]+)>\s*$/.exec(s);
-    (ADDRESS.test((m ? m[1]! : s).trim()) ? valid : invalid).push(s);
-  }
+  for (const s of splitRecipients(input)) (isRecipient(s) ? valid : invalid).push(s);
   return { valid, invalid };
+}
+
+/**
+ * A typed list split into recipients on commas, semicolons and new lines, but not inside a quoted name or the <address>
+ * (`"Lima, Caio" <caio@x.com>` is one). Trimmed, empty ones dropped.
+ */
+export function splitRecipients(input: string): string[] {
+  return scanRecipients(input).items;
+}
+
+/** Whether a typed list has a separator outside quotes and <address> (so a chip is complete). */
+export const hasSeparator = (input: string) => scanRecipients(input).separated;
+
+function scanRecipients(input: string): { items: string[]; separated: boolean } {
+  const out: string[] = [];
+  let separated = false;
+  let cur = "";
+  let quoted = false;
+  let angle = false;
+  for (const ch of input) {
+    if (ch === '"' && !angle) quoted = !quoted;
+    else if (ch === "<" && !quoted) angle = true;
+    else if (ch === ">" && !quoted) angle = false;
+    else if (!quoted && !angle && (ch === "," || ch === ";" || ch === "\n")) {
+      separated = true;
+      if (cur.trim()) out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return { items: out, separated };
+}
+
+/** One recipient as written ("Bia <b@x.com>", `"Lima, Caio" <c@x.com>`, "b@x.com"): whether it holds an address. */
+export function isRecipient(s: string): boolean {
+  const m = /<([^>]+)>\s*$/.exec(s);
+  return ADDRESS.test((m ? m[1]! : s).trim());
+}
+
+/**
+ * The attribution line over the quoted message in a reply, in the UI language ("Em 5 de nov. de 2026 às 10:12, Marina
+ * Costa escreveu:"); Ember puts it above the `gmail_quote` so mail clients fold the quote.
+ */
+export function quoteHeader(at: number, name: string, locale: Locale): string {
+  return translate(locale, "compose.quoteHeader", {
+    date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(at),
+    time: new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(at),
+    name,
+  });
 }

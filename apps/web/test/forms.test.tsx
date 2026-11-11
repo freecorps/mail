@@ -1,16 +1,23 @@
-// Form behavior: compose (one send per draft, the right error message and field, From resets per message) and
+// Form behavior: the compose window (chips, the right error message, forwarding's fixed mailbox, at most three) and
 // sign-in (the 8-character minimum is a sign-up rule only).
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { EmberProvider } from "@freecorps/ember-react";
 import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { Toaster } from "@/components/ui/sonner";
-import { ComposeDialog } from "@/features/ComposeDialog";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ComposeDock } from "@/features/ComposeDock";
+import { RecipientInput } from "@/features/composer/RecipientInput";
+import { closeWindow, dockWindows, minimizeWindow, openComposerDialog, openWindow, type Restore } from "@/model/dock";
+import { ComposerDialogs } from "@/features/composer/Dialogs";
+import { api } from "@/lib/api";
+import { useAutosave } from "@/model/drafts";
+import { useUploads } from "@/model/uploads";
+import { scheduledSends, undoSend } from "@/model/outbox";
 import { SignIn } from "@/features/SignIn";
 import { I18nProvider } from "@/i18n";
 import type { Mailbox } from "@/lib/api";
 import { createMailClient } from "@/lib/ember";
-import { useThreadList } from "@/model/threads";
 import { mailServer } from "./mailServer";
 
 const cleanups: Array<() => void> = [];
@@ -36,7 +43,7 @@ function setup() {
       <I18nProvider locale="pt-BR">{children}</I18nProvider>
     </EmberProvider>
   );
-  return { wrapper };
+  return { wrapper, client };
 }
 
 const boxes = [
@@ -44,83 +51,281 @@ const boxes = [
   { name: "privacy", address: "privacy@acme.test", displayName: null, unread: 0 },
 ] as unknown as Mailbox[];
 
-function Harness() {
-  const [open, setOpen] = useState(true);
+function Dock() {
   return (
-    <>
-      <button type="button" onClick={() => setOpen(true)}>
-        reopen
-      </button>
-      <ComposeDialog open={open} onOpenChange={setOpen} mailboxes={boxes} defaultMailbox="support" onSent={() => {}} />
+    <TooltipProvider>
+      <ComposeDock mailboxes={boxes} defaultMailbox="support" onOpenThread={() => {}} />
       <Toaster />
-    </>
+    </TooltipProvider>
   );
 }
 
-describe("compose dialog", () => {
-  it("empty body: its own message, aria-invalid on the body (not To)", () => {
+describe("compose window", () => {
+  afterEach(() => {
+    for (const w of [...dockWindows()]) closeWindow(w.key);
+  });
+
+  it("recipients become chips (typed list, comma), invalid ones say so, and an empty body has its own message", async () => {
     const { wrapper } = setup();
-    render(<Harness />, { wrapper });
-    fireEvent.change(screen.getByLabelText("Para"), { target: { value: "rui@user.test" } });
-    fireEvent.change(screen.getByLabelText("Mensagem"), { target: { value: "   " } });
-    fireEvent.submit(screen.getByLabelText("Para").closest("form")!);
+    act(() => void openWindow({ kind: "compose", mailbox: "support" }));
+    render(<Dock />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" }) as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "ana@user.test, nao-e-email," } });
+    expect(screen.getByText("ana@user.test")).toBeTruthy();
+    expect(screen.getByTitle("Endereço inválido: nao-e-email")).toBeTruthy();
+    fireEvent.submit(to.closest("form")!);
+    expect(screen.getByRole("alert").textContent).toBe("Endereços inválidos: nao-e-email");
+    fireEvent.click(screen.getByRole("button", { name: "Remover nao-e-email" }));
+    fireEvent.submit(to.closest("form")!);
     expect(screen.getByRole("alert").textContent).toBe("Escreva a mensagem antes de enviar.");
-    expect(screen.getByLabelText("Mensagem").getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByLabelText("Para").hasAttribute("aria-invalid")).toBe(false);
-
-    fireEvent.change(screen.getByLabelText("Para"), { target: { value: "nope" } });
-    fireEvent.submit(screen.getByLabelText("Para").closest("form")!);
-    expect(screen.getByLabelText("Para").getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByLabelText("Mensagem").hasAttribute("aria-invalid")).toBe(false);
   });
 
-  it("From is per message: a pick does not carry over to the next compose", () => {
+  it("Backspace in the empty field takes the last chip back to edit", () => {
     const { wrapper } = setup();
-    render(<Harness />, { wrapper });
-    fireEvent.change(screen.getByLabelText("De"), { target: { value: "privacy" } });
-    expect((screen.getByLabelText("De") as HTMLSelectElement).value).toBe("privacy");
-    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
-    fireEvent.click(screen.getByRole("button", { name: "reopen" }));
-    expect((screen.getByLabelText("De") as HTMLSelectElement).value).toBe("support");
+    act(() => void openWindow({ kind: "compose", mailbox: "support" }));
+    render(<Dock />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" }) as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "Bia <bia@acme.test>;" } });
+    expect(screen.getByText("Bia")).toBeTruthy();
+    fireEvent.keyDown(to, { key: "Backspace" });
+    expect(to.value).toBe("Bia <bia@acme.test>");
   });
 
-  it("a double submit sends once", async () => {
+  it("forwarding starts from the message: its mailbox (fixed), subject, and names the files going along", () => {
     const { wrapper } = setup();
-    const list = renderHook(() => useThreadList({ mailbox: "support", filter: "all", query: "" }), { wrapper });
-    await waitFor(() => expect(list.result.current.status).toBe("ready"));
-    render(<Harness />, { wrapper });
-    fireEvent.change(screen.getByLabelText("Para"), { target: { value: "rui@user.test" } });
-    fireEvent.change(screen.getByLabelText("Mensagem"), { target: { value: "Oi" } });
-    const form = screen.getByLabelText("Para").closest("form")!;
-    act(() => {
-      fireEvent.submit(form);
-      fireEvent.submit(form);
-    });
-    await waitFor(() => expect(list.result.current.rows.map((r) => r.pending)).toEqual([false]));
-  });
-});
-
-describe("forwarding", () => {
-  it("starts from the message: its mailbox (fixed), subject and quoted text, and names the files going along", () => {
-    const { wrapper } = setup();
-    const source = {
-      threadId: "t1",
-      messageId: "m1",
-      mailbox: "privacy",
-      subject: "Fwd: Contrato",
-      text: "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>",
-      files: ["contrato.pdf"],
-    };
-    render(<ComposeDialog open onOpenChange={() => {}} mailboxes={boxes} defaultMailbox="support" forward={source} onSent={() => {}} />, {
-      wrapper,
-    });
-    expect(screen.getByRole("heading").textContent).toBe("Encaminhar mensagem");
+    act(
+      () =>
+        void openWindow({
+          kind: "forward",
+          forward: {
+            threadId: "t1",
+            messageId: "m1",
+            mailbox: "privacy",
+            subject: "Fwd: Contrato",
+            text: "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>",
+            files: ["contrato.pdf"],
+          },
+        }),
+    );
+    render(<Dock />, { wrapper });
+    expect(screen.getByRole("heading").textContent).toBe("Fwd: Contrato");
     const from = screen.getByLabelText("De") as HTMLSelectElement;
     expect(from.value).toBe("privacy");
     expect(from.disabled).toBe(true);
     expect((screen.getByLabelText("Assunto") as HTMLInputElement).value).toBe("Fwd: Contrato");
-    expect((screen.getByLabelText("Mensagem") as HTMLTextAreaElement).value).toContain("Mensagem encaminhada");
     expect(screen.getByText("Vão junto: contrato.pdf")).toBeTruthy();
+  });
+
+  it("three windows at most; the same draft opens once", () => {
+    const draft = {
+      _id: "d1",
+      kind: "compose",
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: "x",
+      text: "",
+      mailbox: "support",
+      attachments: [],
+    } as never;
+    expect(openWindow({ kind: "compose", draft })).toBe(true);
+    expect(openWindow({ kind: "compose", draft })).toBe(true);
+    expect(dockWindows()).toHaveLength(1);
+    expect(openWindow({ kind: "compose" })).toBe(true);
+    expect(openWindow({ kind: "compose" })).toBe(true);
+    expect(openWindow({ kind: "compose" })).toBe(false);
+    expect(dockWindows()).toHaveLength(3);
+    // An undone or failed send comes back even then: its text would be lost otherwise.
+    expect(openWindow({ kind: "compose", restore: { ...restore, draftId: null } }, { always: true })).toBe(true);
+    expect(dockWindows()).toHaveLength(4);
+  });
+
+  it("a full dock changes nothing when one more window is asked for", () => {
+    for (let i = 0; i < 3; i++) openWindow({ kind: "compose" });
+    // Minimized windows stay minimized: a failed open has no side effect.
+    minimizeWindow(dockWindows().at(-1)!.key, true);
+    const before = dockWindows();
+    expect(openWindow({ kind: "compose" })).toBe(false);
+    expect(dockWindows()).toBe(before);
+  });
+
+  it("Send twice before the window goes schedules one message", () => {
+    const { wrapper } = setup();
+    act(() => void openWindow({ kind: "compose", restore }));
+    render(<Dock />, { wrapper });
+    const form = screen.getByRole("combobox", { name: "Para" }).closest("form")!;
+    act(() => {
+      fireEvent.submit(form);
+      fireEvent.submit(form);
+    });
+    expect(scheduledSends()).toHaveLength(1);
+    for (const x of scheduledSends()) act(() => void undoSend(x.id));
+  });
+
+  it("a draft's Bcc is kept by the autosave though the field is hidden", async () => {
+    const { wrapper, client } = setup();
+    const { id } = await client.mutation(api.inbox.saveDraft, {
+      kind: "compose",
+      mailbox: "support",
+      to: ["ana@user.test"],
+      bcc: ["chefe@acme.test"],
+      subject: "Fatura",
+      text: "Segue.",
+    });
+    const draft = (await client.query(api.inbox.drafts, {})).find((d) => d._id === id)!;
+    act(() => void openWindow({ kind: "compose", draft }));
+    render(<Dock />, { wrapper });
+    fireEvent.change(screen.getByLabelText("Assunto"), { target: { value: "Fatura de março" } });
+    await waitFor(
+      async () => {
+        const d = (await client.query(api.inbox.drafts, {})).find((x) => x._id === id)!;
+        expect(d.subject).toBe("Fatura de março");
+        expect(d.bcc).toEqual(["chefe@acme.test"]);
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  it("pasted duplicates make one chip (the address in any case)", () => {
+    const { wrapper } = setup();
+    let chips: string[] = [];
+    function Field() {
+      const [value, setValue] = useState<string[]>(["bia@acme.test"]);
+      chips = value;
+      return <RecipientInput label="Para" value={value} onChange={setValue} contacts={[]} />;
+    }
+    render(<Field />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" });
+    fireEvent.paste(to, { clipboardData: { getData: () => "ana@user.test, ANA@user.test; Bia <BIA@acme.test>" } });
+    expect(chips).toEqual(["bia@acme.test", "ana@user.test"]);
+  });
+
+  it("text still typed becomes a chip when the field goes away (minimize), not only on blur", () => {
+    const { wrapper } = setup();
+    let chips: string[] = [];
+    let hide: () => void = () => {};
+    function Field() {
+      const [value, setValue] = useState<string[]>([]);
+      const [shown, setShown] = useState(true);
+      chips = value;
+      hide = () => setShown(false);
+      return shown ? <RecipientInput label="Para" value={value} onChange={setValue} contacts={[]} /> : null;
+    }
+    render(<Field />, { wrapper });
+    fireEvent.change(screen.getByRole("combobox", { name: "Para" }), { target: { value: "ana@user.test" } });
+    act(() => hide());
+    expect(chips).toEqual(["ana@user.test"]);
+  });
+
+  it("Enter in an empty To field does not send (after making a chip); ⌘Enter still does", () => {
+    const { wrapper } = setup();
+    act(() => void openWindow({ kind: "compose", mailbox: "support" }));
+    render(<Dock />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" }) as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "ana@user.test," } });
+    expect(screen.getByText("ana@user.test")).toBeTruthy();
+    // fireEvent returns false when the default (the form's implicit submit) was prevented.
+    expect(fireEvent.keyDown(to, { key: "Enter" })).toBe(false);
+    expect(fireEvent.keyDown(to, { key: "Enter", metaKey: true })).toBe(true);
+  });
+
+  it("picking a suggestion whose name has a comma makes one chip", () => {
+    const { wrapper } = setup();
+    let chips: string[] = [];
+    function Field() {
+      const [value, setValue] = useState<string[]>([]);
+      chips = value;
+      return <RecipientInput label="Para" value={value} onChange={setValue} contacts={[{ name: "Lima, Caio", email: "caio@user.test" }]} />;
+    }
+    render(<Field />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" }) as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "cai" } });
+    fireEvent.keyDown(to, { key: "Enter" });
+    expect(chips).toEqual(['"Lima, Caio" <caio@user.test>']);
+    expect(screen.getByText("Lima, Caio")).toBeTruthy();
+    expect(screen.queryByTitle(/Endereço inválido/)).toBeNull();
+  });
+
+  it("an undone send's window sends again without an edit (its text comes back with it)", () => {
+    const { wrapper } = setup();
+    act(() => void openWindow({ kind: "compose", restore }));
+    render(<Dock />, { wrapper });
+    fireEvent.submit(screen.getByRole("combobox", { name: "Para" }).closest("form")!);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(dockWindows()).toHaveLength(0);
+    // Take it back (it would go out after the undo window).
+    for (const x of scheduledSends()) act(() => void undoSend(x.id));
+  });
+});
+
+const restore: Restore = {
+  mailbox: "support",
+  to: ["ana@user.test"],
+  cc: [],
+  subject: "Fatura",
+  bcc: [],
+  html: "<p>Segue a fatura.</p>",
+  text: "Segue a fatura.",
+  attachments: [],
+  signature: false,
+  draftId: null,
+};
+
+describe("drafts", () => {
+  it("a send takes the draft a save already on its way creates (it does not outlive the send)", async () => {
+    const { wrapper, client } = setup();
+    const { result } = renderHook(() => useAutosave(), { wrapper });
+    act(() => {
+      result.current.update({ kind: "compose", mailbox: "support", to: [], cc: [], subject: "Oi", text: "Olá" });
+      result.current.flush();
+    });
+    // Let the save leave (it starts on the next microtask); no id is known yet: the send asks forget() for it.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(result.current.id()).toBeNull();
+    const id = await result.current.forget();
+    expect(id).toBeTruthy();
+    await waitFor(async () => expect((await client.query(api.inbox.drafts, {})).map((d) => d._id)).toContain(id));
+  });
+
+  it("discarding while a save is on its way removes the draft that save creates", async () => {
+    const { wrapper, client } = setup();
+    const { result } = renderHook(() => useAutosave(), { wrapper });
+    act(() => {
+      result.current.update({ kind: "compose", mailbox: "support", to: [], cc: [], subject: "Oi", text: "Olá" });
+      result.current.flush();
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    // As the window's discard does: the id the save brings back is deleted.
+    const id = await result.current.forget();
+    expect(id).toBeTruthy();
+    await client.mutation(api.inbox.deleteDraft, { id: id! });
+    expect((await client.query(api.inbox.drafts, {})).map((d) => d._id)).not.toContain(id);
+  });
+
+  it("a save that fails is said (failed) and can be tried again; a good one clears it", async () => {
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useAutosave(), { wrapper });
+    // agent-1 is not a member of privacy: the server refuses.
+    act(() => {
+      result.current.update({ kind: "compose", mailbox: "privacy", to: [], cc: [], subject: "x", text: "y" });
+      result.current.flush();
+    });
+    await waitFor(() => expect(result.current.failed).toBe(true));
+    act(() => {
+      result.current.update({ kind: "compose", mailbox: "support", to: [], cc: [], subject: "x", text: "y" });
+      result.current.retry();
+    });
+    await waitFor(() => expect(result.current.failed).toBe(false));
+    expect(result.current.id()).toBeTruthy();
+  });
+
+  it("a save not started yet when the send happens is dropped (nothing to consume)", async () => {
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useAutosave(), { wrapper });
+    result.current.update({ kind: "compose", mailbox: "support", to: [], cc: [], subject: "Oi", text: "Olá" });
+    expect(await result.current.forget()).toBeNull();
   });
 });
 
@@ -135,5 +340,45 @@ describe("sign in", () => {
     expect(password().hasAttribute("minlength")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Criar uma conta" }));
     expect(password().minLength).toBe(8);
+  });
+});
+
+describe("uploads", () => {
+  it("removing a file makes room at once (the list it counts is never behind)", () => {
+    const { wrapper } = setup();
+    const { result } = renderHook(() => useUploads(), { wrapper });
+    // Empty files fail at once (no upload), and still take a place in the list.
+    const empty = (n: number) => Array.from({ length: n }, (_, i) => new File([], `f${i}.txt`, { type: "text/plain" }));
+    act(() => result.current.add(empty(20), () => "too large", "too many"));
+    expect(result.current.items).toHaveLength(20);
+    act(() => {
+      result.current.remove(result.current.items[0]!.id);
+      result.current.add(empty(1), () => "too large", "too many");
+    });
+    expect(result.current.items).toHaveLength(20);
+    expect(result.current.items.at(-1)!.error).toBe("too large");
+  });
+});
+
+describe("signature dialog", () => {
+  afterEach(() => openComposerDialog(null));
+
+  it("while the signatures load, nothing shows and Save is off (a save would write the suggestion over one)", async () => {
+    const { wrapper, client } = setup();
+    await client.mutation(api.inbox.setSignature, { mailbox: null, text: "Bia — Acme" });
+    act(() => openComposerDialog({ kind: "signature", mailbox: null }));
+    render(
+      <TooltipProvider>
+        <ComposerDialogs mailboxes={boxes} />
+      </TooltipProvider>,
+      { wrapper },
+    );
+    const area = screen.getByLabelText("Texto da assinatura") as HTMLTextAreaElement;
+    const save = screen.getByRole("button", { name: "Salvar" }) as HTMLButtonElement;
+    expect(area.disabled).toBe(true);
+    expect(area.value).toBe("");
+    expect(save.disabled).toBe(true);
+    await waitFor(() => expect(area.value).toBe("Bia — Acme"));
+    expect(area.disabled).toBe(false);
   });
 });

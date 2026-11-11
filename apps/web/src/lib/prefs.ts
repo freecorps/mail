@@ -26,7 +26,11 @@ export type Prefs = {
   panes: PaneWidths;
   /** The conversation's context panel (contact, earlier conversations, files), where there is room for it. */
   contextPanel: boolean;
+  /** Seconds a send waits, so "Desfazer" can take it back (0: at once). */
+  undoSend: UndoSend;
 };
+export const UNDO_SEND = [0, 5, 10, 20] as const;
+export type UndoSend = (typeof UNDO_SEND)[number];
 
 const clampWidth = (v: unknown, min: number, max: number, fallback: number) =>
   typeof v === "number" && Number.isFinite(v) ? Math.round(Math.min(max, Math.max(min, v))) : fallback;
@@ -45,6 +49,7 @@ export function parsePrefs(raw: unknown): Prefs {
     reading: READING_MODES.includes(r.reading as ReadingMode) ? (r.reading as ReadingMode) : "split",
     sidebarCollapsed: r.sidebarCollapsed === true,
     contextPanel: r.contextPanel !== false,
+    undoSend: UNDO_SEND.includes(r.undoSend as UndoSend) ? (r.undoSend as UndoSend) : 5,
     panes: {
       sidebar: clampWidth(panes.sidebar, PANE_LIMITS.sidebar.min, PANE_LIMITS.sidebar.max, DEFAULT_PANES.sidebar),
       list: clampWidth(panes.list, PANE_LIMITS.list.min, PANE_LIMITS.list.max, DEFAULT_PANES.list),
@@ -116,6 +121,7 @@ export function usePrefs() {
   const setSidebarCollapsed = useCallback((c: boolean) => {
     if (current.sidebarCollapsed !== c) write({ ...current, sidebarCollapsed: c });
   }, []);
+  const setUndoSend = useCallback((v: UndoSend) => write({ ...current, undoSend: v }), []);
   const setContextPanel = useCallback((v: boolean) => write({ ...current, contextPanel: v }), []);
   const setPanes = useCallback((p: Partial<PaneWidths>) => {
     const next = { ...current.panes, ...p };
@@ -130,6 +136,8 @@ export function usePrefs() {
     sidebarCollapsed: prefs.sidebarCollapsed,
     panes: prefs.panes,
     contextPanel: prefs.contextPanel,
+    undoSend: prefs.undoSend,
+    setUndoSend,
     setContextPanel,
     setTheme,
     setLocale,
@@ -139,3 +147,6 @@ export function usePrefs() {
     setPanes,
   };
 }
+
+/** The undo-send delay outside React (a send scheduled from a callback reads the current pref). */
+export const undoSendMs = () => current.undoSend * 1000;

@@ -134,6 +134,74 @@ export type ViewPage = { page: Thread[]; isDone: boolean; partial: boolean };
 export type ViewCount = { threads: number; unread: number; capped: boolean };
 
 export type PageOpts = { numItems: number; cursor: string | null };
+
+// ---------------------------------------------------------------------------------------------- composer (#38)
+
+/** A file the member uploaded (`inbox:generateUploadUrl`), sent with a reply, a new conversation or a forward. */
+export type AttachmentArg = { file: string; filename: string; contentType: string };
+/** What every send takes from the composer: the HTML body (sanitized by Ember; `text` stays the text/plain part), the
+ * signature (default on), and the draft the send consumes. */
+export type ComposerArgs = { bodyHtml?: string; signature?: boolean; draftId?: string; attachments?: AttachmentArg[] };
+
+export interface SignatureDoc {
+  _id: string;
+  _creationTime: number;
+  userId: string;
+  /** Absent: the member's default for every mailbox. */
+  mailbox?: string;
+  text: string;
+  html?: string;
+  updatedAt: number;
+}
+/** The signature a send from `mailbox` would use: the mailbox's own, else the default (`from: null`). */
+export type EffectiveSignature = { text: string; html: string | null; from: string | null } | null;
+
+export type DraftKind = "reply" | "note" | "compose" | "forward";
+export interface DraftDoc {
+  _id: string;
+  _creationTime: number;
+  userId: string;
+  kind: DraftKind;
+  threadId?: string;
+  messageId?: string;
+  mailbox: string;
+  to: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  text: string;
+  bodyHtml?: string;
+  attachments: AttachmentArg[];
+  updatedAt: number;
+}
+export type SaveDraftArgs = {
+  id?: string;
+  kind: DraftKind;
+  threadId?: string;
+  messageId?: string;
+  mailbox?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  text: string;
+  bodyHtml?: string;
+  attachments?: AttachmentArg[];
+};
+
+export interface SavedReply {
+  _id: string;
+  _creationTime: number;
+  mailbox: string;
+  title: string;
+  text: string;
+  bodyHtml?: string;
+  createdBy: string;
+  updatedAt: number;
+}
+
+type SendResult = { emailId: string; messageId: string; status: string };
+type NewThreadResult = SendResult & { threadId: string; number: number };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
 // ---------------------------------------------------------------------------------------------- admin (console:*)
@@ -323,25 +391,38 @@ export const api = {
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),
     members: q<"query", { mailbox: string }, Member[]>("inbox:members"),
     attachments: q<"query", { threadId: string }, Record<string, string | null>>("inbox:attachments"),
-    reply: q<"mutation", { threadId: string; text: string; cc?: string[] }, { emailId: string; messageId: string; status: string }>(
-      "inbox:reply",
-    ),
+    reply: q<"mutation", { threadId: string; text: string; cc?: string[]; quoteHeader?: string } & ComposerArgs, SendResult>("inbox:reply"),
     forward: q<
       "mutation",
-      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string },
-      { threadId: string; emailId: string; messageId: string; status: string; number: number }
+      { threadId: string; messageId: string; to: string[]; cc?: string[]; subject: string; text: string } & ComposerArgs,
+      NewThreadResult
     >("inbox:forward"),
-    note: q<"mutation", { threadId: string; text: string }, string>("inbox:note"),
+    note: q<"mutation", { threadId: string; text: string; draftId?: string }, string>("inbox:note"),
     markRead: q<"mutation", { threadId: string }, boolean>("inbox:markRead"),
     markUnread: q<"mutation", { threadId: string }, boolean>("inbox:markUnread"),
     setStatus: q<"mutation", { threadId: string; status: ThreadStatus }, ThreadStatus>("inbox:setStatus"),
     deleteThread: q<"mutation", { threadId: string }, { deleted: boolean; canceled?: number }>("inbox:deleteThread"),
     assign: q<"mutation", { threadId: string; userId: string | null }, string | null>("inbox:assign"),
-    compose: q<
+    compose: q<"mutation", { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string } & ComposerArgs, NewThreadResult>(
+      "inbox:compose",
+    ),
+    generateUploadUrl: q<"mutation", { contentType?: string; size: number; sha256?: string; multipart?: boolean }, unknown>(
+      "inbox:generateUploadUrl",
+    ),
+    signatures: q<"query", Record<string, never>, SignatureDoc[]>("inbox:signatures"),
+    signature: q<"query", { mailbox: string }, EffectiveSignature>("inbox:signature"),
+    setSignature: q<"mutation", { mailbox?: string | null; text: string; html?: string }, string>("inbox:setSignature"),
+    deleteSignature: q<"mutation", { mailbox?: string | null }, boolean>("inbox:deleteSignature"),
+    drafts: q<"query", { threadId?: string }, DraftDoc[]>("inbox:drafts"),
+    saveDraft: q<"mutation", SaveDraftArgs, { id: string; updatedAt: number }>("inbox:saveDraft"),
+    deleteDraft: q<"mutation", { id: string }, boolean>("inbox:deleteDraft"),
+    savedReplies: q<"query", { mailbox: string }, SavedReply[]>("inbox:savedReplies"),
+    saveSavedReply: q<
       "mutation",
-      { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string },
-      { threadId: string; emailId: string; messageId: string; status: string; number: number }
-    >("inbox:compose"),
+      { id?: string; mailbox: string; title: string; text: string; bodyHtml?: string },
+      { id: string; updatedAt: number }
+    >("inbox:saveSavedReply"),
+    deleteSavedReply: q<"mutation", { id: string }, true>("inbox:deleteSavedReply"),
     registerDevice: q<
       "mutation",
       { token: string; provider?: string; platform?: string; deviceName?: string; environment?: string; publicKey?: string },

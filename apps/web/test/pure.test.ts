@@ -299,9 +299,12 @@ describe("theme", () => {
       sidebarCollapsed: false,
       panes: { sidebar: 248, list: 380 },
       contextPanel: true,
+      undoSend: 5,
     };
     expect(parsePrefs(null)).toEqual(defaults);
     expect(parsePrefs({ contextPanel: false }).contextPanel).toBe(false);
+    expect(parsePrefs({ undoSend: 20 }).undoSend).toBe(20);
+    expect(parsePrefs({ undoSend: 7 }).undoSend).toBe(5);
     expect(parsePrefs({ theme: "dark", locale: "en", density: "compact", reading: "focus", sidebarCollapsed: true })).toEqual({
       ...defaults,
       theme: "dark",

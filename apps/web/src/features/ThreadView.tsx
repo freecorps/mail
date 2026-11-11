@@ -41,7 +41,9 @@ import { plural } from "@/i18n/strings";
 import { api, type Message, type ThreadStatus } from "@/lib/api";
 import { onContextToggle, useEscapeCloses } from "@/lib/contextPanel";
 import { linkifyText } from "@/lib/emailHtml";
-import { contactOf, displayAddress, formatFull, formatWhen } from "@/lib/format";
+import { contactOf, displayAddress, formatFull, formatWhen, quoteHeader } from "@/lib/format";
+import { openWindow } from "@/model/dock";
+import { undoSend, useScheduled, type Scheduled } from "@/model/outbox";
 import { useNow } from "@/lib/now";
 import { usePrefs } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -50,14 +52,13 @@ import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "@/model
 import { deliveryState, foldMessages, useThread, type DeliveryState, type MessageItem } from "@/model/thread";
 import { isPersonal, useMailboxes } from "@/model/threads";
 import { AssignItems } from "./AssignMenu";
-import { ComposeDialog, type ForwardSource } from "./ComposeDialog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { ContextPanel, Files } from "./ContextPanel";
 import { EmailFrame } from "./EmailFrame";
 import { Confirm } from "./admin/parts";
 
 /** Width of the conversation pane from which the context panel sits beside the messages (else it covers them). */
-const SIDE_PANEL_MIN = 880;
+const SIDE_PANEL_MIN = 760;
 
 export function ThreadView({
   threadId,
@@ -85,6 +86,7 @@ export function ThreadView({
   const { t, locale } = useI18n();
   const vm = useThread(threadId);
   const actions = useThreadActions();
+  const scheduled = useScheduled(threadId);
   const boxes = useMailboxes().mailboxes;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
   const personal = isPersonal(boxes, vm.thread?.mailbox);
@@ -143,29 +145,29 @@ export function ThreadView({
   // Over the messages, the panel is the top layer: Escape hides it before it closes the conversation.
   useEscapeCloses(roomy === false && overlay, toggleContext);
 
-  // The message being forwarded stays while the dialog is closed, so a failed send can reopen it with its draft.
-  const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
-  const [forwardOpen, setForwardOpen] = useState(false);
   const forward = (m: Message) => {
-    setForwardOpen(true);
-    setForwarding({
-      threadId,
-      messageId: m._id,
-      mailbox: m.mailbox,
-      subject: forwardSubject(m.subject || (vm.thread?.subject ?? "")),
-      text: forwardText(
-        m,
-        {
-          header: t("forward.header"),
-          from: t("forward.from"),
-          date: t("forward.date"),
-          subject: t("forward.subject"),
-          to: t("forward.to"),
-        },
-        formatFull(m.at, locale),
-      ),
-      files: forwardedFiles(m.attachments).map((a) => a.filename),
+    const opened = openWindow({
+      kind: "forward",
+      forward: {
+        threadId,
+        messageId: m._id,
+        mailbox: m.mailbox,
+        subject: forwardSubject(m.subject || (vm.thread?.subject ?? "")),
+        text: forwardText(
+          m,
+          {
+            header: t("forward.header"),
+            from: t("forward.from"),
+            date: t("forward.date"),
+            subject: t("forward.subject"),
+            to: t("forward.to"),
+          },
+          formatFull(m.at, locale),
+        ),
+        files: forwardedFiles(m.attachments).map((a) => a.filename),
+      },
     });
+    if (!opened) toast(t("compose.tooMany"));
   };
 
   // Opens at the top of the latest message (a long email starts where it starts), and keeps it there while frames
@@ -267,6 +269,8 @@ export function ThreadView({
   }
 
   const th = vm.thread;
+  // Ember quotes the latest message received; its attribution line is written here, in the UI language.
+  const lastInbound = vm.items.findLast((i) => i.message.direction === "inbound")?.message ?? null;
   const archived = th.status === "closed";
   const unread = th.unreadCount > 0;
   const target = [{ threadId, status: th.status, unread }];
@@ -385,17 +389,26 @@ export function ThreadView({
                   </li>
                 );
               })}
+              {scheduled.map((x) => (
+                <li key={x.id} className="border-t">
+                  <ScheduledSend item={x} />
+                </li>
+              ))}
             </ol>
           </ReaderGrows>
 
           <Composer
+            key={threadId}
             ref={composerRef}
-            contactName={contactOf(th)}
+            threadId={threadId}
+            mailbox={th.mailbox}
+            mailboxLabel={boxes.find((b) => b.name === th.mailbox)?.displayName ?? th.mailbox}
+            contact={{ name: contactOf(th), email: th.contact }}
+            number={th.number}
             disabled={!vm.canReply}
-            onReply={vm.reply}
-            onNote={vm.note}
             notes={!personal}
             others={others}
+            quoteHeader={lastInbound ? quoteHeader(lastInbound.at, displayAddress(lastInbound.from), locale) : undefined}
           />
         </div>
         {contextShown && (
@@ -409,15 +422,6 @@ export function ThreadView({
           />
         )}
       </div>
-      <ComposeDialog
-        key={forwarding?.messageId ?? "none"}
-        open={forwardOpen && forwarding !== null}
-        onOpenChange={setForwardOpen}
-        mailboxes={boxes}
-        defaultMailbox={vm.thread?.mailbox ?? null}
-        forward={forwarding}
-        onSent={(id) => onOpenThread?.(id)}
-      />
     </Pane>
   );
 }
@@ -713,6 +717,28 @@ function MessageBlock({
 /** Tells the conversation the reader opened something inside a message (a quote): see `readerGrows`. */
 const ReaderGrowsContext = createContext<() => void>(() => {});
 const ReaderGrows = ReaderGrowsContext.Provider;
+
+/** A send waiting out its undo window: what goes, when, and "Desfazer" (it never reached the server). */
+function ScheduledSend({ item }: { item: Scheduled }) {
+  const { t } = useI18n();
+  const now = useNow(1000);
+  const left = Math.max(0, Math.ceil((item.sendAt - now) / 1000));
+  const note = item.kind === "note";
+  return (
+    <article className={cn("px-4 py-3.5 sm:px-6", note && "mx-4 my-3 rounded-lg bg-note px-4 text-note-foreground sm:mx-6")}>
+      <header className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+        <Clock className="size-3.5" aria-hidden="true" />
+        <span className="tabular-nums" aria-live="polite">
+          {t("send.scheduledShort", { seconds: left })}
+        </span>
+        <Button variant="outline" size="xs" className="ml-auto" onClick={() => undoSend(item.id)}>
+          {t("common.undo")}
+        </Button>
+      </header>
+      <p className="line-clamp-3 text-sm whitespace-pre-wrap opacity-70 [overflow-wrap:anywhere]">{item.text}</p>
+    </article>
+  );
+}
 
 /** "•••": shows or hides the quoted part of a message. */
 function QuoteToggle({ open, onToggle: flip }: { open: boolean; onToggle: () => void }) {

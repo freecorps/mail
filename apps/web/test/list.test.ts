@@ -266,3 +266,13 @@ describe("conversation folds", () => {
     expect(foldMessages(0, false)).toEqual([]);
   });
 });
+
+describe("undone sends kept for a gone composer", () => {
+  it("one per conversation, read once", async () => {
+    const { keepUndone, takeUndone } = await import("@/model/undone");
+    keepUndone("t1", { mode: "reply", html: "<p>Oi</p>", text: "Oi", all: true, signature: true, files: [] });
+    expect(takeUndone("t2")).toBeNull();
+    expect(takeUndone("t1")).toMatchObject({ mode: "reply", text: "Oi", all: true });
+    expect(takeUndone("t1")).toBeNull();
+  });
+});

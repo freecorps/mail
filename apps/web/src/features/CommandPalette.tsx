@@ -2,6 +2,7 @@
 // Sent/Spam, search conversations across every mailbox, compose, switch theme/density/layout, and, for admins, jump to
 // an admin section. No open/close animation: it is a keyboard surface used all day.
 import { useState } from "react";
+import { openWindow } from "@/model/dock";
 import {
   Archive,
   ArchiveRestore,
@@ -9,6 +10,7 @@ import {
   CircleDot,
   Columns2,
   Columns3,
+  FilePen,
   Keyboard,
   LayoutList,
   Mail,
@@ -45,6 +47,7 @@ import { useI18n } from "@/i18n/context";
 import { api, VIEWS, type Mailbox, type ThreadStatus, type View } from "@/lib/api";
 import { contactOf, displayAddress } from "@/lib/format";
 import { READING_MODES, usePrefs, type Density, type ReadingMode, type ThemePref } from "@/lib/prefs";
+import { useHeldDrafts } from "@/model/drafts";
 import { modKey, shortcutFor } from "@/model/keys";
 import { ADMIN_SECTIONS, type AdminSection } from "@/model/route";
 import { useMembers } from "@/model/thread";
@@ -105,6 +108,12 @@ function Body(p: PaletteProps & { close: () => void }) {
   const assign = useMutation(api.inbox.assign);
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
+  // New conversations and forwards being written (replies and notes reopen with their conversation); not one a send
+  // still holds (in its undo window: reopening it would send it twice).
+  const held = useHeldDrafts();
+  const drafts = (useQuerySnapshot(api.inbox.drafts, {}).value ?? [])
+    .filter((d) => (d.kind === "compose" || d.kind === "forward") && !held.has(d._id))
+    .slice(0, 8);
   const mod = modKey();
   const names = Object.fromEntries(p.mailboxes.map((b) => [b.name, b.displayName ?? b.name]));
   const current = p.mailboxes.find((b) => b.name === p.mailbox) ?? null;
@@ -262,6 +271,39 @@ function Body(p: PaletteProps & { close: () => void }) {
             </>
           )}
         </CommandGroup>
+
+        {drafts.length > 0 && (
+          <CommandGroup heading={t("palette.drafts")}>
+            {drafts.map((d) => (
+              <Item
+                key={d._id}
+                id={d._id}
+                icon={FilePen}
+                label={d.subject.trim() || t("compose.noSubject")}
+                hint={d.to.join(", ") || names[d.mailbox]}
+                onSelect={run(
+                  () =>
+                    openWindow(
+                      d.kind === "forward"
+                        ? {
+                            kind: "forward",
+                            draft: d,
+                            forward: {
+                              threadId: d.threadId ?? "",
+                              messageId: d.messageId ?? "",
+                              mailbox: d.mailbox,
+                              subject: d.subject,
+                              text: "",
+                              files: [],
+                            },
+                          }
+                        : { kind: "compose", draft: d },
+                    ) || toast(t("compose.tooMany")),
+                )}
+              />
+            ))}
+          </CommandGroup>
+        )}
 
         <CommandGroup heading={t("palette.actions")}>
           <Item icon={PenSquare} label={t("threads.compose")} keys={["c"]} onSelect={run(p.onCompose)} />
