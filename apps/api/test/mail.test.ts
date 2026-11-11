@@ -489,6 +489,9 @@ describe("mail app", () => {
     // The retry (a lost answer, the offline queue, the notification action's fallback): same result, nothing sent.
     const again = await call("mutation", "inbox:reply", args, "user:wolf");
     expect(again.value).toEqual(first.value);
+    // A retry whose quote line was rebuilt in another language (the device changed it meanwhile) is the same send.
+    const relocalized = await call("mutation", "inbox:reply", { ...args, quoteHeader: "On Nov 5, 2026, Ana wrote:" }, "user:wolf");
+    expect(relocalized.value).toEqual(first.value);
     expect(await outbound()).toBe(before + 1);
     // Another member with the same id sends their own.
     const other = await call("mutation", "inbox:reply", { ...args, text: "Mine too." }, "user:heitor");

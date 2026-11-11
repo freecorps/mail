@@ -485,7 +485,9 @@ function fnv64(s: string): string {
  * the id (a retry carries the very same ones).
  */
 export function sendTarget(where: string, args: Record<string, unknown>): string {
-  const { requestId: _id, ...rest } = args;
+  // Not part of what the message is: the attribution line above the quote is rebuilt by each retry from the device's
+  // language and clock (a retry after either changed is still the same send, never a refusal).
+  const { requestId: _id, quoteHeader: _q, ...rest } = args;
   return `${where}#${fnv64(canonical(rest))}`;
 }
 
