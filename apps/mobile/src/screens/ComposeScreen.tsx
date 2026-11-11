@@ -40,7 +40,7 @@ import { formatLater, laterChoices } from "../lib/when";
 import { deviceTimeZone } from "../prefs";
 import { usePresence } from "../presence";
 import { RECENT_THREADS } from "../offline/replica";
-import { corner, hairline, radius, screenEdge, spacing, type, useColors } from "../theme";
+import { corner, hairline, inputAccent, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 type Params = { threadId?: string; mode?: string; forwardThread?: string; forwardMessage?: string; mailbox?: string; to?: string; draftId?: string; restore?: string };
 
@@ -602,7 +602,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                   {subject}
                 </ThemedText>
               ) : (
-                <TextInput value={subject} onChangeText={(v) => (setSubject(v), touch())} accessibilityLabel={t("compose.subject")} style={[styles.subject, { color: c.labelText }]} />
+                <TextInput value={subject} onChangeText={(v) => (setSubject(v), touch())} accessibilityLabel={t("compose.subject")} {...inputAccent(c)} style={[styles.subject, { color: c.labelText }]} />
               )}
             </View>
             <Separator inset={screenEdge} />
@@ -618,6 +618,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
           placeholderTextColor={c.tertiaryText}
           accessibilityLabel={t("compose.body")}
           textAlignVertical="top"
+          {...inputAccent(c)}
           style={[styles.body, { color: c.labelText }, note && { backgroundColor: c.noteBackground }]}
         />
         {quoted ? (

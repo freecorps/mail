@@ -112,3 +112,11 @@ export function paletteFor(scheme: "light" | "dark"): Palette {
 export function useColors(): Palette {
   return paletteFor(useColorScheme() === "dark" ? "dark" : "light");
 }
+
+/**
+ * A React Native text field's cursor and selection handles in the accent (Android: Material's primary; left alone they
+ * are the window theme's default teal). Android-only props: the iOS caret keeps the system tint.
+ */
+export function inputAccent(p: Palette) {
+  return { cursorColor: p.tint, selectionHandleColor: p.tint };
+}

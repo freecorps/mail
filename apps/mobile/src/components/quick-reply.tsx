@@ -18,7 +18,7 @@ import { draftReplyMode, quoteHeader, quotedMessage, replyState, type ReplyMode 
 import { createDraftSaver, replyDraftArgs } from "../model/draft-saver";
 import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
-import { corner, hairline, radius, spacing, type, useColors } from "../theme";
+import { corner, hairline, inputAccent, radius, spacing, type, useColors } from "../theme";
 import { Icons, type IconSpec } from "./icons";
 import { IconButton, MenuButton, type MenuItem } from "./native";
 import { canSchedule, draftStep, isLinkRefusal, releaseDraft, runScheduled } from "../model/schedule";
@@ -356,6 +356,7 @@ export function QuickReply({
               accessibilityLabel={placeholder}
               onFocus={cancelClose}
               onBlur={onBlur}
+              {...inputAccent(c)}
               style={[styles.input, { color: c.labelText }]}
             />
           </View>
