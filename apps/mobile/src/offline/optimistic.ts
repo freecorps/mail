@@ -2,7 +2,7 @@
 // restored after a restart is still shown: the reply appears in the thread with a "sending" mark, the thread moves to
 // "waiting", unread counters drop, and the server's answer replaces all of it when the queue drains.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-react-native";
-import { INBOX_VIEWS, type Address, type Draft, type SaveDraftArgs, type Mailbox, type Message, type Page, type ScheduledSend, type SentArgs, type SentThread, type Tag, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCount, type ViewCounts, type ViewPage } from "../api";
+import { INBOX_VIEWS, type Address, type Draft, type SaveDraftArgs, type Mailbox, type Message, type Page, type ScheduledSend, type SearchHit, type SentArgs, type SentThread, type Tag, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCount, type ViewCounts, type ViewPage } from "../api";
 import { threadsKeeps, viewKeeps, viewOrder } from "./replica";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
@@ -87,6 +87,7 @@ function adjustMailboxCounts(store: Store, before: Thread, after: Thread | null)
  * with it.
  */
 function patchThread(store: Store, threadId: string, patch: (t: Thread) => Thread): Thread | null {
+  patchSearch(store, threadId, patch);
   let found = patchLoaded(store, threadId, patch);
   // Loaded nowhere any more (an archive dropped it from the only list showing it): the copy kept when it was dropped
   // lets a later patch, such as "Desfazer", put it back.
@@ -98,6 +99,41 @@ function patchThread(store: Store, threadId: string, patch: (t: Thread) => Threa
   adjustViewCounts(store, found.before, found.after);
   adjustMailboxCounts(store, found.before, found.after);
   return found.after;
+}
+
+/**
+ * Search hits carry their thread's state (status, unread, assignee, tags, wake time) and act like list rows: the same
+ * patch applies to them, so the swipe, menu and tag sheet of a search result follow at once and toggle the right way
+ * the next time too. Counts are not moved here: `patchLoaded` does that for the thread where it is listed.
+ */
+function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Thread) {
+  for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: unknown; value: SearchHit[] | undefined }>) {
+    if (!value?.some((h) => h.threadId === threadId)) continue;
+    const next = value.map((h): SearchHit => {
+      if (h.threadId !== threadId) return h;
+      const t = patch({
+        _id: h.threadId,
+        mailbox: h.mailbox,
+        subject: h.subject,
+        status: h.status,
+        unreadCount: h.unreadCount ?? 0,
+        assignee: h.assignee,
+        assigneeName: h.assigneeName,
+        ...(h.tags?.length ? { tags: h.tags } : {}),
+        ...(h.snoozedUntil ? { snoozed: true, snoozedUntil: h.snoozedUntil } : {}),
+      } as unknown as Thread);
+      return {
+        ...h,
+        status: t.status,
+        unreadCount: t.unreadCount,
+        assignee: t.assignee ?? undefined,
+        assigneeName: t.assigneeName ?? undefined,
+        tags: t.tags ?? [],
+        snoozedUntil: t.snoozed && t.snoozedUntil ? t.snoozedUntil : undefined,
+      };
+    });
+    store.setQuery<any>("inbox:search", args as never, next);
+  }
 }
 
 /** Threads an optimistic patch dropped from a list (newest last), so a later patch can bring them back. */

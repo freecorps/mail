@@ -766,3 +766,23 @@ describe("timeline", () => {
     expect(merged.map((x) => (x.kind === "message" ? x.item.id : x.event.id))).toEqual(["e0", "m1", "m2", "e1"]);
   });
 });
+
+describe("search hits follow thread patches", () => {
+  const up = inboxOptimisticUpdates(() => 1000);
+  const hit = { messageId: "m1", threadId: "email$threads_a", mailbox: "support", direction: "inbound", subject: "Oi", from: { address: "a@x.com" }, snippet: "", at: 1, status: "open", unreadCount: 2 };
+  const other = { ...hit, messageId: "m2", threadId: "email$threads_b" };
+
+  it("tags, read, archive and snooze apply to the hit (only that thread's), loaded nowhere else", () => {
+    const s = fakeStore([["inbox:search", { query: "oi" }, [hit, other]]]);
+    up["inbox:addTag"]!(s.store, { threadId: hit.threadId, tag: "vip" }, rec);
+    up["inbox:markRead"]!(s.store, { threadId: hit.threadId }, rec);
+    up["inbox:setStatus"]!(s.store, { threadId: hit.threadId, status: "closed" }, rec);
+    up["inbox:snooze"]!(s.store, { threadId: hit.threadId, until: 9_000 }, rec);
+    const [a, b] = s.get("inbox:search", { query: "oi" });
+    expect(a).toMatchObject({ tags: ["vip"], unreadCount: 0, status: "closed", snoozedUntil: 9_000 });
+    expect(b).toBe(other);
+    up["inbox:removeTag"]!(s.store, { threadId: hit.threadId, tag: "vip" }, rec);
+    up["inbox:unsnooze"]!(s.store, { threadId: hit.threadId }, rec);
+    expect(s.get("inbox:search", { query: "oi" })[0]).toMatchObject({ tags: [], snoozedUntil: undefined });
+  });
+});

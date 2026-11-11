@@ -126,6 +126,8 @@ export interface SearchHit {
   assignee?: string;
   assigneeName?: string;
   snoozedUntil?: number;
+  /** The thread's tags (Ember 0.7.2): the tag sheet and chips of a search row. */
+  tags?: string[];
 }
 
 export interface ThreadDetail {

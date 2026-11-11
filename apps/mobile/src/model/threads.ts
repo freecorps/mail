@@ -96,8 +96,10 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       assignee: h.assignee ?? null,
       assigneeName: h.assigneeName ?? null,
       pending: false,
-      tags: [],
-      snoozedUntil: null,
+      // Its tags and wake time too (Ember 0.7.2; none from an older server or the device), so the tag sheet and
+      // "Adiada até …" read a hit like a list row. The server sets `snoozedUntil` only while the thread is snoozed.
+      tags: h.tags ?? [],
+      snoozedUntil: h.snoozedUntil ?? null,
     });
   }
   return out;
