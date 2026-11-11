@@ -1,13 +1,19 @@
 // View models of the mailbox and thread-list screens (hooks over live queries; the row builders are pure).
 import { useEffect, useMemo, useState } from "react";
 import { useQuerySnapshot } from "@freecorps/ember-react";
-import { api, type Mailbox, type SearchHit, type SentThread, type Thread, type ThreadStatus } from "@/lib/api";
+import { api, type Mailbox, type SearchHit, type SentThread, type Thread, type ThreadStatus, type View } from "@/lib/api";
 import { contactOf, displayAddress } from "@/lib/format";
 import { isOptimisticId } from "@/lib/optimistic";
+import { useDevData } from "@/dev/data";
+import { FIXTURES } from "@/dev/fixtures";
 
-/** A status, or `sent`: the conversations the mailbox wrote in, by its latest send (not a status). */
-export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent";
-export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed", "sent"];
+/**
+ * What a mailbox's list shows: a status (`spam` included), or `sent`, the conversations the mailbox wrote in, by its
+ * latest send (not a status). The tabs over the list are the working statuses; Sent and Spam are sidebar destinations.
+ */
+export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent" | "spam";
+export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed", "sent", "spam"];
+export const STATUS_TABS: ThreadFilter[] = ["all", "open", "waiting", "closed"];
 export const PAGE = 30;
 
 export interface ThreadRow {
@@ -90,7 +96,8 @@ const sourceOf = (s: { source?: "local" | "cache" }): Source => s.source ?? "ser
 
 export function useMailboxes() {
   const s = useQuerySnapshot(api.inbox.mailboxes, {});
-  const mailboxes: Mailbox[] = ownFirst(s.value ?? []);
+  const dev = useDevData();
+  const mailboxes: Mailbox[] = ownFirst(import.meta.env.DEV && dev ? FIXTURES[dev].mailboxes : (s.value ?? []));
   return {
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,
@@ -102,22 +109,40 @@ export function useMailboxes() {
 
 export const MIN_QUERY = 2;
 
-export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query: string }) {
+/** Most threads one `inbox:view` read returns (apps/api VIEW_MAX). */
+export const VIEW_MAX = 300;
+
+/** The statuses a view's list can be narrowed to with the tabs: only "all mailboxes" takes every status. */
+export const viewTakesTabs = (view: View | null) => view === null || view === "all";
+
+/**
+ * The list: a view across mailboxes (`view`), or one mailbox's list (`filter`: a status, Sent, Spam); a search query of
+ * two characters or more replaces either (across every mailbox in a view, in the mailbox otherwise).
+ */
+export function useThreadList(o: { mailbox: string; view?: View | null; filter: ThreadFilter; query: string }) {
+  const view = o.view ?? null;
   const [limit, setLimit] = useState({ key: "", n: PAGE });
-  const key = `${o.mailbox}\u0000${o.filter}`;
+  const key = `${view ?? o.mailbox}\u0000${o.filter}`;
   const n = limit.key === key ? limit.n : PAGE;
   const q = o.query.trim();
   const searching = q.length >= MIN_QUERY;
-  const sentView = o.filter === "sent";
+  const sentView = !view && o.filter === "sent";
+  const status = o.filter === "all" || o.filter === "sent" ? undefined : (o.filter as ThreadStatus);
   const inbox = useQuerySnapshot(
     api.inbox.threads,
-    searching || sentView
+    searching || sentView || view
       ? "skip"
-      : { mailbox: o.mailbox, ...(o.filter === "all" ? {} : { status: o.filter }), paginationOpts: { numItems: n, cursor: null } },
+      : { mailbox: o.mailbox, ...(status ? { status } : {}), paginationOpts: { numItems: n, cursor: null } },
   );
   const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox: o.mailbox, limit: n } : "skip");
-  const list = sentView ? sent : inbox;
-  const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, mailbox: o.mailbox } : "skip");
+  const across = useQuerySnapshot(
+    api.inbox.view,
+    !searching && view
+      ? { view, ...(viewTakesTabs(view) && status && status !== "spam" ? { status } : {}), limit: Math.min(n, VIEW_MAX) }
+      : "skip",
+  );
+  const list = view ? across : sentView ? sent : inbox;
+  const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, ...(view ? {} : { mailbox: o.mailbox }) } : "skip");
   const s = searching ? search : list;
   const fresh = useMemo(
     () =>
@@ -125,10 +150,12 @@ export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query:
         ? null
         : searching
           ? searchRows(search.value ?? [])
-          : sentView
-            ? (sent.value?.page ?? []).map(sentRow)
-            : (inbox.value?.page ?? []).map(threadRow),
-    [searching, sentView, s.value, search.value, sent.value, inbox.value],
+          : view
+            ? (across.value?.page ?? []).map(threadRow)
+            : sentView
+              ? (sent.value?.page ?? []).map(sentRow)
+              : (inbox.value?.page ?? []).map(threadRow),
+    [searching, view, sentView, s.value, search.value, across.value, sent.value, inbox.value],
   );
   // While a bigger page (or a new search) loads, keep showing the previous rows of the same list.
   const [last, setLast] = useState<{ key: string; rows: ThreadRow[] }>({ key: "", rows: [] });
@@ -143,9 +170,44 @@ export function useThreadList(o: { mailbox: string; filter: ThreadFilter; query:
     error: s.error ?? null,
     source: sourceOf(s),
     optimistic: s.optimistic,
-    canLoadMore: !searching && !!list.value && !list.value.isDone,
+    canLoadMore: !searching && !!list.value && !list.value.isDone && (!view || n < VIEW_MAX),
     loadMore: () => setLimit({ key, n: n + PAGE }),
   };
+}
+
+/** Whether a mailbox has any spam (the sidebar lists Spam only then). */
+export function useHasSpam(mailbox: string | null): boolean {
+  const s = useQuerySnapshot(
+    api.inbox.threads,
+    mailbox ? { mailbox, status: "spam", paginationOpts: { numItems: 1, cursor: null } } : "skip",
+  );
+  const dev = useDevData();
+  if (import.meta.env.DEV && dev) return FIXTURES[dev].hasSpam;
+  return (s.value?.page.length ?? 0) > 0;
+}
+
+/** The view counts (`inbox:views`) for the sidebar and Hoje; null while loading. */
+export function useViewCounts() {
+  const s = useQuerySnapshot(api.inbox.views, {});
+  const dev = useDevData();
+  if (import.meta.env.DEV && dev) return FIXTURES[dev].counts;
+  return s.value ?? null;
+}
+
+/**
+ * The number beside a view, as on mobile: unread messages for "all" and "unread" (what a mail app counts), the
+ * threads themselves for "assigned" and "waiting" (a to-do list, worked on whether read or not). Null when zero.
+ */
+export function viewBadge(view: View, counts: Record<View, { threads: number; unread: number; capped: boolean }> | null): string | null {
+  const c = counts?.[view];
+  if (!c) return null;
+  const n = view === "all" || view === "unread" ? c.unread : c.threads;
+  return n > 0 ? badge(n, c.capped) : null;
+}
+
+/** A count for a badge: "99+" past 99, "+" when the server stopped counting. */
+export function badge(n: number, capped = false): string {
+  return n > 99 ? "99+" : `${n}${capped ? "+" : ""}`;
 }
 
 /** Your own mailbox first, then the shared ones as the server lists them (stable). */

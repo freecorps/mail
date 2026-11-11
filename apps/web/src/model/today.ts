@@ -2,6 +2,8 @@
 // assigned to you and the ones waiting on the contact for more than a day from `inbox:view`. The pure parts are tested.
 import { useQuerySnapshot } from "@freecorps/ember-react";
 import { api, type Thread, type View, type ViewCount } from "@/lib/api";
+import { useDevData } from "@/dev/data";
+import { FIXTURES } from "@/dev/fixtures";
 import type { LoadStatus } from "./threads";
 
 /** A conversation waiting on the contact for longer than this is due a follow-up. */
@@ -33,12 +35,23 @@ export interface TodaySection {
   more: boolean;
 }
 
+type ViewPageLike = { page: Thread[]; isDone: boolean };
+type Snap<T> = { status: string; value?: T };
+
 const statusOf = (s: { status: string }): LoadStatus => (s.status === "success" ? "ready" : (s.status as LoadStatus));
 
 export function useToday(now: number) {
-  const counts = useQuerySnapshot(api.inbox.views, {});
-  const assigned = useQuerySnapshot(api.inbox.view, { view: "assigned", limit: TODAY_ROWS + 1 });
-  const waiting = useQuerySnapshot(api.inbox.view, { view: "waiting", limit: WAITING_SCAN });
+  let counts = useQuerySnapshot(api.inbox.views, {}) as Snap<Record<View, ViewCount>>;
+  let assigned = useQuerySnapshot(api.inbox.view, { view: "assigned", limit: TODAY_ROWS + 1 }) as Snap<ViewPageLike>;
+  let waiting = useQuerySnapshot(api.inbox.view, { view: "waiting", limit: WAITING_SCAN }) as Snap<ViewPageLike>;
+  const dev = useDevData();
+  if (import.meta.env.DEV && dev) {
+    const fx = FIXTURES[dev];
+    const v = fx.view(now);
+    counts = { status: "success", value: fx.counts };
+    assigned = { status: "success", value: v.assigned };
+    waiting = { status: "success", value: v.waiting };
+  }
   const stale = staleWaiting(waiting.value?.page ?? [], now);
   const mine: TodaySection = {
     status: statusOf(assigned),

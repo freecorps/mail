@@ -8,6 +8,7 @@ import type { Thread, View } from "@/lib/api";
 import { contactOf, formatAge } from "@/lib/format";
 import { useNow } from "@/lib/now";
 import { cn } from "@/lib/utils";
+import { modKey } from "@/model/keys";
 import { useToday, type TodaySection } from "@/model/today";
 
 /** The views in the order the sidebar and mobile list them. */
@@ -33,8 +34,9 @@ export function Today({
   const date = new Intl.DateTimeFormat(locale, { weekday: "long", day: "numeric", month: "long" }).format(now);
 
   return (
-    <section aria-labelledby="today-title" className={cn("min-h-0 flex-1 overflow-y-auto", className)}>
-      <div className="mx-auto w-full max-w-xl px-8 pt-10 pb-12">
+    // Sized by its pane, not the window (the reader can be 360px on a wide screen): container queries.
+    <section aria-labelledby="today-title" className={cn("@container min-h-0 flex-1 overflow-y-auto", className)}>
+      <div className="mx-auto w-full max-w-xl px-5 pt-8 pb-12 @md:px-8 @md:pt-10">
         <header>
           <h2 id="today-title" className="text-lg font-semibold">
             {t("today.title")}
@@ -45,7 +47,7 @@ export function Today({
         <ul
           aria-label={t("today.counts")}
           aria-busy={today.counts.status === "loading"}
-          className="mt-6 grid grid-cols-2 gap-y-4 border-y py-4 sm:grid-cols-4"
+          className="mt-6 grid grid-cols-2 gap-y-4 border-y py-4 @md:grid-cols-4"
         >
           {COUNT_ORDER.map((v) => {
             const c = today.counts.value?.[v];
@@ -55,7 +57,7 @@ export function Today({
                 <span className="block text-xl font-semibold tabular-nums">
                   {value ?? (today.counts.status === "error" ? "–" : <Skeleton className="my-1 h-6 w-8" />)}
                 </span>
-                <span className="block truncate text-xs text-muted-foreground">{t(`views.${v}`)}</span>
+                <span className="block truncate text-xs text-muted-foreground">{v === "all" ? t("today.count.all") : t(`views.${v}`)}</span>
               </>
             );
             return (
@@ -99,7 +101,7 @@ export function Today({
           <h3 id="today-keys" className="text-ui font-medium">
             {t("today.keys")}
           </h3>
-          <ul className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1.5 text-ui text-muted-foreground sm:grid-cols-2">
+          <ul className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1.5 text-ui text-muted-foreground @md:grid-cols-2">
             {HINTS.map((h) => (
               <li key={h.label} className="flex items-center gap-2">
                 <span className="flex gap-1">
@@ -118,6 +120,7 @@ export function Today({
 }
 
 const HINTS = [
+  { keys: [modKey(), "K"], label: "today.key.palette" },
   { keys: ["j", "k"], label: "today.key.move" },
   { keys: ["Enter"], label: "today.key.open" },
   { keys: ["c"], label: "today.key.compose" },
@@ -184,12 +187,28 @@ function Section({
                   onClick={() => onOpen(th._id)}
                   className="pressable flex w-full min-w-0 items-baseline gap-3 rounded-md px-2 py-1.5 text-left text-ui hover:bg-accent"
                 >
-                  <span className={cn("w-36 shrink-0 truncate", unread ? "font-semibold" : "font-medium text-foreground/85")}>
+                  {/* Names and subjects come from mail: any script (dir="auto"), any length (title shows the rest). */}
+                  <span
+                    dir="auto"
+                    title={contactOf(th)}
+                    className={cn(
+                      "w-28 shrink-0 truncate text-start @md:w-36",
+                      unread ? "font-semibold" : "font-medium text-foreground/85",
+                    )}
+                  >
                     {unread && <span className="sr-only">{t("threads.unread")}: </span>}
                     {contactOf(th)}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">{th.subject}</span>
-                  <span className="hidden max-w-28 shrink-0 truncate text-xs text-muted-foreground lg:inline">{r.mailbox}</span>
+                  <span
+                    dir="auto"
+                    title={th.subject.trim() || undefined}
+                    className="min-w-0 flex-1 truncate text-start text-muted-foreground"
+                  >
+                    {th.subject.trim() || <span className="italic">{t("thread.noSubject")}</span>}
+                  </span>
+                  <span dir="auto" title={r.mailbox} className="hidden max-w-28 shrink-0 truncate text-xs text-muted-foreground @lg:inline">
+                    {r.mailbox}
+                  </span>
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{r.meta}</span>
                 </button>
               </li>
@@ -199,7 +218,7 @@ function Section({
       )}
       {extra > 0 && onMore && (
         <button type="button" onClick={onMore} className="mt-1 rounded-sm text-xs font-medium text-muted-foreground hover:text-foreground">
-          {t("today.more", { count: nf.format(extra) })}
+          {t("today.more", { count: `${nf.format(extra)}${section.more ? "+" : ""}` })}
         </button>
       )}
     </section>

@@ -11,7 +11,8 @@ export type ShortcutAction =
   | "unread"
   | "escape"
   | "help"
-  | "sidebar";
+  | "sidebar"
+  | "palette";
 
 export interface KeyLike {
   key: string;
@@ -38,8 +39,12 @@ const KEYS: Record<string, ShortcutAction> = {
   "[": "sidebar",
 };
 
-/** The action for a key press, or null. In a text field only Escape counts (it leaves the field). */
+/**
+ * The action for a key press, or null. ⌘K / Ctrl+K opens the command palette from anywhere (fields included); otherwise
+ * in a text field only Escape counts (it leaves the field).
+ */
 export function shortcutFor(e: KeyLike, inField: boolean): ShortcutAction | null {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === "k") return "palette";
   if (e.metaKey || e.ctrlKey || e.altKey) return null;
   if (inField) return e.key === "Escape" ? "escape" : null;
   return KEYS[e.key] ?? null;
@@ -65,8 +70,14 @@ export function moveSelection(ids: readonly string[], current: string | null, de
   return ids[Math.min(ids.length - 1, Math.max(0, i + delta))]!;
 }
 
+/** The modifier as the platform writes it: ⌘ on Apple keyboards, Ctrl elsewhere. */
+export function modKey(platform = typeof navigator === "undefined" ? "" : navigator.platform): string {
+  return /Mac|iPhone|iPad/.test(platform) ? "⌘" : "Ctrl";
+}
+
 /** The shortcut sheet, in display order. */
 export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
+  { keys: [modKey(), "K"], action: "palette" },
   { keys: ["j", "↓"], action: "next" },
   { keys: ["k", "↑"], action: "prev" },
   { keys: ["Enter", "o"], action: "open" },

@@ -200,6 +200,27 @@
   #root {
     height: 100%;
   }
+  /* Phones: no gray tap flash (controls have their own :active), no page bounce or pull-to-refresh behind the app's
+     own scroll areas, no text inflation in landscape. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+  }
+  button,
+  a,
+  [role="button"],
+  [role="tab"] {
+    touch-action: manipulation;
+  }
+  /* iOS zooms into fields under 16px and stays zoomed: 16px wherever the pointer is a finger. */
+  @media (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";

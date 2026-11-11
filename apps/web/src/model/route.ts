@@ -1,6 +1,7 @@
-// The inbox location lives in the URL (`?m=support&f=open&t=<threadId>&q=…`), so reloads, back/forward and shared
-// links land on the same view. Pure parse/format (tested) and a tiny history hook.
+// The inbox location lives in the URL (`?v=assigned` or `?m=support&f=open`, then `&q=…&t=<threadId>`), so reloads,
+// back/forward and shared links land on the same view. Pure parse/format (tested) and a tiny history hook.
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { VIEWS, type View } from "@/lib/api";
 import { THREAD_FILTERS, useDebounced, type ThreadFilter } from "./threads";
 
 /** Sections of the admin screen (`?a=`). */
@@ -10,6 +11,8 @@ export type AdminSection = (typeof ADMIN_SECTIONS)[number];
 export interface Route {
   /** The admin screen's section; null for the inbox. */
   admin: AdminSection | null;
+  /** A view across mailboxes (`?v=`); when set, the list is the view's, not the mailbox's. */
+  view: View | null;
   mailbox: string | null;
   filter: ThreadFilter;
   thread: string | null;
@@ -20,8 +23,10 @@ export function parseRoute(search: string): Route {
   const p = new URLSearchParams(search);
   const f = p.get("f") as ThreadFilter | null;
   const a = p.get("a") as AdminSection | null;
+  const v = p.get("v") as View | null;
   return {
     admin: a && ADMIN_SECTIONS.includes(a) ? a : null,
+    view: v && VIEWS.includes(v) ? v : null,
     mailbox: p.get("m") || null,
     filter: f && THREAD_FILTERS.includes(f) ? f : "all",
     thread: p.get("t") || null,
@@ -32,6 +37,7 @@ export function parseRoute(search: string): Route {
 export function formatRoute(r: Route): string {
   const p = new URLSearchParams();
   if (r.admin) p.set("a", r.admin);
+  if (r.view) p.set("v", r.view);
   if (r.mailbox) p.set("m", r.mailbox);
   if (r.filter !== "all") p.set("f", r.filter);
   if (r.query) p.set("q", r.query);
