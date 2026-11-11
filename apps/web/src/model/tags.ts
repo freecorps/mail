@@ -83,6 +83,23 @@ export function tagCreateError(
   return threads.some((x) => (x.tags?.length ?? 0) >= TAG_LIMITS.perThread) ? "threadFull" : null;
 }
 
+/**
+ * The menu's state after a tag it created landed: the new tag added to each thread's tags as the menu has them now
+ * (`local`, toggled since the click; else the thread's own), never the snapshot from when it was created.
+ */
+export function withCreated(
+  local: Readonly<Record<string, readonly string[]>>,
+  threads: ReadonlyArray<{ threadId: string; tags?: readonly string[] }>,
+  tagId: string,
+): Record<string, readonly string[]> {
+  const next: Record<string, readonly string[]> = { ...local };
+  for (const x of threads) {
+    const now = local[x.threadId] ?? x.tags ?? [];
+    next[x.threadId] = now.includes(tagId) ? now : [...now, tagId];
+  }
+  return next;
+}
+
 /** The tags whose name holds the query (ignoring case and accents), best first: starts-with, then contains. */
 export function matchTags(tags: readonly TagDoc[], query: string): TagDoc[] {
   const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();

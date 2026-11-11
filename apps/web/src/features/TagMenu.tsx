@@ -10,7 +10,7 @@ import { useI18n } from "@/i18n/context";
 import { TAG_COLORS, type TagColor } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { openPicker, type TagTarget } from "@/model/picker";
-import { matchTags, nextColor, TAG_LIMITS, tagCreateError, tagsOf, useAllTags, useTagActions } from "@/model/tags";
+import { matchTags, nextColor, TAG_LIMITS, tagCreateError, tagsOf, withCreated, useAllTags, useTagActions } from "@/model/tags";
 import { useMailboxes } from "@/model/threads";
 
 export function TagMenu({
@@ -77,7 +77,8 @@ export function TagCommand({ targets, onClose }: { targets: TagTarget[]; onClose
     setQuery("");
     setColor(null);
     void actions.createAndAdd(mailbox, name, createColor, live).then((id) => {
-      if (id) setLocal(Object.fromEntries(live.map((x) => [x.threadId, [...x.tags, id]])));
+      // Toggles made while it was being created stay: only the new tag is added to what the menu shows now.
+      if (id) setLocal((now) => withCreated(now, targets, id));
     });
   };
 

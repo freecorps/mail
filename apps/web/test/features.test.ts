@@ -9,7 +9,8 @@ import { checkPick, dayAt, formatAt, MAX_AHEAD_MS, sendPresets, snoozePresets, w
 import { phraseOf, placeEntries, showsInline } from "@/model/activity";
 import { HEARTBEAT_MS, presenceBeat, presenceLine, SETTLE_MS, type PresenceTimers } from "@/model/presence";
 import { ATTACH_LIMIT, isLinkRefusal, isScheduled, sendLaterCheck } from "@/model/schedule";
-import { matchTags, nextColor, swapOrders, tagCreateError, tagNameError, threadTags } from "@/model/tags";
+import { matchTags, nextColor, swapOrders, tagCreateError, tagNameError, threadTags, withCreated } from "@/model/tags";
+import { searchRows } from "@/model/threads";
 import { snoozeTargetOf } from "@/model/snooze";
 import { invalidChips, withTyped } from "@/model/recipients";
 import { mailServer } from "./mailServer";
@@ -364,6 +365,11 @@ describe("times in the member's zone", () => {
     expect(checkPick("2027-11-11", "09:00", now, SP)).toEqual({ ok: true, at: Date.parse("2027-11-11T12:00:00Z") });
     expect(checkPick("2027-11-13", "09:00", now, SP)).toMatchObject({ ok: false, error: "tooFar" });
     expect(checkPick("", "09:00", now, SP)).toMatchObject({ ok: false, error: "invalid" });
+    // Safari's time input can carry seconds: the same minute.
+    const minute = checkPick("2027-11-11", "09:00", now, SP);
+    expect(checkPick("2027-11-11", "09:00:00", now, SP)).toEqual(minute);
+    expect(checkPick("2027-11-11", "09:00:30.250", now, SP)).toEqual(minute);
+    expect(checkPick("2027-11-11", "9:00", now, SP)).toMatchObject({ ok: false, error: "invalid" });
     const ok = checkPick("2027-11-11", "09:00", now, SP);
     expect(ok.ok && ok.at - now < MAX_AHEAD_MS).toBe(true);
     expect(formatAt(Date.parse("2026-11-12T11:00:00Z"), now, "pt-BR", SP)).toBe("amanhã às 08:00");
@@ -548,6 +554,33 @@ describe("tag helpers", () => {
         Array.from({ length: 100 }, (_, i) => tag(`t${i}`, i)),
       ),
     ).toBe("full");
+  });
+
+  it("a created tag lands on what the menu shows now, keeping toggles made while it was created", () => {
+    const threads = [
+      { threadId: "t1", tags: ["a", "b"] },
+      { threadId: "t2", tags: [] },
+    ];
+    // At the click both were as above; then "b" came off t1 and "a" went on t2.
+    const local = { t1: ["a"], t2: ["a"] };
+    expect(withCreated(local, threads, "new")).toEqual({ t1: ["a", "new"], t2: ["a", "new"] });
+    // A thread never toggled takes its own tags; one that has it already is left as it is.
+    expect(withCreated({}, [{ threadId: "t3", tags: ["x", "new"] }, { threadId: "t4" }], "new")).toEqual({ t3: ["x", "new"], t4: ["new"] });
+  });
+
+  it("search rows carry the thread's tags (none from an older server)", () => {
+    const hit = {
+      messageId: "m1",
+      threadId: "t1",
+      mailbox: "support",
+      direction: "inbound" as const,
+      subject: "s",
+      from: { email: "a@b.test" },
+      snippet: "",
+      at: 1,
+    };
+    expect(searchRows([{ ...hit, tags: ["g1"] }])[0]!.tags).toEqual(["g1"]);
+    expect(searchRows([hit])[0]!.tags).toEqual([]);
   });
 
   it("creating from the menu is blocked when a thread already has the most tags it takes", () => {

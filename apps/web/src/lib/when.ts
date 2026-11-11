@@ -170,7 +170,8 @@ export type PickCheck = { ok: true; at: number } | { ok: false; error: "invalid"
  */
 export function checkPick(date: string, time: string, now: number, zone: string = localZone()): PickCheck {
   const d = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-  const t = /^(\d{2}):(\d{2})$/.exec(time);
+  // `HH:MM`, or `HH:MM:SS(.sss)` (Safari's time input with a step): seconds are dropped (the server takes minutes).
+  const t = /^(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(time);
   if (!d || !t) return { ok: false, error: "invalid", at: null };
   const at = zonedTime(Number(d[1]), Number(d[2]), Number(d[3]), Number(t[1]), Number(t[2]), zone);
   if (!Number.isFinite(at)) return { ok: false, error: "invalid", at: null };

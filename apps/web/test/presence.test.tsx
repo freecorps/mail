@@ -57,6 +57,29 @@ describe("presence", () => {
     await waitFor(() => expect(seen()).toEqual([]));
   });
 
+  it("into the back-forward cache it goes quiet and comes back on pageshow; a real unload stops it", async () => {
+    const { a, wrapper, seen } = setup();
+    setVisibility("visible");
+    renderHook(() => useOwnPresence(a.threadId, false), { wrapper });
+    await waitFor(() => expect(seen()).toHaveLength(1));
+    const page = (type: "pagehide" | "pageshow", persisted: boolean) => {
+      const e = new Event(type);
+      Object.defineProperty(e, "persisted", { value: persisted });
+      window.dispatchEvent(e);
+    };
+    page("pagehide", true);
+    await waitFor(() => expect(seen()).toEqual([]));
+    page("pageshow", true);
+    await waitFor(() => expect(seen()).toEqual([expect.objectContaining({ state: "viewing" })]));
+    page("pagehide", false);
+    await waitFor(() => expect(seen()).toEqual([]));
+    // Stopped for good: becoming visible again sends nothing.
+    setVisibility("hidden");
+    setVisibility("visible");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(seen()).toEqual([]);
+  });
+
   it("never shows the member to themselves", async () => {
     const { srv, a, wrapper } = setup();
     setVisibility("visible");

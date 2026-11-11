@@ -88,6 +88,8 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       status: h.status ?? null,
       assignee: h.assignee ?? null,
       assigneeName: h.assigneeName ?? null,
+      // Its tags too (Ember 0.7.2; none from an older server), so the tag menu on a hit toggles the right way.
+      tags: h.tags ?? [],
       pending: false,
     });
   }

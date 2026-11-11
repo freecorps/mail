@@ -82,12 +82,19 @@ export function useOwnPresence(threadId: string, replying: boolean, enabled = tr
     const apply = () => b.set(document.visibilityState === "hidden" ? null : replyingNow.current ? "replying" : "viewing");
     apply();
     document.addEventListener("visibilitychange", apply);
-    // Closing the tab: the row would otherwise stay until it expires (30 s).
-    const leave = () => b.stop();
+    // Leaving the page: the row would otherwise stay until it expires (30 s). Into the back-forward cache
+    // (`persisted`) the page may come back as it was, so it only goes quiet, and `pageshow` brings it back; a real
+    // unload stops for good.
+    const leave = (e: PageTransitionEvent) => (e.persisted ? b.set(null) : b.stop());
+    const back = (e: PageTransitionEvent) => {
+      if (e.persisted) apply();
+    };
     window.addEventListener("pagehide", leave);
+    window.addEventListener("pageshow", back);
     return () => {
       document.removeEventListener("visibilitychange", apply);
       window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pageshow", back);
       b.stop();
       beat.current = null;
     };
