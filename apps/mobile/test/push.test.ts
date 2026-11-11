@@ -409,3 +409,104 @@ describe("sign-out clears push's process-wide state (resetPushState)", () => {
     expect(opened).toEqual([]);
   });
 });
+
+describe("delivery checks the session after every await (deliverCalls)", () => {
+  const replyCalls = [
+    { fn: "reply" as const, args: { threadId: "t1", text: "Oi", requestId: "push-x" } },
+    { fn: "markRead" as const, args: { threadId: "t1" } },
+  ];
+  function rig(o: { http?: (token: string) => Promise<"sent" | "failed" | "refused">; tokens?: string[] } = {}) {
+    const log: string[] = [];
+    const tokens = [...(o.tokens ?? ["tok-A"])];
+    const fx = {
+      token: async () => (log.push("token"), tokens.shift() ?? null),
+      sendOverHttp: async (c: { fn: string }, token: string) => (log.push(`http:${c.fn}:${token}`), (o.http ?? (async () => "sent" as const))(token)),
+      client: async () => ({
+        enqueue: async (c: { fn: string }) => void log.push(`queue:${c.fn}`),
+        flush: async () => void log.push("flush"),
+      }),
+      refreshBadge: async () => void log.push("badge"),
+      queueWaitMs: 10,
+    };
+    return { fx, log };
+  }
+
+  it("signed out during the HTTPS attempt: nothing is queued, nothing flushed, and the response is not marked", async () => {
+    const { deliverCalls } = await import("../src/push/deliver");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { fx, log } = rig({ http: async () => (await gate, "failed") });
+    const handledLog: string[] = [];
+    const respondFx = {
+      isHandled: async () => false,
+      markHandled: async () => void handledLog.push("markHandled"),
+      clearLast: () => void handledLog.push("clearLast"),
+      dismiss: async () => void handledLog.push("dismiss"),
+      route: () => {},
+      targetOf: () => ({ threadId: "t1" }),
+      locale: async () => "pt-BR" as const,
+      clock24: () => true,
+      deliver: (_k: unknown, calls: unknown, live: () => boolean) => deliverCalls(calls as typeof replyCalls, live, fx),
+    };
+    const running = processResponse({ actionIdentifier: "reply", userText: "Oi", notification: { date: 1, request: { identifier: "race-1", content: { data } } } }, respondFx);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(log).toEqual(["token", "http:reply:tok-A"]);
+    resetResponseState();
+    release();
+    await running;
+    expect(log).toEqual(["token", "http:reply:tok-A"]);
+    expect(handledLog).toEqual([]);
+  });
+
+  it("the token is taken once: every HTTPS attempt of the action carries the acting member's", async () => {
+    const { deliverCalls } = await import("../src/push/deliver");
+    const { fx, log } = rig({ tokens: ["tok-A", "tok-B"] });
+    const d = await deliverCalls(replyCalls, () => true, fx);
+    expect(d.durable).toBe(true);
+    await d.settled;
+    expect(log).toEqual(["token", "http:reply:tok-A", "http:markRead:tok-A", "badge"]);
+  });
+
+  it("signed out after the client loaded, or between queueing and flushing: no queue write after it", async () => {
+    const { deliverCalls } = await import("../src/push/deliver");
+    // HTTPS fails, then the session ends while the client is being loaded.
+    let alive = true;
+    const a = rig({ http: async () => "failed" });
+    const slowClient = { ...a.fx, client: async () => ((alive = false), a.fx.client()) };
+    expect((await deliverCalls(replyCalls, () => alive, slowClient)).durable).toBe(false);
+    expect(a.log).toEqual(["token", "http:reply:tok-A"]);
+    // Queued, then the session ends before the flush: not flushed, not durable (so not marked).
+    let calls = 0;
+    let alive2 = true;
+    const b = rig({ http: async () => "failed" });
+    const flushLater = {
+      ...b.fx,
+      // The second load is the one before the flush: the session ends there.
+      client: async () => {
+        calls++;
+        const c = await b.fx.client();
+        if (calls === 2) alive2 = false;
+        return c;
+      },
+    };
+    const d = await deliverCalls([replyCalls[0]!], () => alive2, flushLater);
+    expect(d.durable).toBe(false);
+    expect(b.log).toEqual(["token", "http:reply:tok-A", "queue:reply"]);
+  });
+
+  it("normal paths: a failed HTTPS attempt queues it and what follows (in order); no token queues; refused stops", async () => {
+    const { deliverCalls } = await import("../src/push/deliver");
+    const failed = rig({ http: async () => "failed" });
+    const d = await deliverCalls(replyCalls, () => true, failed.fx);
+    await d.settled;
+    expect(d.durable).toBe(true);
+    expect(failed.log).toEqual(["token", "http:reply:tok-A", "queue:reply", "queue:markRead", "flush", "badge"]);
+    const none = rig({ tokens: [] });
+    await (await deliverCalls(replyCalls, () => true, none.fx)).settled;
+    expect(none.log).toEqual(["token", "queue:reply", "queue:markRead", "flush", "badge"]);
+    const refused = rig({ http: async () => "refused" });
+    const r = await deliverCalls(replyCalls, () => true, refused.fx);
+    expect(r).toMatchObject({ durable: true, refused: true });
+    expect(refused.log).toEqual(["token", "http:reply:tok-A", "badge"]);
+  });
+});

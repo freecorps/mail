@@ -31,6 +31,7 @@ import {
   type ActionCall,
   type PushAction,
 } from "./mail-push";
+import { deliverCalls, type HttpOutcome } from "./deliver";
 import { processResponse, resetPushStateWith, type Delivery, type ResponseEffects } from "./respond";
 import { clearNotificationTarget, routeToThread } from "./routing";
 import { targetOf } from "./transport";
@@ -87,10 +88,8 @@ const ember = () => import("../ember");
  * window. "sent": the server answered (applied, or refused for good: a retry would be refused too). "failed": no
  * answer (offline, timeout): the caller queues it on the client instead.
  */
-async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed" | "refused"> {
-  const [{ authClient }, { EMBER_URL }] = await Promise.all([ember(), import("../config")]);
-  const token = await authClient.fetchToken().catch(() => null);
-  if (!token) return "failed";
+async function sendOverHttp(call: ActionCall, token: string): Promise<HttpOutcome> {
+  const { EMBER_URL } = await import("../config");
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), HTTP_TIMEOUT_MS);
   try {
@@ -121,28 +120,27 @@ async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed" | "refu
  * (SQLite, sent on reconnect; optimistic in the lists meanwhile). `durable` once each one was answered or written to
  * the queue on disk; `settled` when the queued ones are done (or after QUEUE_WAIT_MS) and the badge is read again.
  */
-async function deliver(kind: PushAction, calls: ActionCall[], live: () => boolean): Promise<Delivery> {
-  const queued: Promise<unknown>[] = [];
-  for (const x of calls) {
-    // Signed out meanwhile: nothing more goes (respond.ts then marks nothing either).
-    if (!live()) return { durable: false, settled: Promise.resolve() };
-    if (!queued.length) {
-      const r = await sendOverHttp(x);
-      if (r === "sent") continue;
-      // Refused: nothing after it goes either (a refused reply does not mark the conversation read).
-      if (r === "refused") return { durable: true, settled: refreshBadge(), refused: true };
-    }
-    const c = (await ember()).emberClient;
-    const p =
-      x.fn === "reply" ? c.mutation(api.inbox.reply, x.args) : x.fn === "setStatus" ? c.mutation(api.inbox.setStatus, x.args) : c.mutation(api.inbox.markRead, x.args);
-    queued.push(p.catch((e: unknown) => console.warn(`[push] ${kind}`, e instanceof Error ? e.message : e)));
-  }
-  const durable = queued.length ? await (await ember()).emberClient.flushStorage().then(() => true, () => false) : true;
-  const settled = (async () => {
-    if (queued.length) await Promise.race([Promise.all(queued), new Promise((r) => setTimeout(r, QUEUE_WAIT_MS))]);
-    await refreshBadge();
-  })();
-  return { durable, settled };
+/**
+ * Sends an action's mutations (deliver.ts: each over HTTPS with the acting member's token, else on the client's queue;
+ * `live()` checked after every await). `durable` once each one was answered or written to the queue on disk;
+ * `settled` when the queued ones are done (or after QUEUE_WAIT_MS) and the badge is read again.
+ */
+function deliver(kind: PushAction, calls: ActionCall[], live: () => boolean): Promise<Delivery> {
+  return deliverCalls(calls, live, {
+    token: async () => (await ember()).authClient.fetchToken(),
+    sendOverHttp,
+    client: async () => {
+      const c = (await ember()).emberClient;
+      return {
+        enqueue: (x) =>
+          x.fn === "reply" ? c.mutation(api.inbox.reply, x.args) : x.fn === "setStatus" ? c.mutation(api.inbox.setStatus, x.args) : c.mutation(api.inbox.markRead, x.args),
+        flush: () => c.flushStorage(),
+      };
+    },
+    refreshBadge,
+    queueWaitMs: QUEUE_WAIT_MS,
+    warn: (m, e) => console.warn(`${m} (${kind})`, e instanceof Error ? e.message : e),
+  });
 }
 
 /** Takes a conversation's notifications off the screen (after an action on it; Android shows a spinner until then). */
