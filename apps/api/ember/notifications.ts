@@ -23,7 +23,8 @@ export const MAIL_CATEGORY = "mail";
 export const MAIL_CHANNEL = "mail";
 
 export type NotificationPrefs = { muted: string[]; preview: boolean };
-export const DEFAULT_PREFS: NotificationPrefs = { muted: [], preview: true };
+/** No row yet: every mailbox on, previews shown. Frozen; `prefsOf` hands out copies. */
+export const DEFAULT_PREFS: Readonly<NotificationPrefs> = Object.freeze({ muted: Object.freeze([]) as unknown as string[], preview: true });
 
 export type PrefsDoc = NotificationPrefs & { _id: string; userId: string; updatedAt: number };
 
@@ -33,7 +34,8 @@ export function prefsDoc(db: Db, userId: string): PrefsDoc | null {
 
 export function prefsOf(db: Db, userId: string): NotificationPrefs {
   const d = prefsDoc(db, userId);
-  return d ? { muted: d.muted, preview: d.preview } : DEFAULT_PREFS;
+  // A fresh object each time: a caller changing it never changes a member's row or the defaults.
+  return d ? { muted: [...d.muted], preview: d.preview } : { muted: [...DEFAULT_PREFS.muted], preview: DEFAULT_PREFS.preview };
 }
 
 /** What `support:onInbound` gets from the email component (the fields the push uses). */

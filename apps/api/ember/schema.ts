@@ -116,9 +116,17 @@ export default defineSchema({
     /**
      * Sends already done, by the client's id for them (`requestId` on `inbox:reply` / `compose` / `forward`): a retry
      * of the same send (a lost answer, the offline queue, a notification action sent twice) returns `result` and sends
-     * nothing. Kept 7 days (`inbox:pruneSendRequests`, daily).
+     * nothing; the same id with other arguments is refused. Kept 7 days (`inbox:pruneSendRequests`, daily).
      */
-    sendRequests: defineTable({ userId: v.string(), requestId: v.string(), fn: v.string(), result: v.any(), at: v.number() })
+    sendRequests: defineTable({
+      userId: v.string(),
+      requestId: v.string(),
+      fn: v.string(),
+      /** What was sent: the thread (reply, forward) or the mailbox (compose), and a hash of the arguments. */
+      target: v.string(),
+      result: v.any(),
+      at: v.number(),
+    })
       .index("by_request", ["userId", "requestId"])
       .index("by_at", ["at"]),
 

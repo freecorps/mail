@@ -456,20 +456,56 @@ const composerArgs = {
 export const SEND_REQUEST_TTL_MS = 7 * 24 * 3600 * 1000;
 export const REQUEST_ID_MAX = 64;
 
+/** JSON with object keys sorted, so equal arguments give equal text whatever their key order. */
+function canonical(x: unknown): string {
+  if (Array.isArray(x)) return `[${x.map(canonical).join(",")}]`;
+  if (x && typeof x === "object") {
+    const o = x as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(x) ?? "null";
+}
+
+/** A 64-bit FNV-1a of `s` (hex): tells one send's arguments from another's (not a security boundary: same member). */
+function fnv64(s: string): string {
+  let h = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(s)) h = BigInt.asUintN(64, (h ^ BigInt(byte)) * 0x100000001b3n);
+  return h.toString(16).padStart(16, "0");
+}
+
 /**
- * At most once per `requestId`: the earlier send's result when the member already sent with that id (nothing is sent
- * again), else `send()`'s, recorded in the same transaction. Ids are per member, so two members' equal ids never meet.
+ * What a send is, for its `requestId` record: the thread or mailbox it goes to, and a hash of all its arguments but
+ * the id (a retry carries the very same ones).
  */
-function sendOnce<T>(ctx: Ctx & { now: number }, m: Member, fn: string, requestId: string | undefined, send: () => T): T {
+export function sendTarget(where: string, args: Record<string, unknown>): string {
+  const { requestId: _id, ...rest } = args;
+  return `${where}#${fnv64(canonical(rest))}`;
+}
+
+/**
+ * At most once per `requestId`: the earlier send's result when the member already sent these arguments with that id
+ * (nothing is sent again), else `send()`'s, recorded in the same transaction. The same id with another kind of send,
+ * another thread or mailbox, or other arguments is refused (a ValidationError): never someone else's result. Ids are
+ * per member, so two members' equal ids never meet.
+ */
+function sendOnce<T>(ctx: Ctx & { now: number }, m: Member, fn: string, target: string, requestId: string | undefined, send: () => T): T {
   if (requestId === undefined) return send();
-  if (!requestId || requestId.length > REQUEST_ID_MAX) throw new Error(`requestId: 1 to ${REQUEST_ID_MAX} characters`);
-  const prior = ctx.db.query("sendRequests").withIndex("by_request", (q: any) => q.eq("userId", m.userId).eq("requestId", requestId)).first() as { fn: string; result: T } | null;
+  if (!requestId || requestId.length > REQUEST_ID_MAX) throw new EmberError("ValidationError", `requestId: 1 to ${REQUEST_ID_MAX} characters`);
+  const prior = ctx.db.query("sendRequests").withIndex("by_request", (q: any) => q.eq("userId", m.userId).eq("requestId", requestId)).first() as {
+    fn: string;
+    target: string;
+    result: T;
+  } | null;
   if (prior) {
-    if (prior.fn !== fn) throw new Error(`requestId already used for ${prior.fn}`);
+    if (prior.fn !== fn || prior.target !== target) throw new EmberError("ValidationError", "requestId already used for another send");
     return prior.result;
   }
   const result = send();
-  ctx.db.insert("sendRequests", { userId: m.userId, requestId, fn, result, at: ctx.now });
+  ctx.db.insert("sendRequests", { userId: m.userId, requestId, fn, target, result, at: ctx.now });
   return result;
 }
 
@@ -488,7 +524,7 @@ export const reply = mutation({
   args: { threadId: v.string(), text: v.string(), cc: ccArg, attachments: attachmentsArg, quoteHeader: v.optional(v.string()), ...composerArgs },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
-    return sendOnce(ctx, m, "reply", a.requestId, () => {
+    return sendOnce(ctx, m, "reply", sendTarget(a.threadId, a), a.requestId, () => {
       const draft = draftOf(ctx, m, a.draftId);
       const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
       const at = sendAtOf(ctx, a.sendAt);
@@ -519,7 +555,7 @@ export const forward = mutation({
   args: { threadId: v.string(), messageId: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
-    return sendOnce(ctx, m, "forward", a.requestId, () => {
+    return sendOnce(ctx, m, "forward", sendTarget(a.threadId, a), a.requestId, () => {
       const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string; inline?: boolean; contentId?: string }> }>).find((x) => x._id === a.messageId);
       if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
       const draft = draftOf(ctx, m, a.draftId);
@@ -616,7 +652,7 @@ export const compose = mutation({
   args: { mailbox: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const m = allowed(ctx, a.mailbox);
-    return sendOnce(ctx, m, "compose", a.requestId, () => {
+    return sendOnce(ctx, m, "compose", sendTarget(a.mailbox, a), a.requestId, () => {
       const draft = draftOf(ctx, m, a.draftId);
       const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
       const at = sendAtOf(ctx, a.sendAt);
@@ -764,7 +800,11 @@ export const notifications = query({
   },
 });
 
-/** Turns one mailbox's pushes on or off (`mailbox` + `enabled`), and/or the preview. Returns the new preferences. */
+/**
+ * Turns one mailbox's pushes on or off (`mailbox` + `enabled`), and/or the preview. Returns the preferences as
+ * `inbox:notifications` does (`muted` filtered to the mailboxes the member sees). Nothing is written when nothing
+ * changes (no row until the member really changes something).
+ */
 export const setNotifications = mutation({
   args: { mailbox: v.optional(v.string()), enabled: v.optional(v.boolean()), preview: v.optional(v.boolean()) },
   handler: (ctx, a) => {
@@ -774,10 +814,15 @@ export const setNotifications = mutation({
     const doc = prefsDoc(ctx.db, m.userId);
     const p = prefsOf(ctx.db, m.userId);
     const muted = a.mailbox === undefined ? p.muted : a.enabled ? p.muted.filter((b) => b !== a.mailbox) : [...new Set([...p.muted, a.mailbox])];
-    const next = { muted, preview: a.preview ?? p.preview, updatedAt: ctx.now };
-    if (doc) ctx.db.patch(doc._id as any, next);
-    else ctx.db.insert("notificationPrefs", { userId: m.userId, ...next });
-    return { muted: next.muted, preview: next.preview };
+    const preview = a.preview ?? p.preview;
+    const changed = preview !== p.preview || muted.length !== p.muted.length || muted.some((b, i) => b !== p.muted[i]);
+    if (changed) {
+      const next = { muted, preview, updatedAt: ctx.now };
+      if (doc) ctx.db.patch(doc._id as any, next);
+      else ctx.db.insert("notificationPrefs", { userId: m.userId, ...next });
+    }
+    const seen = new Set(memberMailboxes(ctx, m));
+    return { muted: muted.filter((b) => seen.has(b)), preview };
   },
 });
 

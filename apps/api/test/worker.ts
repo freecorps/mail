@@ -28,6 +28,11 @@ export default createEmberWorker({
         },
       }),
       pruneDrafts: mutationGeneric({ args: {}, handler: (ctx: any) => ctx.runMutation("inbox:pruneDrafts", {}) }),
+      // Test-only: how many notificationPrefs rows a member has.
+      prefsRows: queryGeneric({
+        args: { userId: v.string() },
+        handler: (ctx: any, { userId }: { userId: string }) => ctx.db.query("notificationPrefs").withIndex("by_user", (q: any) => q.eq("userId", userId)).collect().length,
+      }),
       // Test-only: a member's send ids as if recorded at `at`, then the daily prune.
       ageSendRequests: mutationGeneric({
         args: { userId: v.string(), at: v.number() },
