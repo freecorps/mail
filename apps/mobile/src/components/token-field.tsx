@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View, type TextInputInstance } from "react-native";
 import { useI18n } from "../i18n";
 import { addressOf, addTokens, backspaceToken, createBlurCommit, splitTyped, suggest, tokenOf, validToken, type Contact } from "../model/compose";
-import { corner, minTouch, radius, screenEdge, spacing, type, useColors } from "../theme";
+import { corner, inputAccent, minTouch, radius, screenEdge, spacing, type, useColors } from "../theme";
 import { Avatar, Separator } from "./ui";
 import { ThemedText } from "./themed-text";
 
@@ -120,6 +120,7 @@ export function TokenField({
               textContentType="emailAddress"
               autoComplete="email"
               accessibilityLabel={label}
+              {...inputAccent(c)}
               style={[styles.input, { color: c.labelText }]}
             />
           )}

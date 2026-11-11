@@ -1,1 +1,1 @@
-export { LabeledPicker } from "./labeled-picker.ios";
+export { useLabeledPicker } from "./labeled-picker.ios";

@@ -9,7 +9,8 @@
 // was not native enough on a phone (see the PR of this layer).
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { fillSavedReply } from "@freecorps/mail-email-html/compose";
-import { Host, Switch } from "@expo/ui";
+import { Switch } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { router, Stack, useIsFocused, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Alert, StyleSheet, TextInput, View } from "react-native";
@@ -40,7 +41,7 @@ import { formatLater, laterChoices } from "../lib/when";
 import { deviceTimeZone } from "../prefs";
 import { usePresence } from "../presence";
 import { RECENT_THREADS } from "../offline/replica";
-import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
+import { corner, disabledTint, hairline, inputAccent, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 type Params = { threadId?: string; mode?: string; forwardThread?: string; forwardMessage?: string; mailbox?: string; to?: string; draftId?: string; restore?: string };
 
@@ -507,10 +508,12 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
               {t("common.cancel")}
             </Stack.Toolbar.Button>
           </Stack.Toolbar>
-          <Stack.Toolbar placement="right">
+          {/* Android: the menu's items take the toolbar's tint, so it is the label color (Material's menu text) and the
+              two buttons keep the accent themselves. */}
+          <Stack.Toolbar placement="right" {...(ios ? {} : { tintColor: c.labelText })}>
             {/* "Enviar mais tarde" beside Send (Mail's long-press menu, made visible): presets with their time, "Escolher…". */}
             {note || !laterIcon ? null : (
-              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} disabled={!ready || scheduling}>
+              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} tintColor={disabledTint(c, !ready || scheduling) ?? (ios ? undefined : c.tint)} disabled={!ready || scheduling}>
                 {/* Direct children only: the native menu does not read through a fragment. */}
                 {schedulable.ok
                   ? [
@@ -530,7 +533,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                     ]}
               </Stack.Toolbar.Menu>
             )}
-            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready || scheduling} onPress={() => send()}>
+            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")} variant="done" tintColor={disabledTint(c, !ready || scheduling) ?? c.tint} disabled={!ready || scheduling} onPress={() => send()}>
               {note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")}
             </Stack.Toolbar.Button>
           </Stack.Toolbar>
@@ -602,7 +605,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                   {subject}
                 </ThemedText>
               ) : (
-                <TextInput value={subject} onChangeText={(v) => (setSubject(v), touch())} accessibilityLabel={t("compose.subject")} style={[styles.subject, { color: c.labelText }]} />
+                <TextInput value={subject} onChangeText={(v) => (setSubject(v), touch())} accessibilityLabel={t("compose.subject")} {...inputAccent(c)} style={[styles.subject, { color: c.labelText }]} />
               )}
             </View>
             <Separator inset={screenEdge} />
@@ -618,6 +621,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
           placeholderTextColor={c.tertiaryText}
           accessibilityLabel={t("compose.body")}
           textAlignVertical="top"
+          {...inputAccent(c)}
           style={[styles.body, { color: c.labelText }, note && { backgroundColor: c.noteBackground }]}
         />
         {quoted ? (
@@ -641,9 +645,9 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
               <ThemedText variant="subheadline" style={styles.grow}>
                 {t("compose.signatureOn")}
               </ThemedText>
-              <Host matchContents seedColor={c.tint}>
+              <BrandHost matchContents>
                 <Switch value={withSignature && !!signature} onValueChange={setWithSignature} disabled={!signature} />
-              </Host>
+              </BrandHost>
             </View>
             {signature ? (
               <ThemedText variant="subheadline" tone="secondary" style={!withSignature && styles.off} selectable>
@@ -671,7 +675,7 @@ const styles = StyleSheet.create({
   body: { minHeight: 180, fontSize: type.body.fontSize, lineHeight: type.body.lineHeight, paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.md, ...corner(radius.xs) },
   quoted: { paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   actions: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
-  signature: { marginHorizontal: screenEdge, paddingTop: spacing.md, gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  signature: { marginHorizontal: screenEdge, paddingTop: spacing.md, gap: spacing.sm, borderTopWidth: hairline },
   signatureHead: { flexDirection: "row", alignItems: "center" },
   off: { opacity: 0.4, textDecorationLine: "line-through" },
 });

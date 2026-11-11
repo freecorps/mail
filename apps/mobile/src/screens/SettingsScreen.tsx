@@ -1,12 +1,13 @@
 // Settings tab: a native grouped form (SwiftUI Form on iOS, Material 3 list on Android). Language is a native picker;
 // the conversation list's look (avatars, preview lines) and swipe actions are native toggles/pickers; sign-out is a
 // destructive native button behind the system confirmation alert.
-import { Button, FieldGroup, Host, ListItem, Picker, Switch, Text } from "@expo/ui";
+import { Button, FieldGroup, ListItem, Picker, Switch, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { Alert } from "react-native";
 import { Icons } from "../components/icons";
-import { LabeledPicker, NativeIcon } from "../components/ui";
+import { disclosure, NativeIcon, useLabeledPicker } from "../components/ui";
 import { EMBER_URL, PUSH_TRANSPORT } from "../config";
 import { useI18n } from "../i18n";
 import type { SwipeKind } from "../model/list-actions";
@@ -57,6 +58,17 @@ export function SettingsScreen() {
     leading: { label: t("settings.swipeLeading"), value: list.swipeLeading, options: swipeOptions, onChange: (v: SwipeKind) => setListPrefs({ swipeLeading: v }) },
     trailing: { label: t("settings.swipeTrailing"), value: list.swipeTrailing, options: swipeOptions, onChange: (v: SwipeKind) => setListPrefs({ swipeTrailing: v }) },
   };
+  // Each picker as a row of its section (SwiftUI menu picker / Material row with a menu): see useLabeledPicker.
+  const undoRow = useLabeledPicker<number>(undoPicker);
+  const linesRow = useLabeledPicker<number>(pickers.lines);
+  const leadingRow = useLabeledPicker<SwipeKind>(pickers.leading);
+  const trailingRow = useLabeledPicker<SwipeKind>(pickers.trailing);
+  const langRow = useLabeledPicker<LanguagePref>({
+    label: t("settings.language"),
+    value: session.lang.pref,
+    options: langs.map((l) => ({ value: l.v, label: l.label })),
+    onChange: session.lang.setPref,
+  });
   const swipeFooter = (
     <FieldGroup.SectionFooter>
       <Text textStyle={{ color: colors.secondaryText }}>{t("settings.swipeFooter")}</Text>
@@ -70,7 +82,7 @@ export function SettingsScreen() {
     ]);
 
   return (
-    <Host style={{ flex: 1 }} seedColor={colors.tint}>
+    <BrandHost style={{ flex: 1 }}>
       <FieldGroup>
         <FieldGroup.Section title={t("settings.account")}>
           <ListItem leading={<NativeIcon icon={Icons.account} color={colors.tint} />} supportingText={user?.name ? user.email : undefined}>
@@ -85,66 +97,44 @@ export function SettingsScreen() {
         <FieldGroup.Section title={t("settings.sending")}>
           <ListItem
             leading={<NativeIcon icon={Icons.signature} color={colors.tint} />}
-            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            trailing={disclosure(colors.tertiaryText)}
             onPress={() => router.push("/signature")}
           >
             <Text>{t("settings.signature")}</Text>
           </ListItem>
+          {undoRow}
+          {undoFooter}
+        </FieldGroup.Section>
+
+        {/* iOS: the system's menu picker under its own title; Android: a row that says what it sets. */}
+        <FieldGroup.Section title={ios ? t("settings.language") : undefined}>
           {ios ? (
-            <>
-              <LabeledPicker<number> {...undoPicker} />
-              {undoFooter}
-            </>
-          ) : null}
-        </FieldGroup.Section>
-        {ios ? null : (
-          <FieldGroup.Section title={undoPicker.label}>
-            <LabeledPicker<number> {...undoPicker} />
-            {undoFooter}
-          </FieldGroup.Section>
-        )}
-
-        <FieldGroup.Section title={t("settings.language")}>
-          <Picker<LanguagePref> selectedValue={session.lang.pref} onValueChange={session.lang.setPref}>
-            {langs.map((l) => (
-              <Picker.Item key={l.v} label={l.label} value={l.v} />
-            ))}
-          </Picker>
+            <Picker<LanguagePref> selectedValue={session.lang.pref} onValueChange={session.lang.setPref}>
+              {langs.map((l) => (
+                <Picker.Item key={l.v} label={l.label} value={l.v} />
+              ))}
+            </Picker>
+          ) : (
+            langRow
+          )}
         </FieldGroup.Section>
 
-        {/* iOS: labeled menu pickers in one Form section, like Mail's settings. Android: each dropdown under its title. */}
+        {/* Labeled pickers in one section, like Mail's settings (a Material row with its menu on Android). */}
         <FieldGroup.Section title={t("settings.appearance")}>
           <Switch label={t("settings.avatars")} value={list.avatars} onValueChange={(v) => setListPrefs({ avatars: v })} />
-          {ios ? <LabeledPicker<number> {...pickers.lines} /> : null}
+          {linesRow}
         </FieldGroup.Section>
-        {ios ? null : (
-          <FieldGroup.Section title={pickers.lines.label}>
-            <LabeledPicker<number> {...pickers.lines} />
-          </FieldGroup.Section>
-        )}
-        {ios ? (
-          <FieldGroup.Section title={t("settings.swipe")}>
-            <LabeledPicker<SwipeKind> {...pickers.leading} />
-            <LabeledPicker<SwipeKind> {...pickers.trailing} />
-            {swipeFooter}
-          </FieldGroup.Section>
-        ) : (
-          <>
-            <FieldGroup.Section title={pickers.leading.label}>
-              <LabeledPicker<SwipeKind> {...pickers.leading} />
-            </FieldGroup.Section>
-            <FieldGroup.Section title={pickers.trailing.label}>
-              <LabeledPicker<SwipeKind> {...pickers.trailing} />
-              {swipeFooter}
-            </FieldGroup.Section>
-          </>
-        )}
+        <FieldGroup.Section title={t("settings.swipe")}>
+          {leadingRow}
+          {trailingRow}
+          {swipeFooter}
+        </FieldGroup.Section>
 
         {/* Etiquetas: each mailbox's tags (rename, color, order, delete). */}
         <FieldGroup.Section title={t("settings.tags")}>
           <ListItem
             leading={<NativeIcon icon={Icons.tag} color={colors.tint} />}
-            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            trailing={disclosure(colors.tertiaryText)}
             onPress={() => router.push("/tag-list")}
             testID="settings-tags"
           >
@@ -156,7 +146,7 @@ export function SettingsScreen() {
         <FieldGroup.Section title={t("settings.notifications")}>
           <ListItem
             leading={<NativeIcon icon={Icons.bell} color={colors.tint} />}
-            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            trailing={disclosure(colors.tertiaryText)}
             supportingText={pushText}
             onPress={() => router.push("/notifications")}
           >
@@ -179,6 +169,6 @@ export function SettingsScreen() {
           </Button>
         </FieldGroup.Section>
       </FieldGroup>
-    </Host>
+    </BrandHost>
   );
 }

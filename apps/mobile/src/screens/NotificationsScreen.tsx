@@ -2,7 +2,8 @@
 // system settings, where sounds and, on Android, each mailbox's channel live), "Mostrar prévia", and one switch per
 // mailbox. Preview and mailboxes are the member's, kept on the server (`inbox:setNotifications`): a mailbox turned
 // off is never pushed to them, on any device. The switches move at once (optimistic, queued offline).
-import { FieldGroup, Host, ListItem, Switch, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Switch, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { Linking } from "react-native";
 import { api } from "../api";
@@ -42,7 +43,7 @@ export function NotificationsScreen() {
   );
 
   return (
-    <Host style={{ flex: 1 }} seedColor={c.tint}>
+    <BrandHost style={{ flex: 1 }}>
       <FieldGroup>
         <FieldGroup.Section title={t("notifications.status")}>
           <ListItem leading={<NativeIcon icon={Icons.bell} color={c.tint} />}>
@@ -84,6 +85,6 @@ export function NotificationsScreen() {
           </>
         )}
       </FieldGroup>
-    </Host>
+    </BrandHost>
   );
 }

@@ -1,11 +1,12 @@
 // Ajustes › Etiquetas: each mailbox's tags in their order (a native grouped list), a row per tag (to rename, recolor,
 // move or delete it) and "Nova etiqueta" per mailbox. Tags belong to the mailbox: any member who sees it manages them.
-import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useQuery } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { api } from "../api";
 import { Icons } from "../components/icons";
-import { Loading, NativeIcon } from "../components/ui";
+import { disclosure, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { byMailbox, tagColor } from "../model/tags";
 import { useMailboxes } from "../model/threads";
@@ -20,7 +21,7 @@ export function TagListScreen() {
   if (status === "loading" || !tags) return <Loading />;
   const groups = byMailbox(tags, mailboxes.map((b) => b.name));
   return (
-    <Host style={{ flex: 1 }} seedColor={c.tint}>
+    <BrandHost style={{ flex: 1 }}>
       <FieldGroup>
         {groups.map((g, i) => {
           const box = mailboxes.find((b) => b.name === g.mailbox);
@@ -31,7 +32,7 @@ export function TagListScreen() {
                   key={x._id}
                   onPress={() => router.push({ pathname: "/tag/[tagId]", params: { tagId: x._id, mailbox: x.mailbox } })}
                   leading={<NativeIcon icon={Icons.tagFill} color={hue(tagColor(x.color))} />}
-                  trailing={<NativeIcon icon={Icons.chevron} size={14} color={c.tertiaryText} />}
+                  trailing={disclosure(c.tertiaryText)}
                   testID={`tag-${x._id}`}
                 >
                   <Text>{x.name}</Text>
@@ -49,6 +50,6 @@ export function TagListScreen() {
           );
         })}
       </FieldGroup>
-    </Host>
+    </BrandHost>
   );
 }

@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import { useI18n } from "../i18n";
 import { fileSize } from "../lib/format";
 import type { Upload } from "../lib/uploads";
-import { corner, radius, spacing, useColors } from "../theme";
+import { corner, hairline, radius, spacing, useColors } from "../theme";
 import { Icons, Symbol } from "./icons";
 import { ThemedText } from "./themed-text";
 import { NativeIcon } from "./ui";
@@ -73,5 +73,5 @@ export function UploadSection({ items, onAdd, onRemove }: { items: Upload[]; onA
 
 const styles = StyleSheet.create({
   strip: { gap: spacing.sm, paddingHorizontal: spacing.md, paddingTop: spacing.sm },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, ...corner(radius.md), borderWidth: StyleSheet.hairlineWidth },
+  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, ...corner(radius.md), borderWidth: hairline },
 });

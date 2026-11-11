@@ -47,6 +47,10 @@ export default function RootLayout() {
   );
 }
 
+// Android: Material 3's bottom sheet corners (extra large, 28 dp); react-native-screens draws them square by default.
+// iOS keeps the system's sheet.
+const sheet = process.env.EXPO_OS === "android" ? { sheetCornerRadius: 28 } : {};
+
 function RootStack() {
   const { phase } = useSession();
   const header = useHeaderColors();
@@ -88,11 +92,11 @@ function RootStack() {
                 : { presentation: "modal", headerShown: true }
             }
           />
-          <Stack.Screen name="assign" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true }} />
+          <Stack.Screen name="assign" options={{ ...sheet, presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true }} />
           {/* Snooze / send later (presets and a date picker), a thread's tags, its activity: sheets over whatever opened them. */}
-          <Stack.Screen name="when" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: process.env.EXPO_OS === "ios" ? 1 : 0, sheetGrabberVisible: true }} />
-          <Stack.Screen name="tags" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true }} />
-          <Stack.Screen name="activity" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true }} />
+          <Stack.Screen name="when" options={{ ...sheet, presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: process.env.EXPO_OS === "ios" ? 1 : 0, sheetGrabberVisible: true }} />
+          <Stack.Screen name="tags" options={{ ...sheet, presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true }} />
+          <Stack.Screen name="activity" options={{ ...sheet, presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true }} />
         </Stack.Protected>
         <Stack.Protected guard={phase === "signedOut"}>
           <Stack.Screen name="sign-in" />

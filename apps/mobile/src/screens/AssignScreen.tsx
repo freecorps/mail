@@ -1,6 +1,7 @@
 // Assign (form sheet): team members as a native list with a checkmark on the current assignee. From the list's Edit
 // mode it assigns several threads of one mailbox at once (`threadIds`, comma-separated), one optimistic call each.
-import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState, useMutation } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { api } from "../api";
@@ -42,7 +43,7 @@ export function AssignScreen() {
       {status === "loading" && online ? (
         <Loading />
       ) : (
-        <Host style={{ flex: 1 }} seedColor={c.tint}>
+        <BrandHost style={{ flex: 1 }}>
           <FieldGroup>
             <FieldGroup.Section>
               {rows.map((m) => (
@@ -62,7 +63,7 @@ export function AssignScreen() {
               ) : null}
             </FieldGroup.Section>
           </FieldGroup>
-        </Host>
+        </BrandHost>
       )}
     </>
   );

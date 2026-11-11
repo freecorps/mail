@@ -8,7 +8,7 @@ import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withRepea
 import { useI18n } from "../i18n";
 import { displaySubject, initials } from "../lib/format";
 import type { ThreadRow } from "../model/threads";
-import { corner, radius, screenEdge, spacing, tabular, type, useColors } from "../theme";
+import { corner, hairline, radius, screenEdge, spacing, tabular, type, useColors } from "../theme";
 import { Icons, Symbol } from "./icons";
 import { Avatar, UnreadDot } from "./ui";
 import { TagChips } from "./tag-chips";
@@ -147,7 +147,7 @@ export function SkeletonRows({ count = 8, avatars, previewLines }: { count?: num
               ))}
             </View>
           </View>
-          <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginLeft: textInset(avatars) }} />
+          <View style={{ height: hairline, backgroundColor: c.separator, marginLeft: textInset(avatars) }} />
         </View>
       ))}
     </Animated.View>

@@ -2,7 +2,8 @@
 // with a checkmark), its place in the mailbox's list (up / down) and "Excluir etiqueta" behind the system alert. An
 // existing tag saves as it changes (optimistic, queued offline); a new one is created with "Criar" (it needs the
 // server's id, so a connection).
-import { Button, FieldGroup, Host, ListItem, Text, TextInput } from "@expo/ui";
+import { Button, FieldGroup, ListItem, Text, TextInput } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
@@ -103,7 +104,7 @@ export function TagEditScreen() {
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
       ) : null}
-      <Host style={{ flex: 1 }} seedColor={c.tint}>
+      <BrandHost style={{ flex: 1 }}>
         <FieldGroup>
           <FieldGroup.Section title={t("tags.name")}>
             <TextInput
@@ -164,7 +165,7 @@ export function TagEditScreen() {
             </>
           )}
         </FieldGroup>
-      </Host>
+      </BrandHost>
     </>
   );
 }

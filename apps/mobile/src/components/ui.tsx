@@ -1,20 +1,30 @@
 // Small shared pieces that have no native control on either platform (avatar, status label, unread dot, connection
 // strip), plus thin wrappers that put a native @expo/ui control into a React Native layout. Everything interactive is
 // native: buttons come from @expo/ui (SwiftUI / Jetpack Compose), icons from SF Symbols / Material Symbols.
-import { Button, Host, type ButtonVariant } from "@expo/ui";
+import { Button, type ButtonVariant } from "@expo/ui";
+import { BrandHost } from "./native/brand-host";
 import { useConnectionState } from "@freecorps/ember-react-native";
 import type { ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { ThreadStatus } from "../api";
 import { useI18n } from "../i18n";
 import { initials } from "../lib/format";
-import { corner, radius, screenEdge, spacing, useColors } from "../theme";
+import { corner, hairline, radius, screenEdge, spacing, useColors } from "../theme";
 import { Icons, Symbol, type IconSpec } from "./icons";
+import { NativeIcon } from "./native";
 import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
-export { DateTimePicker, EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner } from "./native";
+export { EmptyState, IconButton, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner, useDateTimePicker, useLabeledPicker } from "./native";
+
+/**
+ * The trailing chevron of a row that opens another screen: iOS only (a Settings-style disclosure). Material 3 list
+ * rows that navigate have no chevron, so on Android there is nothing.
+ */
+export function disclosure(color: string) {
+  return process.env.EXPO_OS === "ios" ? <NativeIcon icon={Icons.chevron} size={14} color={color} /> : undefined;
+}
 
 /**
  * A neutral monogram, like Contacts: white initials on a grey gradient (iOS), a Material tonal container (Android).
@@ -102,9 +112,9 @@ export function Loading() {
 export function NativeButton({ label, onPress, variant = "text", disabled }: { label: string; onPress(): void; variant?: ButtonVariant; disabled?: boolean }) {
   const c = useColors();
   return (
-    <Host matchContents seedColor={c.tint}>
+    <BrandHost matchContents>
       <Button label={label} variant={variant} onPress={onPress} disabled={!!disabled} />
-    </Host>
+    </BrandHost>
   );
 }
 
@@ -128,7 +138,7 @@ export function ConnectionBanner() {
 
 export function Separator({ inset = 0 }: { inset?: number }) {
   const c = useColors();
-  return <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: c.separator, marginLeft: inset }} />;
+  return <View style={{ height: hairline, backgroundColor: c.separator, marginLeft: inset }} />;
 }
 
 const styles = StyleSheet.create({

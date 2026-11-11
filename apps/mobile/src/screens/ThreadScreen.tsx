@@ -50,7 +50,7 @@ import { keepUndoneCompose } from "../model/undone-compose";
 import { forwardedFiles } from "../model/forward";
 import { formatAgo, formatLater } from "../lib/when";
 import { usePresence } from "../presence";
-import { corner, radius, screenEdge, spacing, useColors } from "../theme";
+import { corner, disabledTint, hairline, radius, screenEdge, spacing, useColors } from "../theme";
 
 const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
   open: Icons.statusOpen,
@@ -390,10 +390,10 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
       <Stack.Screen options={{ title: thread?.number ? t("thread.title", { number: thread.number }) : "" }} />
       {icons && (around.prev || around.next) ? (
         <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button icon={prevIcon} accessibilityLabel={t("thread.previous")} disabled={!around.prev} onPress={() => go(around.prev)}>
+          <Stack.Toolbar.Button icon={prevIcon} accessibilityLabel={t("thread.previous")} tintColor={disabledTint(c, !around.prev)} disabled={!around.prev} onPress={() => go(around.prev)}>
             {t("thread.previous")}
           </Stack.Toolbar.Button>
-          <Stack.Toolbar.Button icon={nextIcon} accessibilityLabel={t("thread.next")} disabled={!around.next} onPress={() => go(around.next)}>
+          <Stack.Toolbar.Button icon={nextIcon} accessibilityLabel={t("thread.next")} tintColor={disabledTint(c, !around.next)} disabled={!around.next} onPress={() => go(around.next)}>
             {t("thread.next")}
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
@@ -463,8 +463,10 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
     </>
   );
 
-  if (vm.status === "loading") return <>{preview ? null : chrome}<Loading /></>;
-  if (!thread) return <>{preview ? null : chrome}<EmptyState icon={Icons.error} title={vm.error || vm.gone ? t("thread.notFound") : t("common.error")} body={vm.error?.message} /></>;
+  // The chrome goes last: on Android the bottom toolbar is a view of this screen, and a sibling after it (the list)
+  // would sit on top and take its taps.
+  if (vm.status === "loading") return <><Loading />{preview ? null : chrome}</>;
+  if (!thread) return <><EmptyState icon={Icons.error} title={vm.error || vm.gone ? t("thread.notFound") : t("common.error")} body={vm.error?.message} />{preview ? null : chrome}</>;
 
   const statusItems: MenuItem[] = STATUS_CHOICES.map((s) => ({
     key: s,
@@ -610,7 +612,6 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
   const items = mergeTimeline(messages, (i) => i.message.at, events);
   return (
     <View style={[styles.grow, { backgroundColor: c.background }]}>
-      {preview ? null : chrome}
       <FlatList
         data={items}
         keyExtractor={(i) => (i.kind === "message" ? i.item.message._id : `ev:${i.event.id}`)}
@@ -647,6 +648,7 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
       ) : !ios && icons ? (
         <ReplyFab label={t("thread.reply")} onPress={startReply} />
       ) : null}
+      {preview ? null : chrome}
     </View>
   );
 }
@@ -691,5 +693,5 @@ const styles = StyleSheet.create({
   expandRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.sm },
   pressed: { opacity: 0.5 },
   spam: { textAlign: "center", padding: spacing.lg },
-  paneBar: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  paneBar: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.sm, borderTopWidth: hairline },
 });

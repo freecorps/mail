@@ -1,13 +1,14 @@
 // "Etiquetas" of one conversation (form sheet): a search field that also names a new tag, the mailbox's tags as native
 // rows with a checkmark on the ones the thread has (a tap toggles, optimistic and queued offline), "Criar “…”" when
 // the name is new, and a way to Ajustes › Etiquetas. Tags belong to the mailbox: the whole team shares them.
-import { FieldGroup, Host, ListItem, Text, TextInput, type TextInputRef } from "@expo/ui";
+import { FieldGroup, ListItem, Text, TextInput, type TextInputRef } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useRef, useState } from "react";
 import { api } from "../api";
 import { Icons } from "../components/icons";
-import { Loading, NativeIcon } from "../components/ui";
+import { disclosure, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { haptics } from "../lib/haptics";
 import { createBlock, TAG_NAME_MAX, tagColor, tagSearch, THREAD_TAGS_MAX, toggleTag } from "../model/tags";
@@ -70,7 +71,7 @@ export function TagsSheet() {
       {!tags && online ? (
         <Loading />
       ) : (
-        <Host style={{ flex: 1 }} seedColor={c.tint}>
+        <BrandHost style={{ flex: 1 }}>
           <FieldGroup>
             <FieldGroup.Section>
               <TextInput
@@ -118,13 +119,13 @@ export function TagsSheet() {
                   router.push("/tag-list");
                 }}
                 leading={<NativeIcon icon={Icons.settings} color={c.tint} />}
-                trailing={<NativeIcon icon={Icons.chevron} size={14} color={c.tertiaryText} />}
+                trailing={disclosure(c.tertiaryText)}
               >
                 <Text>{t("tags.manage")}</Text>
               </ListItem>
             </FieldGroup.Section>
           </FieldGroup>
-        </Host>
+        </BrandHost>
       )}
     </>
   );

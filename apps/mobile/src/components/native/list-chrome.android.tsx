@@ -4,10 +4,13 @@ import { BrandHost as Host } from "./brand-host";
 import { FilterChip, FloatingActionButton, Icon, LazyRow, Text } from "@expo/ui/jetpack-compose";
 import { semantics } from "@expo/ui/jetpack-compose/modifiers";
 import { Stack } from "expo-router";
+import { useEffect } from "react";
 import { StyleSheet } from "react-native";
-import { screenEdge, spacing, useColors } from "../../theme";
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
+import { EASE_IN_OUT, motion, screenEdge, spacing, useColors } from "../../theme";
 import { Icons, useMaterialSource, useToolbarIcon } from "../icons";
 import type { ListActionsProps, ListFilterProps } from "./types";
+import { useSnackbarShowing } from "./undo-banner.android";
 
 export function ListFilters<T extends string>({ filters, value, onChange, label }: ListFilterProps<T>) {
   if (!filters.length) return null;
@@ -30,11 +33,22 @@ export function ListFilters<T extends string>({ filters, value, onChange, label 
   );
 }
 
-export function ListActions<T extends string>({ compose, edit }: ListActionsProps<T>) {
+/** A one-line Material snackbar (48 dp) and the 8 dp between it and the FAB. */
+const SNACKBAR_LIFT = 56;
+
+export function ListActions<T extends string>({ compose, edit, endInset = 0 }: ListActionsProps<T>) {
   const c = useColors();
   // Compose tints the glyph with the FAB's content color; the raster color is only a placeholder.
   const source = useMaterialSource(Icons.compose, 24, c.labelText);
   const selectIcon = useToolbarIcon(Icons.select, c.secondaryText);
+  // Above the "Desfazer" snackbar while one shows (it sits over the navigation bar, where the FAB is).
+  const snackbar = useSnackbarShowing() ? SNACKBAR_LIFT : 0;
+  const reduced = useReducedMotion();
+  const lift = useSharedValue(0);
+  useEffect(() => {
+    lift.value = reduced ? -snackbar : withTiming(-snackbar, { duration: motion.base, easing: EASE_IN_OUT });
+  }, [snackbar, reduced, lift]);
+  const fabStyle = useAnimatedStyle(() => ({ transform: [{ translateY: lift.value }] }));
   return (
     <>
       {edit && selectIcon ? (
@@ -44,11 +58,13 @@ export function ListActions<T extends string>({ compose, edit }: ListActionsProp
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
       ) : null}
-      <Host matchContents style={styles.fab}>
-        <FloatingActionButton onClick={compose.onPress} modifiers={[semantics({ contentDescription: compose.label })]}>
-          <FloatingActionButton.Icon>{source ? <Icon source={source} size={24} contentDescription={compose.label} /> : null}</FloatingActionButton.Icon>
-        </FloatingActionButton>
-      </Host>
+      <Animated.View style={[styles.fab, endInset ? { right: screenEdge + endInset } : null, fabStyle]}>
+        <Host matchContents>
+          <FloatingActionButton onClick={compose.onPress} modifiers={[semantics({ contentDescription: compose.label })]}>
+            <FloatingActionButton.Icon>{source ? <Icon source={source} size={24} contentDescription={compose.label} /> : null}</FloatingActionButton.Icon>
+          </FloatingActionButton>
+        </Host>
+      </Animated.View>
     </>
   );
 }

@@ -112,3 +112,20 @@ export function paletteFor(scheme: "light" | "dark"): Palette {
 export function useColors(): Palette {
   return paletteFor(useColorScheme() === "dark" ? "dark" : "light");
 }
+
+/**
+ * A React Native text field's cursor and selection handles in the accent (Android: Material's primary; left alone they
+ * are the window theme's default teal). Android-only props: the iOS caret keeps the system tint.
+ */
+export function inputAccent(p: Palette) {
+  return { cursorColor: p.tint, selectionHandleColor: p.tint };
+}
+
+/**
+ * A disabled toolbar item's tint on Android: expo-router's Android toolbar draws the icon in its tint whether the item
+ * is enabled or not, so a disabled Enviar or ↑ looked tappable. Material's disabled content (on-surface at ~38%)
+ * instead; undefined otherwise and on iOS (the system dims a disabled item itself).
+ */
+export function disabledTint(p: Palette, disabled: boolean): string | undefined {
+  return disabled && process.env.EXPO_OS === "android" ? p.tertiaryText : undefined;
+}

@@ -1,7 +1,7 @@
 // iPad: the split layout by window width, moving the selection, and the hardware keyboard's commands and registry.
 import { describe, expect, it, vi } from "vitest";
 import { translate } from "../src/i18n/strings";
-import { afterListChange, leaveFrom, nextAfter, paneLayout, reselect, SPLIT_MIN_WIDTH, step, stepFrom } from "../src/model/split";
+import { afterListChange, leaveFrom, listEndInset, nextAfter, paneLayout, reselect, SPLIT_MIN_WIDTH, step, stepFrom } from "../src/model/split";
 import { actionOf, BINDINGS, createShortcutRegistry, keyCommands, SHORTCUT_TITLES, type ShortcutAction } from "../src/model/shortcuts";
 
 const rows = (...ids: string[]) => ids.map((threadId) => ({ threadId }));
@@ -26,6 +26,14 @@ describe("split layout", () => {
     expect(width(1032)).toBe(392);
     expect(width(1376)).toBe(420);
     for (const w of [678, 744, 834, 1032, 1194, 1376, 2000]) expect(width(w)).toBeGreaterThanOrEqual(320), expect(width(w)).toBeLessThanOrEqual(420);
+  });
+});
+
+describe("list end inset", () => {
+  it("is the detail pane's width with two panes and nothing with one", () => {
+    expect(listEndInset(paneLayout(720), 720)).toBe(720 - 320);
+    expect(listEndInset(paneLayout(1376), 1376)).toBe(1376 - 420);
+    expect(listEndInset(paneLayout(411), 411)).toBe(0);
   });
 });
 

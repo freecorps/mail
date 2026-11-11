@@ -15,8 +15,20 @@ iPad (list and conversation side by side; English UI):
 |---|---|
 | ![iPad split](docs/screenshots/split-light-ipad.png) | ![iPad split, dark](docs/screenshots/split-dark-ipad.png) |
 
-Screenshots: iPhone 18 Pro and iPad Pro 13-inch simulators (iOS 27.2), development build, the demo seed below
-(`bun run seed:dev`). The other files in `docs/screenshots/` come from earlier waves (Android among them).
+Android (Material 3: the wallpaper's dynamic colors for surfaces, the ember accent for what is interactive; the
+home-screen widgets are Jetpack Glance):
+
+| Caixas | Conversas | Conversa | Nova mensagem | Ajustes | Widgets |
+|---|---|---|---|---|---|
+| ![Caixas](docs/screenshots/home-light-android.png) | ![Conversas](docs/screenshots/inbox-light-android.png) | ![Conversa](docs/screenshots/thread-light-android.png) | ![Nova mensagem](docs/screenshots/compose-light-android.png) | ![Ajustes](docs/screenshots/settings-light-android.png) | ![Widgets](docs/screenshots/widgets-light-android.png) |
+| ![Caixas, escuro](docs/screenshots/home-dark-android.png) | ![Conversas, escuro](docs/screenshots/inbox-dark-android.png) | ![Conversa, escuro](docs/screenshots/thread-dark-android.png) | ![Nova mensagem, escuro](docs/screenshots/compose-dark-android.png) | ![Ajustes, escuro](docs/screenshots/settings-dark-android.png) | ![Widgets, escuro](docs/screenshots/widgets-dark-android.png) |
+
+A wide Android window (from 678 dp: tablets, unfolded foldables) splits like the iPad:
+![Android split](docs/screenshots/split-dark-android.png)
+
+Screenshots: iPhone 18 Pro and iPad Pro 13-inch simulators (iOS 27.2) and an Android 16 emulator (1080 × 2400, 420
+dpi; the split view at 240 dpi), development builds, the demo seed below (`bun run seed:dev`). The other files in
+`docs/screenshots/` come from earlier waves.
 
 ## Features
 
@@ -191,8 +203,18 @@ on a Mac with Xcode: `eas build --local --platform ios --profile production --ou
 
 ## Known limits
 
-- Android has not been checked end to end in this round (the emulator was unavailable); its screenshots are from
-  earlier waves.
+- Android:
+  - Confirmations (Descartar rascunho?, Sair, Excluir) are React Native's `Alert`, which Android draws as an AppCompat
+    dialog (square corners, upper-case buttons in the theme's teal), not Material 3's. The fix is native: an app
+    theme with a Material 3 parent and the ember `colorPrimary` (a config plugin, then a new build).
+  - Predictive back is off (`enableOnBackInvokedCallback="false"`, Expo's default): back works, without the system's
+    preview animation.
+  - Back while a list's search is open leaves the list at once (react-native-screens' search bar) instead of closing
+    the search first.
+  - After a light/dark switch while the app runs, a Compose control on a screen under another in its stack (the
+    list's FAB under an open conversation) can keep the old palette until the screen mounts again (a relaunch).
+  - Push needs real FCM (the emulator reports no push); notification channels (one per mailbox, in "Caixas") and the
+    widgets were checked on the emulator.
 - Widgets are drawn from a snapshot the app writes (at most every 15 s and when it goes to the background), so they lag
   the inbox while the app is closed. Lock-screen widgets are iOS only.
 - On the iOS 27.2 simulator a software keyboard shows while a system menu (a row's context menu, Mais) is open, with no

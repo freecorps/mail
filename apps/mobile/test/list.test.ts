@@ -16,7 +16,7 @@ import {
   swipeKinds,
   toggleSelected,
 } from "../src/model/list-actions";
-import { createUndoStore, offerUndoArchive } from "../src/model/undo";
+import { createShowOnce, createUndoStore, offerUndoArchive } from "../src/model/undo";
 
 const W = 390;
 const row = (o: Partial<{ threadId: string; unread: boolean; status: "open" | "waiting" | "closed" | "spam" | null; pending: boolean; mailbox: string }> = {}) => ({
@@ -104,6 +104,38 @@ describe("edit mode", () => {
     expect(keepsArchived({ view: "all" }, "all")).toBe(true);
     expect(keepsArchived({ view: "assigned" }, "all")).toBe(false);
     expect(keepsArchived({ view: "waiting" }, "all")).toBe(false);
+  });
+});
+
+describe("undo shown once (Android snackbar)", () => {
+  it("a language change or a new object for the same entry does not show it again", () => {
+    const store = createUndoStore({ ms: 5000 });
+    const once = createShowOnce();
+    store.show("Arquivada", () => {});
+    const entry = store.get()!;
+    expect(once(entry.id)).toBe(true);
+    // The effect runs again (a new `t`, a copy of the entry): nothing new queues.
+    expect(once(entry.id)).toBe(false);
+    expect(once({ ...entry }.id)).toBe(false);
+    store.show("Arquivadas", () => {});
+    expect(once(store.get()!.id)).toBe(true);
+  });
+
+  it("an older id that comes later still shows once (a notice that waited out a send)", () => {
+    const once = createShowOnce();
+    expect(once(1)).toBe(true);
+    expect(once(3)).toBe(true);
+    expect(once(2)).toBe(true);
+    expect(once(2)).toBe(false);
+  });
+
+  it("remembers the last few ids only", () => {
+    const once = createShowOnce(2);
+    once(1);
+    once(2);
+    once(3);
+    expect(once(3)).toBe(false);
+    expect(once(1)).toBe(true);
   });
 });
 
