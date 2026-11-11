@@ -144,3 +144,22 @@ describe("undo", () => {
     expect(restore.mock.calls).toEqual([["t1", "open"], ["t2", "waiting"]]);
   });
 });
+
+describe("pull-to-refresh connectivity", () => {
+  it("a nudge's online/offline wins over a stale source until the source reports itself", async () => {
+    const { nudgeable } = await import("../src/client");
+    let emitBase: (e: "online" | "offline" | "foreground" | "background") => void = () => {};
+    let online = false;
+    const c = nudgeable({ isOnline: () => online, subscribe: (emit) => ((emitBase = emit), () => {}) });
+    const seen: string[] = [];
+    c.source!.subscribe((e) => void seen.push(e));
+    expect(c.source!.isOnline!()).toBe(false);
+    c.nudge("online");
+    c.nudge("foreground");
+    expect(c.source!.isOnline!()).toBe(true);
+    expect(seen).toEqual(["online", "foreground"]);
+    online = false;
+    emitBase("offline");
+    expect(c.source!.isOnline!()).toBe(false);
+  });
+});

@@ -27,7 +27,11 @@ export async function clearReplica(): Promise<void> {
  */
 export async function resync(): Promise<void> {
   const state = await NetInfo.fetch().catch(() => null);
-  emberClient.nudge(state?.isConnected === false ? "offline" : "foreground");
+  if (state?.isConnected === false) return emberClient.nudge("offline");
+  // The client may still believe it is offline (NetInfo's listener lags the fresh reading): say online first, then
+  // foreground so a live socket is pinged too.
+  emberClient.nudge("online");
+  emberClient.nudge("foreground");
 }
 
 /** Pull-to-refresh: resync, then hold the spinner until the sockets are up (or 2.5 s), and for at least 600 ms. */

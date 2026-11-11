@@ -29,21 +29,33 @@ export type MailClient = EmberClient & {
 const isSource = (c: unknown): c is ConnectivitySource => typeof (c as ConnectivitySource | undefined)?.subscribe === "function";
 
 /** The connectivity source the client gets, plus a way to emit into it by hand. */
-function nudgeable(c: MailClientOptions["connectivity"]): { source: ConnectivitySource | null; nudge(e: ConnectivityEvent): void } {
+export function nudgeable(c: MailClientOptions["connectivity"]): { source: ConnectivitySource | null; nudge(e: ConnectivityEvent): void } {
   const base = c === null ? null : isSource(c) ? c : createExpoConnectivity(c ?? {});
   const emitters = new Set<(e: ConnectivityEvent) => void>();
+  // What a nudge said about the network wins over the base source's (possibly stale) reading until the base reports
+  // online/offline itself: a pull that saw the network back must not be ignored because NetInfo has not caught up.
+  let told: boolean | null = null;
   const source: ConnectivitySource = {
-    ...(base?.isOnline ? { isOnline: () => base.isOnline!() } : {}),
+    ...(base?.isOnline ? { isOnline: () => told ?? base.isOnline!() } : {}),
     subscribe(emit) {
       emitters.add(emit);
-      const off = base?.subscribe(emit);
+      const off = base?.subscribe((e) => {
+        if (e === "online" || e === "offline") told = null;
+        emit(e);
+      });
       return () => {
         emitters.delete(emit);
         off?.();
       };
     },
   };
-  return { source, nudge: (e) => emitters.forEach((emit) => emit(e)) };
+  return {
+    source,
+    nudge: (e) => {
+      if (e === "online" || e === "offline") told = e === "online";
+      emitters.forEach((emit) => emit(e));
+    },
+  };
 }
 
 /**

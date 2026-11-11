@@ -77,5 +77,9 @@ export function setListPrefs(patch: Partial<ListPrefs>) {
   listEdits = { ...listEdits, ...patch };
   listPrefs = { ...listPrefs, ...patch };
   emitList();
-  AsyncStorage.setItem(LIST_KEY, JSON.stringify(listPrefs)).catch(() => {});
+  // Written over what is stored, not over the in-memory defaults: before the first read lands, only this change (and
+  // earlier ones) replace stored values; the rest stays as saved.
+  AsyncStorage.getItem(LIST_KEY)
+    .then((raw) => AsyncStorage.setItem(LIST_KEY, JSON.stringify({ ...parseListPrefs(raw), ...listEdits })))
+    .catch(() => {});
 }
