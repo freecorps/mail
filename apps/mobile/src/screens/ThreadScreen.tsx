@@ -121,9 +121,16 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   useEffect(() => {
     if (!draft) setSuppress(false);
   }, [draft]);
-  const barOpen = !preview && vm.canReply && (opened_ !== null || (!!draft && !suppress));
+  // Moved to the full composer: the bar stays out while that sheet is up (one editor on the draft at a time), and comes
+  // back over its draft when this screen has the focus again.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (focused) setExpanded(false);
+  }, [focused]);
+  const barOpen = !preview && vm.canReply && !expanded && (opened_ !== null || (!!draft && !suppress));
   const startReply = useCallback(() => {
     if (!vm.canReply) return;
+    setExpanded(false);
     setOpenBar("focus");
   }, [vm.canReply]);
   const closeBar = useCallback(() => {
@@ -131,7 +138,10 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     setSuppress(true);
   }, []);
   // To the full composer: the bar hides without suppressing its draft, so it shows again once the composer is dismissed.
-  const expandBar = useCallback(() => setOpenBar(null), []);
+  const expandBar = useCallback(() => {
+    setOpenBar(null);
+    setExpanded(true);
+  }, []);
   const reopenBar = useCallback(() => {
     setSuppress(false);
     setOpenBar("focus");

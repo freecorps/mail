@@ -154,7 +154,12 @@ export function QuickReply({
     setText(v);
     save({ text: v });
   };
-  // A finished upload is part of the draft too.
+  // Removing a file is an edit: the draft saves without it (the effect below writes once the list changes).
+  const removeFile = (id: string) => {
+    dirty.current = true;
+    uploads.remove(id);
+  };
+  // A finished upload is part of the draft too (and so is one removed).
   const ready = uploads.attachments.map((a) => a.file).join(",");
   useEffect(() => {
     if (dirty.current && kind === "reply") save({});
@@ -220,7 +225,7 @@ export function QuickReply({
         onLayout={onLayout}
         style={[styles.bar, { backgroundColor: c.surface, borderTopColor: c.separator, paddingBottom: Math.max(insets.bottom, spacing.sm) }]}
       >
-        {mode !== "note" ? <UploadStrip items={uploads.items} onRemove={uploads.remove} /> : null}
+        {mode !== "note" ? <UploadStrip items={uploads.items} onRemove={removeFile} /> : null}
         <View style={styles.row}>
           {modes.length > 1 ? (
             <View style={styles.ctrl}>
