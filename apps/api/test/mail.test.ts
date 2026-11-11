@@ -380,7 +380,8 @@ describe("mail app", () => {
     expect(t).toMatchObject({ subject: "Lunch?", contact: "ana@user.test" });
     expect((await call("query", "inbox:thread", { threadId: t._id }, "user:heitor")).error.message).toMatch(/no access/);
     expect((await call("query", "inbox:search", { query: "lunch" }, "user:heitor")).value).toEqual([]);
-    expect((await call("query", "inbox:search", { query: "lunch" }, "user:wolf")).value).toMatchObject([{ threadId: t._id }]);
+    // Each hit carries its thread's state (Ember 0.7.1), so the clients act on it without loading the thread.
+    expect((await call("query", "inbox:search", { query: "lunch" }, "user:wolf")).value).toMatchObject([{ threadId: t._id, status: expect.any(String), unreadCount: expect.any(Number) }]);
     expect((await call("query", "inbox:recent", {}, "user:heitor")).value.threads.some((x: any) => x._id === t._id)).toBe(false);
     // No assignment in a personal mailbox; its member list is its owner.
     expect((await call("mutation", "inbox:assign", { threadId: t._id, userId: "wolf" }, "user:wolf")).error.message).toMatch(/personal mailbox/);
