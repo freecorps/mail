@@ -2,7 +2,7 @@
 // restored after a restart is still shown: the reply appears in the thread with a "sending" mark, the thread moves to
 // "waiting", unread counters drop, and the server's answer replaces all of it when the queue drains.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-react-native";
-import type { Mailbox, Message, Page, SentArgs, SentThread, Thread, ThreadDetail, ThreadStatus, ThreadsArgs, ViewArgs, ViewPage } from "../api";
+import { INBOX_VIEWS, type Mailbox, type Message, type Page, type SentArgs, type SentThread, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCounts, type ViewPage } from "../api";
 import { viewKeeps } from "./replica";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
@@ -14,8 +14,43 @@ const tempId = (now: number) => `${OPTIMISTIC_PREFIX}${now.toString(36)}-${(seq+
 
 type Store = OptimisticLocalStore;
 
-/** Applies `patch` to the thread wherever it is loaded: its detail and every thread-list page. */
+/**
+ * Moves the home screen's counts (`inbox:views`) for one thread going from `before` to `after`, by the views' own rules
+ * (`viewKeeps`): it leaves or joins a view, and its unread messages go with it. The badges (Minhas, the home rows) then
+ * follow a read, archive or assignment at once, offline too.
+ */
+function adjustViewCounts(store: Store, before: Thread, after: Thread) {
+  const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
+  if (!counts) return;
+  const next = { ...counts };
+  for (const view of INBOX_VIEWS) {
+    const keeps = viewKeeps(view, undefined);
+    const was = keeps(before);
+    const is = keeps(after);
+    if (!was && !is) continue;
+    const c = counts[view];
+    next[view] = {
+      ...c,
+      threads: Math.max(0, c.threads + (is ? 1 : 0) - (was ? 1 : 0)),
+      unread: Math.max(0, c.unread + (is ? after.unreadCount : 0) - (was ? before.unreadCount : 0)),
+    };
+  }
+  store.setQuery<any>("inbox:views", {}, next);
+}
+
+/**
+ * Applies `patch` to the thread wherever it is loaded (its detail and every thread-list page) and moves the view counts
+ * with it.
+ */
 function patchThread(store: Store, threadId: string, patch: (t: Thread) => Thread): Thread | null {
+  const found = patchLoaded(store, threadId, patch);
+  if (found) adjustViewCounts(store, found.before, found.after);
+  return found?.after ?? null;
+}
+
+function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Thread): { before: Thread; after: Thread } | null {
+  let original: Thread | null = null;
+  const patch = (t: Thread) => ((original ??= t), rawPatch(t));
   let found: Thread | null = null;
   const detail = store.getQuery<any>("inbox:thread", { threadId }) as ThreadDetail | undefined;
   if (detail) {
@@ -50,7 +85,7 @@ function patchThread(store: Store, threadId: string, patch: (t: Thread) => Threa
     found ??= next;
     store.setQuery<any>("inbox:sent", args, { ...value, page: value.page.map((t, j) => (j === i ? next : t)) });
   }
-  return found;
+  return found && original ? { before: original, after: found } : null;
 }
 
 type SentPage = { page: SentThread[]; isDone: boolean };

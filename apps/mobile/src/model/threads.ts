@@ -116,7 +116,7 @@ export function useMailboxes() {
 export const MIN_QUERY = 2;
 
 /** `mailbox`: one mailbox's list (with Sent); `view`: a view across the member's mailboxes (search covers them all). */
-export function useThreadList(o: ListSource & { filter: ThreadFilter; query: string }) {
+export function useThreadList(o: ListSource & { filter: ThreadFilter; query: string; searchOnly?: boolean }) {
   const [limit, setLimit] = useState({ key: "", n: PAGE });
   const key = `${o.mailbox ?? `view:${o.view}`}\u0000${o.filter}`;
   const n = limit.key === key ? limit.n : PAGE;
@@ -126,7 +126,8 @@ export function useThreadList(o: ListSource & { filter: ThreadFilter; query: str
   const sentView = mailbox !== undefined && o.filter === "sent";
   const status = o.filter === "all" || o.filter === "sent" ? {} : { status: o.filter };
   const inbox = useQuerySnapshot(api.inbox.threads, searching || sentView || mailbox === undefined ? "skip" : { mailbox, ...status, paginationOpts: { numItems: n, cursor: null } });
-  const view = useQuerySnapshot(api.inbox.view, searching || o.view === undefined ? "skip" : { view: o.view, ...(o.view === "waiting" ? {} : status), limit: n });
+  // The search tab lists nothing until there is a query: no view read (or paged) behind it.
+  const view = useQuerySnapshot(api.inbox.view, searching || o.searchOnly || o.view === undefined ? "skip" : { view: o.view, ...(o.view === "waiting" ? {} : status), limit: n });
   const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox, limit: n } : "skip");
   const list = sentView ? sent : mailbox === undefined ? view : inbox;
   const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, ...(mailbox ? { mailbox } : {}) } : "skip");
