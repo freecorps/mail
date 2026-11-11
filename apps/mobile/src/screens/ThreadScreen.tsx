@@ -75,7 +75,8 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   // ---- Which messages are open ------------------------------------------------------------------------------------
   const latest = latestId(vm.items.map((i) => i.message));
   const [opened, setOpened] = useState<Set<string>>(() => new Set());
-  const [all, setAll] = useState(false);
+  // "Expandir tudo" opens every message by id (not a global flag), so each one still folds on its own afterwards.
+  const all = false;
   const prevLatest = useRef<string | null>(null);
   useEffect(() => {
     // The newest message stays open when a newer one arrives (a reply never folds what it answers).
@@ -112,6 +113,10 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
 
   // ---- Composer ---------------------------------------------------------------------------------------------------
   const [composing, setComposing] = useState(false);
+  // Marked as spam (or otherwise closed to replies) while the bar is open: it closes, and nothing can be sent.
+  useEffect(() => {
+    if (!vm.canReply) setComposing(false);
+  }, [vm.canReply]);
   const startReply = useCallback(() => {
     if (!vm.canReply) return;
     setComposing(true);
@@ -285,7 +290,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
       ) : null}
       {folded >= 2 ? (
         <View style={styles.expandRow}>
-          <Pressable accessibilityRole="button" hitSlop={spacing.sm} onPress={() => setAll(true)} style={({ pressed }) => pressed && styles.pressed}>
+          <Pressable accessibilityRole="button" hitSlop={spacing.sm} onPress={() => setOpened((o) => new Set([...o, ...vm.items.map((i) => i.message._id)]))} style={({ pressed }) => pressed && styles.pressed}>
             <ThemedText variant="subheadline" tone="tint">
               {t("thread.expandAll", { count: folded })}
             </ThemedText>
@@ -341,7 +346,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {preview ? null : composing ? (
+      {preview ? null : composing && vm.canReply ? (
         <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} onClose={() => setComposing(false)} />
       ) : !vm.canReply ? (
         <ThemedText variant="subheadline" tone="secondary" style={styles.spam}>
