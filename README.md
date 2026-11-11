@@ -74,6 +74,10 @@ Operação, deploy de produção e remoção: [`docs/operations.md`](docs/operat
 entrega; o SDK tem `verifyWebhook`). Erros no formato do Resend: `{ statusCode, name, message }`. Os detalhes estão em
 `apps/api/ember/http.ts`.
 
+`GET /inbox/threads?mailbox=<nome>` lista as conversas da caixa, da mais recente para a mais antiga (`status`, `limit`,
+`cursor`). Desde o Ember 0.7, as conversas adiadas (soneca, pelo app) ficam fora dessa lista até acordarem.
+`snoozed=true` lista só as adiadas, da que acorda primeiro para a última.
+
 ```ts
 import { EmberMail } from "@freecorps/mail-sdk";
 const mail = new EmberMail(process.env.MAIL_API_KEY!, { baseUrl: "https://mail.example.com" });
@@ -152,6 +156,18 @@ cd apps/web && bun run dev   # web inbox at http://localhost:5180 (proxies to th
 5. Create API keys (`POST /api-keys`) and send (`POST /emails`), or use the SDK.
 
 For operations, production deploys and teardown, see [`docs/operations.md`](docs/operations.md).
+
+### API (summary)
+
+`POST /emails` (+ `Idempotency-Key`), `POST /emails/batch`, `GET /emails` (filters: `status`, `tag`, `to`, `since`,
+`until`), `GET /emails/:id`, `GET /emails/:id/events`, `POST /emails/:id/cancel`, `/domains`, `/api-keys`
+(`full_access | sending_access | inbox`), `/templates`, `/suppressions`, `/inbox/*`, `/webhooks` (signed Standard
+Webhooks events: `email.received` and the delivery ones; the SDK has `verifyWebhook`). Errors in Resend's shape:
+`{ statusCode, name, message }`. The details are in `apps/api/ember/http.ts`.
+
+`GET /inbox/threads?mailbox=<name>` lists the mailbox's conversations, newest first (`status`, `limit`, `cursor`).
+Since Ember 0.7, snoozed conversations (snoozed in the app) are left out of that list until they wake up.
+`snoozed=true` lists only the snoozed ones, soonest to wake first.
 
 ### For agents
 

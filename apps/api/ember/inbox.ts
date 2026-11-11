@@ -125,15 +125,21 @@ export const generateUploadUrl = mutation({
   },
 });
 
-/** Mailboxes this member can see, with unread counts (aggregate); `personal`: their own mailbox, no one else's. */
+/**
+ * Mailboxes this member can see, with their counts: `threads` and `unread` messages, snoozed threads left out (as in
+ * `views` and the lists: they count again when they wake), from the email component's `counts` aggregates.
+ * `personal`: their own mailbox, no one else's.
+ */
 export const mailboxes = query({
   args: {},
   handler: (ctx) => {
     const m = member(ctx);
     const personal = owners(ctx.db);
     const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string; address: string; displayName?: string }>).filter((b) => canSeeWith(personal, m, b.name));
-    const unread = ctx.runQuery(email.unread, { mailboxes: all.map((b) => b.name) }) as Record<string, { unread: number; threads: number }>;
-    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), ...unread[b.name]! }));
+    return all.map((b) => {
+      const c = (ctx.runQuery(email.counts, { mailbox: b.name }) as { all: { threads: number; unread: number } }).all;
+      return { name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), unread: c.unread, threads: c.threads };
+    });
   },
 });
 

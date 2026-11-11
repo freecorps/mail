@@ -581,7 +581,15 @@ http.route({
     if (!mailbox) throw new ApiError(422, "missing_required_field", "mailbox is required");
     notPersonal(await personalMailboxes(ctx), mailbox);
     const status = url.searchParams.get("status");
-    const r = await ctx.runQuery(email.threads, { mailbox, ...(status ? { status } : {}), paginationOpts: { numItems: pageLimit(url, 30), cursor: url.searchParams.get("cursor") } });
+    // Snoozed threads are out of the default list (Ember 0.7); `snoozed=true` lists only them, soonest to wake first.
+    const snoozed = url.searchParams.get("snoozed");
+    if (snoozed !== null && snoozed !== "true" && snoozed !== "false") throw new ApiError(422, "validation_error", "snoozed must be true or false");
+    const r = await ctx.runQuery(email.threads, {
+      mailbox,
+      ...(status ? { status } : {}),
+      ...(snoozed === "true" ? { snoozed: true } : {}),
+      paginationOpts: { numItems: pageLimit(url, 30), cursor: url.searchParams.get("cursor") },
+    });
     return json(r);
   }),
 });

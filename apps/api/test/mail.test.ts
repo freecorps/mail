@@ -1246,10 +1246,30 @@ describe("mail app", () => {
     expect(subjects(await q("inbox:threads", { mailbox: "ea", assignee: "edu" }, "eva"))).toEqual(["exact one"]);
     expect(subjects(await q("inbox:threads", { mailbox: "ea", unread: true, status: "open" }, "eva"))).toContain("exact one");
 
+    // The mailbox badges (`inbox:mailboxes`) leave snoozed threads out too.
+    const badge = async (who: string, name: string) => {
+      const b = ((await q("inbox:mailboxes", {}, who)) as any[]).find((x) => x.name === name);
+      return { threads: b.threads, unread: b.unread };
+    };
+    const ea0 = await badge("eva", "ea");
+    const eia0 = await badge("eva", "eia");
+
     // Snoozed: out of every other view and count, listed soonest to wake first; Edu can't snooze in eb.
     const now = Date.now();
     expect(await mu("inbox:snooze", { threadId: s1, until: now + 7_200_000 }, "edu")).toBe(now + 7_200_000);
     await mu("inbox:snooze", { threadId: s4, until: now + 3_600_000 }, "eva");
+    expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
+    expect(await badge("edu", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
+    expect(await badge("eva", "eia")).toEqual({ threads: eia0.threads - 1, unread: eia0.unread - 1 });
+
+    // HTTP: `GET /inbox/threads` leaves them out too; `snoozed=true` lists only them. Never a personal mailbox.
+    const byKey = async (qs: string) => SELF.fetch(`${BASE}/inbox/threads?${qs}`, { headers: { authorization: "Bearer admin-secret" } });
+    expect(((await admin.inbox.threads({ mailbox: "ea", limit: 100 })).data!.page as any[]).map((t) => t._id)).not.toContain(s1);
+    expect(((await admin.inbox.threads({ mailbox: "ea", snoozed: true })).data!.page as any[]).map((t) => t._id)).toEqual([s1]);
+    expect(((await (await byKey("mailbox=ea&snoozed=true")).json()) as any).page[0]).toMatchObject({ _id: s1, snoozed: true, snoozedUntil: now + 7_200_000 });
+    expect((await byKey("mailbox=ea&snoozed=false")).status).toBe(200);
+    expect(await (await byKey("mailbox=ea&snoozed=yes")).json()).toMatchObject({ statusCode: 422, name: "validation_error" });
+    expect((await byKey("mailbox=eia&snoozed=true")).status).toBe(403);
     expect(await refused("mutation", "inbox:snooze", { threadId: s2, until: now + 3_600_000 }, "edu")).toMatch(/no access/);
     expect(await refused("mutation", "inbox:snooze", { threadId: s3, until: now - 1000 }, "eva")).toMatch(/in the future/);
     expect(await refused("mutation", "inbox:snooze", { threadId: s3, until: now + 400 * 86_400_000 }, "eva")).toMatch(/366 days/);
@@ -1273,10 +1293,14 @@ describe("mail app", () => {
     // Unsnoozed by hand: back where it was. Snoozed for a moment: it comes back on its own, open and unread, on top.
     await mu("inbox:unsnooze", { threadId: s1 }, "edu");
     expect(subjects(await q("inbox:view", { view: "assigned" }, "edu"))).toEqual(["exact one"]);
+    expect(await badge("eva", "ea")).toEqual(ea0);
     await mu("inbox:setStatus", { threadId: s3, status: "closed" }, "eva");
     await mu("inbox:snooze", { threadId: s3, until: Date.now() + 1200 }, "eva");
+    expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread });
     const woke = await until(() => q("inbox:thread", { threadId: s3 }, "eva"), (x: any) => !x.thread.snoozed, 10_000);
     expect(woke.thread).toMatchObject({ status: "open", unreadCount: 1, hasUnread: true });
+    // Woken (by time: back as new, unread), it counts again.
+    expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads, unread: ea0.unread + 1 });
     expect(subjects(await q("inbox:view", { view: "assigned" }, "eva"))[0]).toBe("exact three");
     expect(subjects(await q("inbox:view", { view: "snoozed" }, "eva"))).toEqual(["exact four"]);
 
