@@ -200,6 +200,23 @@ describe("compose window", () => {
     expect(chips).toEqual(["bia@acme.test", "ana@user.test"]);
   });
 
+  it("text still typed becomes a chip when the field goes away (minimize), not only on blur", () => {
+    const { wrapper } = setup();
+    let chips: string[] = [];
+    let hide: () => void = () => {};
+    function Field() {
+      const [value, setValue] = useState<string[]>([]);
+      const [shown, setShown] = useState(true);
+      chips = value;
+      hide = () => setShown(false);
+      return shown ? <RecipientInput label="Para" value={value} onChange={setValue} contacts={[]} /> : null;
+    }
+    render(<Field />, { wrapper });
+    fireEvent.change(screen.getByRole("combobox", { name: "Para" }), { target: { value: "ana@user.test" } });
+    act(() => hide());
+    expect(chips).toEqual(["ana@user.test"]);
+  });
+
   it("Enter in an empty To field does not send (after making a chip); ⌘Enter still does", () => {
     const { wrapper } = setup();
     act(() => void openWindow({ kind: "compose", mailbox: "support" }));

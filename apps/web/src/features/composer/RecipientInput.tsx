@@ -62,6 +62,25 @@ export function RecipientInput({
     setText("");
   };
   const commit = (raw: string) => add(toChips(raw).map((c) => c.value));
+  // Going away with text still typed (minimizing the window unmounts the field before any blur): it becomes chips, as
+  // leaving the field does, so nothing typed is lost. Refs, because the cleanup runs with the last render's values.
+  const pendingText = useRef(text);
+  pendingText.current = text;
+  const latest = useRef({ value, onChange });
+  latest.current = { value, onChange };
+  useEffect(
+    () => () => {
+      const raw = pendingText.current;
+      if (!raw.trim()) return;
+      const { value: had, onChange: change } = latest.current;
+      const have = new Set(had.map(chipEmail));
+      const added = toChips(raw)
+        .map((c) => c.value)
+        .filter((v) => !have.has(chipEmail(v)) && (have.add(chipEmail(v)), true));
+      if (added.length) change([...had, ...added]);
+    },
+    [],
+  );
   // A suggestion is one recipient as it is (never split: its name may hold a comma).
   const pick = (c: Contact) => {
     add([formatContact(c)]);

@@ -81,10 +81,11 @@ export function useAutosave(initialId: string | null = null) {
           if (gen !== generation.current) return;
           if (!args) {
             if (id.current) {
+              // The id is dropped only once the delete went through: a failed delete keeps it, so retry deletes again.
               const old = id.current;
-              id.current = null;
-              last.current = { gen, id: null };
               await del({ id: old });
+              if (id.current === old) id.current = null;
+              last.current = { gen, id: null };
             }
             return;
           }

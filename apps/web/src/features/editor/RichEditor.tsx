@@ -336,20 +336,20 @@ function FormatBubble({ editor }: { editor: Editor }) {
       className="z-40 flex items-center gap-0.5 rounded-lg border bg-popover p-0.5 text-popover-foreground shadow-raised"
     >
       {linking !== null ? (
-        <form
-          className="flex items-center gap-1 px-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            applyLink(linking);
-          }}
-        >
+        // Not a <form>: the editor sits inside the composer's send form, and a nested form's submit (Enter) would also
+        // reach it through React and send the message. Enter applies the link here and goes no further.
+        <div role="group" aria-label={t("editor.linkUrl")} className="flex items-center gap-1 px-1">
           <input
             // oxlint-disable-next-line jsx-a11y/no-autofocus -- the link field opens on purpose from the link button.
             autoFocus
             value={linking}
             onChange={(e) => setLinking(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Escape") {
+              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                e.stopPropagation();
+                applyLink(linking);
+              } else if (e.key === "Escape") {
                 e.preventDefault();
                 setLinking(null);
                 editor.commands.focus();
@@ -360,7 +360,7 @@ function FormatBubble({ editor }: { editor: Editor }) {
             className="h-7 w-56 rounded-md bg-transparent px-1.5 text-ui outline-none"
           />
           {state.link && btn(false, t("editor.unlink"), () => applyLink(""), Unlink)}
-        </form>
+        </div>
       ) : (
         <>
           {btn(state.bold, t("editor.bold"), () => chain().toggleBold().run(), Bold)}
