@@ -386,11 +386,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           <ResizableHandle />
           <ResizablePanel id="content" minSize={PANE_LIMITS.list.min}>
             {adminSection ? (
-              <AdminView
-                section={adminSection}
-                onSection={(a) => navigate({ admin: a }, { push: true })}
-                onClose={() => navigate({ admin: null }, { push: true })}
-              />
+              <div className="flex h-full min-w-0">
+                <AdminView
+                  section={adminSection}
+                  onSection={(a) => navigate({ admin: a }, { push: true })}
+                  onClose={() => navigate({ admin: null }, { push: true })}
+                />
+              </div>
             ) : (
               panes
             )}
