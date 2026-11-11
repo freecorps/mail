@@ -9,7 +9,8 @@ import { combineDateTime, formatAgo, formatLater, fromWallClock, sendPresets, sn
 import { describe as describeEntry, mergeTimeline, quiet } from "../src/model/activity";
 import { keepsArchived, keepsSnoozed, parseListPrefs, swipeKinds } from "../src/model/list-actions";
 import { createPresence, effectiveState, presenceLine } from "../src/model/presence";
-import { ATTACH_LIMIT, canSchedule, isLinkRefusal, runScheduled, scheduledOf } from "../src/model/schedule";
+import { ATTACH_LIMIT, canSchedule, editPlan, isLinkRefusal, runScheduled, scheduledOf } from "../src/model/schedule";
+import { pruneForwards } from "../src/model/scheduled-forwards";
 import { menuEntryEnabled, menuEntryKind } from "../src/components/native/menu-items";
 import { canAddTag, moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
 import { writtenText } from "../src/model/thread-view";
@@ -392,6 +393,37 @@ describe("scheduled sends", () => {
     expect(isLinkRefusal(new Error("sendAt: at most 366 days ahead"))).toBe(false);
     expect(scheduledOf([{ emailId: "e1", messageId: "m1", sendAt: 1, subject: "", to: [] }], { _id: "x", emailId: "e1" })?.emailId).toBe("e1");
     expect(scheduledOf(undefined, { _id: "m1" })).toBeNull();
+  });
+
+  it("Editar on a scheduled forward reopens it as a forward of the same original, or keeps the whole body when the device does not know it", () => {
+    const mine = { file: "f-mine", filename: "nota.pdf", contentType: "application/pdf" };
+    const theirs = { file: "f-orig", filename: "fatura.pdf", contentType: "application/pdf" };
+    const sent = "Veja abaixo.\n\n---------- Mensagem encaminhada ----------\nDe: Ana <a@x>\nAssunto: Fatura\n\nO valor está errado.\n\n-- \nBia";
+    const remembered = { forwardThread: "email$threads_orig", forwardMessage: "email$messages_orig", text: "Veja abaixo.\n\n---------- Mensagem encaminhada ----------\nDe: Ana <a@x>", attachments: [mine], at: 1 };
+    // Scheduled on this device: a forward again, of the same message, with the body as written and only the member's files.
+    expect(editPlan({ text: sent, attachments: [theirs, mine] }, { others: false, forward: remembered, written: writtenText })).toEqual({
+      as: "forward",
+      forwardThread: "email$threads_orig",
+      forwardMessage: "email$messages_orig",
+      text: remembered.text,
+      attachments: [mine],
+    });
+    // Scheduled elsewhere: a new message that keeps the forwarded original (never cut at its header) and the files.
+    const plan = editPlan({ text: sent, attachments: [theirs, mine] }, { others: false, forward: null, written: writtenText });
+    expect(plan).toMatchObject({ as: "compose", attachments: [theirs, mine] });
+    expect(plan.text).toContain("O valor está errado.");
+    expect(editPlan({ text: "Fwd sent in English\n\n---------- Forwarded message ----------\nFrom: a", attachments: [] }, { others: false, forward: null, written: writtenText }).text).toContain("From: a");
+    // A plain new message and a reply: what was written.
+    expect(editPlan({ text: "Oi\n\n-- \nBia", attachments: [] }, { others: false, forward: null, written: writtenText })).toEqual({ as: "compose", text: "Oi", attachments: [] });
+    expect(editPlan({ text: "Ok\n\nEm 5 de nov., Ana <a@x> escreveu:\n> antes", attachments: [] }, { others: true, forward: remembered, written: writtenText })).toEqual({ as: "reply", text: "Ok" });
+    // The device's record keeps 200 at most, newest first, and drops what is past a send's furthest time.
+    const day = 86_400_000;
+    const many = Object.fromEntries(Array.from({ length: 205 }, (_, i) => [`e${i}`, { ...remembered, at: 1000 * day + i }]));
+    const kept = pruneForwards({ ...many, old: { ...remembered, at: 0 } }, 1001 * day);
+    expect(Object.keys(kept)).toHaveLength(200);
+    expect(kept.old).toBeUndefined();
+    expect(kept.e204).toBeDefined();
+    expect(kept.e0).toBeUndefined();
   });
 
   it("Editar reopens what was written: no signature, no quoted history", () => {

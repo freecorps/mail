@@ -3,6 +3,7 @@
 // must work 7 days from the send, so a scheduled send that needs them is refused. The composer blocks the option
 // ahead of time instead of waiting for that error.
 import type { ScheduledSend } from "../api";
+import type { AttachmentArg } from "../lib/uploads";
 
 /** Bytes that go as attachments (apps/api `ATTACH_LIMIT`). Past it, files become links, and a send can't be scheduled. */
 export const ATTACH_LIMIT = 10 * 1024 * 1024;
@@ -64,4 +65,38 @@ export async function runScheduled(o: {
   }
   o.done();
   return "done";
+}
+
+/** What this device knows of a forward it scheduled (the server keeps no link from the new thread to the original). */
+export interface ScheduledForward {
+  forwardThread: string;
+  forwardMessage: string;
+  /** The body as the member had it in the composer (their text and the quoted original). */
+  text: string;
+  /** The member's own uploads (the original's files go along with the forward by themselves). */
+  attachments: AttachmentArg[];
+  at: number;
+}
+
+const FORWARD_MARK = /^-{2,}\s*(mensagem encaminhada|forwarded message)\s*-{2,}\s*$/im;
+
+export type EditPlan =
+  | { as: "reply"; text: string }
+  | { as: "forward"; forwardThread: string; forwardMessage: string; text: string; attachments: AttachmentArg[] }
+  | { as: "compose"; text: string; attachments: AttachmentArg[] };
+
+/**
+ * "Editar" on a scheduled message (already canceled): what the composer reopens as.
+ * - In a conversation with other messages: a reply, with what was written (no signature, no quoted history).
+ * - A forward this device scheduled: a forward again (the same original message, so its files go along), with the body
+ *   as it was and the member's own files.
+ * - A forward this device knows nothing about (scheduled elsewhere): a new message that keeps the whole body, the
+ *   forwarded original included, never cut at the forward's header.
+ * - Any other new message: what was written.
+ */
+export function editPlan(m: { text: string; attachments: AttachmentArg[] }, o: { others: boolean; forward: ScheduledForward | null; written(text: string): string }): EditPlan {
+  if (o.others) return { as: "reply", text: o.written(m.text) };
+  if (o.forward) return { as: "forward", forwardThread: o.forward.forwardThread, forwardMessage: o.forward.forwardMessage, text: o.forward.text, attachments: o.forward.attachments };
+  if (FORWARD_MARK.test(m.text)) return { as: "compose", text: m.text.replace(/\s+$/, ""), attachments: m.attachments };
+  return { as: "compose", text: o.written(m.text), attachments: m.attachments };
 }

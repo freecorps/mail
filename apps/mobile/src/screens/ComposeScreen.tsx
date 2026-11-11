@@ -31,6 +31,7 @@ import { keepUndoneCompose, takeUndoneCompose } from "../model/undone-compose";
 import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
 import { canSchedule, isLinkRefusal, runScheduled } from "../model/schedule";
+import { rememberScheduledForward } from "../model/scheduled-forwards";
 import { notify } from "../model/undo";
 import { setWhenRequest } from "../model/when-request";
 import { haptics } from "../lib/haptics";
@@ -90,20 +91,25 @@ export function ComposeScreen() {
     const m = detail.messages.find((x) => x._id === p.forwardMessage);
     if (!m) return <Loading />;
     const draft = list.find((d) => d.kind === "forward") ?? null;
+    // "Editar" on a scheduled forward: what it had (it was canceled to be edited), unless a draft already has it.
+    const back = draft ? null : undone;
     init = {
       kind: "forward",
       mode: "reply",
       threadId: detail.thread._id,
       messageId: m._id,
       mailbox: m.mailbox,
-      to: draft?.to ?? [],
-      cc: draft?.cc ?? [],
-      subject: draft?.subject ?? forwardSubject(m.subject || detail.thread.subject),
+      to: draft?.to ?? back?.to ?? [],
+      cc: draft?.cc ?? back?.cc ?? [],
+      ...(back?.bcc?.length ? { bcc: back.bcc } : {}),
+      subject: draft?.subject ?? back?.subject ?? forwardSubject(m.subject || detail.thread.subject),
       text:
         draft?.text ??
+        back?.text ??
         forwardText(m, { header: t("forward.header"), from: t("forward.from"), date: t("forward.date"), subject: t("forward.subject"), to: t("forward.to") }, formatFull(m.at, locale, clock24)),
       draft,
       files: forwardedFiles(m.attachments).map((a) => a.filename),
+      ...(back?.attachments.length ? { attachments: back.attachments } : {}),
     };
   } else if (p.threadId && detail) {
     const personal = isPersonal(boxes ?? [], detail.thread.mailbox);
@@ -413,8 +419,14 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
         const quoted = quotedMessage(messages);
         return replyM({ threadId: init.threadId, text: o.text, ...copies, ...extra, ...(quoted ? { quoteHeader: quoteHeader(quoted, locale, clock24) } : {}), ...draft });
       }
-      if (kind === "forward" && init.threadId && init.messageId)
-        return forwardM({ threadId: init.threadId, messageId: init.messageId, to: o.to.map((x) => x.trim()), ...copies, subject: subject.trim(), text: o.text, ...extra, ...draft });
+      if (kind === "forward" && init.threadId && init.messageId) {
+        const forwardThread = init.threadId;
+        const forwardMessage = init.messageId;
+        const r = await forwardM({ threadId: forwardThread, messageId: forwardMessage, to: o.to.map((x) => x.trim()), ...copies, subject: subject.trim(), text: o.text, ...extra, ...draft });
+        // The server keeps no link back to the original: remember it, so "Editar" reopens this as a forward of it.
+        void rememberScheduledForward(r.emailId, { forwardThread, forwardMessage, text: o.text, attachments: o.files, at: Date.now() });
+        return r;
+      }
       if (!from) throw new Error("no mailbox");
       return composeM({ mailbox: from, to: o.to.map((x) => x.trim()), ...copies, subject: subject.trim(), text: o.text, ...extra, ...draft });
     };

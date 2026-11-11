@@ -37,7 +37,8 @@ import { ActivityLine } from "../components/activity-line";
 import { TagChips } from "../components/tag-chips";
 import { describe, mergeTimeline, quiet, type TimelineItem } from "../model/activity";
 import { presenceLine } from "../model/presence";
-import { scheduledOf } from "../model/schedule";
+import { editPlan, scheduledOf } from "../model/schedule";
+import { takeScheduledForward } from "../model/scheduled-forwards";
 import { useSnooze } from "../model/snooze";
 import { threadTags } from "../model/tags";
 import { useTagIndex } from "../model/threads";
@@ -242,21 +243,26 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     const files = forwardedFiles(m.attachments).map((a) => ({ file: a.file, filename: a.filename, contentType: a.contentType }));
     const addr = (a: { email: string; name?: string }) => (a.name ? `${a.name} <${a.email}>` : a.email);
     const others = vm.items.some((i) => i.message._id !== m._id);
+    // A forward this device scheduled reopens as a forward of the same original (`editPlan`).
+    const plan = editPlan({ text: m.text, attachments: files }, { others, forward: others ? null : await takeScheduledForward(emailId), written: writtenText });
     const restore = keepUndoneCompose({
       mailbox: thread.mailbox,
-      ...(others ? { threadId } : {}),
+      ...(plan.as === "reply" ? { threadId } : {}),
       to: m.to.map(addr),
       cc: m.cc.map(addr),
       bcc: (m.bcc ?? []).map(addr),
       subject: m.subject,
-      text: writtenText(m.text),
-      attachments: files,
+      text: plan.text,
+      attachments: plan.as === "reply" ? files : plan.attachments,
     });
-    if (others) router.push({ pathname: "/compose", params: { threadId, mode: m.cc.length ? "all" : "reply", restore } });
+    if (plan.as === "reply") router.push({ pathname: "/compose", params: { threadId, mode: m.cc.length ? "all" : "reply", restore } });
     else {
-      // A new conversation canceled before it went is gone: it reopens as a new message.
+      // A new conversation canceled before it went is gone: it reopens as the forward it was, or as a new message.
       router.back();
-      router.push({ pathname: "/compose", params: { mailbox: thread.mailbox, restore } });
+      router.push({
+        pathname: "/compose",
+        params: plan.as === "forward" ? { forwardThread: plan.forwardThread, forwardMessage: plan.forwardMessage, restore } : { mailbox: thread.mailbox, restore },
+      });
     }
   };
   const go = (to: { threadId: string; mailbox: string } | null) => {
