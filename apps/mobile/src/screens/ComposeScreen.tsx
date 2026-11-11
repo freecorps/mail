@@ -507,10 +507,12 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
               {t("common.cancel")}
             </Stack.Toolbar.Button>
           </Stack.Toolbar>
-          <Stack.Toolbar placement="right">
+          {/* Android: the menu's items take the toolbar's tint, so it is the label color (Material's menu text) and the
+              two buttons keep the accent themselves. */}
+          <Stack.Toolbar placement="right" {...(ios ? {} : { tintColor: c.labelText })}>
             {/* "Enviar mais tarde" beside Send (Mail's long-press menu, made visible): presets with their time, "Escolher…". */}
             {note || !laterIcon ? null : (
-              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} tintColor={disabledTint(c, !ready || scheduling)} disabled={!ready || scheduling}>
+              <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} tintColor={disabledTint(c, !ready || scheduling) ?? (ios ? undefined : c.tint)} disabled={!ready || scheduling}>
                 {/* Direct children only: the native menu does not read through a fragment. */}
                 {schedulable.ok
                   ? [
