@@ -11,6 +11,8 @@ export default function SettingsStack() {
       <Stack.Screen name="settings" options={{ title: t("settings.title") }} />
       <Stack.Screen name="signature" options={{ title: t("signature.title"), headerLargeTitleEnabled: false }} />
       <Stack.Screen name="notifications" options={{ title: t("notifications.title"), headerLargeTitleEnabled: false }} />
+      <Stack.Screen name="tag-list" options={{ title: t("tags.title"), headerLargeTitleEnabled: false }} />
+      <Stack.Screen name="tag/[tagId]" options={{ headerLargeTitleEnabled: false }} />
     </Stack>
   );
 }

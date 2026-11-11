@@ -9,23 +9,31 @@ import type { InboxView, Mailbox, ViewCounts } from "../api";
 import { Icons, type IconSpec } from "../components/icons";
 import { EmptyState, ListActions, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
-import { badge, useMailboxes, useViewCounts } from "../model/threads";
-import { type, useColors } from "../theme";
+import { byMailbox, tagColor } from "../model/tags";
+import { badge, useMailboxes, useTagIndex, useViewCounts } from "../model/threads";
+import { type, useColors, useTagColors } from "../theme";
 
 const MAILBOX_ICONS: Record<string, IconSpec> = { support: Icons.support, privacy: Icons.privacy };
 const mailboxIcon = (b: Mailbox) => (b.personal ? Icons.account : (MAILBOX_ICONS[b.name] ?? Icons.mailbox));
 
-const VIEW_ICONS: Record<InboxView, IconSpec> = { all: Icons.viewAll, assigned: Icons.viewAssigned, unread: Icons.viewUnread, waiting: Icons.viewWaiting };
+const VIEW_ICONS: Record<InboxView, IconSpec> = { all: Icons.viewAll, assigned: Icons.viewAssigned, unread: Icons.viewUnread, waiting: Icons.viewWaiting, snoozed: Icons.snooze };
 
 /**
  * The number beside a view: unread messages for "all" and "unread" (what Mail counts), the threads themselves for
- * "assigned" and "waiting" (a to-do list: they are worked on whether read or not). Nothing when zero.
+ * "assigned", "waiting" and "snoozed" (a to-do list: they are worked on whether read or not). Nothing when zero.
  */
 function viewCount(view: InboxView, counts: ViewCounts | null): string | null {
   const c = counts?.[view];
   if (!c) return null;
   const n = view === "all" || view === "unread" ? c.unread : c.threads;
   return n > 0 ? badge(n, c.capped) : null;
+}
+
+/** A tag's number: its unread messages, like a mailbox (its threads are not a to-do list). */
+function tagCount(id: string, counts: ViewCounts | null): string | null {
+  const c = counts?.tags?.[id];
+  const n = c?.unread ?? 0;
+  return n > 0 ? badge(n) : null;
 }
 
 export function HomeScreen() {
@@ -35,6 +43,15 @@ export function HomeScreen() {
   const counts = useViewCounts();
   const conn = useConnectionState();
   const compose = () => router.push("/compose");
+  const hue = useTagColors();
+  const { tags: allTags } = useTagIndex();
+  const order = vm.mailboxes.map((b) => b.name);
+  const tags = byMailbox(allTags, order).flatMap((g) => g.tags);
+  const manyBoxes = new Set(tags.map((x) => x.mailbox)).size > 1;
+  const boxName = (name: string) => {
+    const b = vm.mailboxes.find((m) => m.name === name);
+    return b ? (b.displayName ?? b.address) : name;
+  };
 
   let body;
   if (vm.status === "loading") body = <Loading />;
@@ -47,7 +64,7 @@ export function HomeScreen() {
       <Host style={{ flex: 1 }} seedColor={c.tint}>
         <FieldGroup>
           <FieldGroup.Section title={t("home.views")}>
-            {(["all", "assigned", "unread", "waiting"] as const).map((v) => (
+            {(["all", "assigned", "unread", "waiting", "snoozed"] as const).map((v) => (
               <ListItem
                 key={v}
                 onPress={() => router.push({ pathname: "/view/[view]", params: { view: v } })}
@@ -74,6 +91,23 @@ export function HomeScreen() {
               </ListItem>
             ))}
           </FieldGroup.Section>
+          {tags.length ? (
+            <FieldGroup.Section title={t("home.tags")}>
+              {tags.map((x) => (
+                <ListItem
+                  key={x._id}
+                  onPress={() => router.push({ pathname: "/view/[view]", params: { view: "all", tag: x._id, title: x.name } })}
+                  leading={<NativeIcon icon={Icons.tagFill} color={hue(tagColor(x.color))} />}
+                  // The mailbox only when tags of more than one show here (two "Urgente" otherwise read the same).
+                  supportingText={manyBoxes ? <Text textStyle={{ color: c.secondaryText, fontSize: type.subheadline.fontSize }}>{boxName(x.mailbox)}</Text> : undefined}
+                  trailing={trailing(tagCount(x._id, counts))}
+                  testID={`tag-${x._id}`}
+                >
+                  <Text>{x.name}</Text>
+                </ListItem>
+              ))}
+            </FieldGroup.Section>
+          ) : null}
           {offline ? (
             <FieldGroup.Section>
               <ListItem

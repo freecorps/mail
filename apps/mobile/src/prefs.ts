@@ -27,6 +27,15 @@ export function deviceClock24(): boolean {
   }
 }
 
+/** The device's time zone (IANA), for "Amanhã, 08:00" and the snooze / send-later presets; undefined: the JS default. */
+export function deviceTimeZone(): string | undefined {
+  try {
+    return getCalendars()[0]?.timeZone ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The app's language outside React (notification actions in the background): the stored override, else the device's. */
 export async function storedLocale(): Promise<Locale> {
   const v = await AsyncStorage.getItem(KEY).catch(() => null);

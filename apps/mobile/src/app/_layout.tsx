@@ -79,6 +79,10 @@ function RootStack() {
             }
           />
           <Stack.Screen name="assign" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true }} />
+          {/* Snooze / send later (presets and a date picker), a thread's tags, its activity: sheets over whatever opened them. */}
+          <Stack.Screen name="when" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetInitialDetentIndex: process.env.EXPO_OS === "ios" ? 1 : 0, sheetGrabberVisible: true }} />
+          <Stack.Screen name="tags" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true }} />
+          <Stack.Screen name="activity" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.6, 1], sheetGrabberVisible: true }} />
         </Stack.Protected>
         <Stack.Protected guard={phase === "signedOut"}>
           <Stack.Screen name="sign-in" />

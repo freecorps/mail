@@ -20,6 +20,13 @@ export interface RowMenuAction {
   label: string;
   icon: IconSpec;
   destructive?: boolean;
+  /** Its time or detail, under the label (iOS). */
+  subtitle?: string;
+  /**
+   * A submenu (iOS: a nested UIMenu, like "Adiar ›" with its presets). Android's long-press menu stays one level: the
+   * item itself runs `onPress` there (it opens a sheet with the same choices).
+   */
+  submenu?: RowMenuAction[];
   onPress(): void;
 }
 
@@ -79,6 +86,8 @@ export interface MenuItem {
   checked?: boolean;
   destructive?: boolean;
   disabled?: boolean;
+  /** A submenu: a nested SwiftUI Menu on iOS, a cascading Material menu on Android (the item opens its level). */
+  submenu?: MenuItem[];
   onPress(): void;
 }
 
@@ -91,4 +100,19 @@ export interface MenuButtonProps {
   items: MenuItem[];
   /** Spoken name when it differs from `label` ("Status: Aberta"). */
   accessibilityLabel?: string;
+}
+
+export interface DateTimePickerProps {
+  label: string;
+  /** The time shown (ms). */
+  value: number;
+  min: number;
+  max: number;
+  /** The time as text ("amanhã, 08:00"), for the Android row. */
+  detail: string;
+  /** Android: open the dialogs at once. */
+  autoOpen?: boolean;
+  onChange(at: number): void;
+  /** Android: the time dialog was confirmed (iOS confirms from the sheet's toolbar). */
+  onCommit(at: number): void;
 }

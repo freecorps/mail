@@ -37,6 +37,8 @@ function semantic() {
     onSwipeRead: pick("#FFFFFF", Color.android.dynamic.onPrimaryContainer, "#FFFFFF"),
     swipeArchive: pick(Color.ios.systemPurple, Color.android.dynamic.tertiaryContainer, "#af52de"),
     onSwipeArchive: pick("#FFFFFF", Color.android.dynamic.onTertiaryContainer, "#FFFFFF"),
+    swipeSnooze: pick(Color.ios.systemIndigo, Color.android.dynamic.tertiary, "#5856d6"),
+    onSwipeSnooze: pick("#FFFFFF", Color.android.dynamic.onTertiary, "#FFFFFF"),
     swipeAssign: pick(Color.ios.systemGray, Color.android.dynamic.secondaryContainer, "#8e8e93"),
     onSwipeAssign: pick("#FFFFFF", Color.android.dynamic.onSecondaryContainer, "#FFFFFF"),
     /** A selected row in Edit mode (on Android not secondaryContainer: the monogram is that color). */

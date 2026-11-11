@@ -81,3 +81,19 @@ export function parseSenders(raw: string | null): Set<string> {
     return new Set();
   }
 }
+
+/**
+ * What the member wrote in a sent message, for "Editar" on a scheduled one: its text without the signature ("-- ")
+ * and the quoted history (the attribution line and what follows, or "> " lines), which the send adds again.
+ */
+export function writtenText(text: string): string {
+  const out: string[] = [];
+  for (const line of (text || "").split(/\r?\n/)) {
+    if (line === "-- " || line === "--") break;
+    if (/^(em|on)\s.+(escreveu|wrote)\s*:\s*$/i.test(line.trim())) break;
+    if (/^-{2,}\s*(mensagem encaminhada|forwarded message)/i.test(line.trim())) break;
+    if (line.trimStart().startsWith(">")) continue;
+    out.push(line);
+  }
+  return out.join("\n").replace(/\s+$/, "");
+}

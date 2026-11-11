@@ -12,4 +12,6 @@ export const haptics = {
   light: () => (ios ? quiet(Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)) : undefined),
   /** Something went out (a reply, a new conversation). */
   success: () => (ios ? quiet(Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)) : undefined),
+  /** Something could not be done as asked (a time out of range). */
+  warning: () => (ios ? quiet(Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)) : undefined),
 };

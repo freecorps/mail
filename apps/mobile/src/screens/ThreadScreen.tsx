@@ -5,7 +5,7 @@
 // with a reply FAB) has Arquivar, Atribuir, Responder and Mais (encaminhar, não lida, copiar link, excluir). Remote
 // images wait behind one compact row ("Carregar imagens", or always for that sender on this device). Responder opens
 // the reply bar in place of the toolbar.
-import { useQuery } from "@freecorps/ember-react-native";
+import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Linking from "expo-linking";
 import { router, Stack, useIsFocused, useIsPreview, useLocalSearchParams } from "expo-router";
@@ -18,7 +18,7 @@ import { Icons, Symbol, useToolbarIcon, type IconSpec } from "../components/icon
 import { CollapsedMessage, ExpandedMessage } from "../components/message-item";
 import { ReplyFab } from "../components/native/reply-fab";
 import { QuickReply, threadDraft } from "../components/quick-reply";
-import { ConnectionBanner, EmptyState, Loading, MenuButton, Separator, ThemedText } from "../components/ui";
+import { ConnectionBanner, EmptyState, Loading, MenuButton, NativeButton, Separator, ThemedText } from "../components/ui";
 import type { MenuItem } from "../components/native";
 import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
@@ -28,11 +28,23 @@ import { replyAllCc } from "../model/forward";
 import { useMembers, useThread, type MessageItem } from "../model/thread";
 import type { Message, Thread } from "../api";
 import { useThreadNeighbors } from "../model/thread-order";
-import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, senderKey, STATUS_CHOICES } from "../model/thread-view";
+import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, senderKey, STATUS_CHOICES, writtenText } from "../model/thread-view";
 import { useOutbox, type OutboxEntry } from "../model/outbox";
 import { isPersonal, useMailboxes } from "../model/threads";
 import { notify, offerUndoArchive } from "../model/undo";
-import { allowImagesFrom, useImageSenders } from "../prefs";
+import { allowImagesFrom, deviceTimeZone, useImageSenders } from "../prefs";
+import { ActivityLine } from "../components/activity-line";
+import { TagChips } from "../components/tag-chips";
+import { describe, mergeTimeline, quiet, type TimelineItem } from "../model/activity";
+import { presenceLine } from "../model/presence";
+import { scheduledOf } from "../model/schedule";
+import { useSnooze } from "../model/snooze";
+import { threadTags } from "../model/tags";
+import { useTagIndex } from "../model/threads";
+import { keepUndoneCompose } from "../model/undone-compose";
+import { forwardedFiles } from "../model/forward";
+import { formatAgo, formatLater } from "../lib/when";
+import { usePresence } from "../presence";
 import { corner, radius, screenEdge, spacing, useColors } from "../theme";
 
 const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
@@ -58,6 +70,19 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   const focused = useIsFocused();
   const vm = useThread(threadId, { markOnOpen: focused && !preview });
   const thread = vm.thread;
+  const { locale, clock24 } = useI18n();
+  const zone = deviceTimeZone();
+  // Tags, the timeline, scheduled sends and who else is here: none of it in a peek.
+  const { index: tagIndex } = useTagIndex();
+  const activity = useQuery(api.inbox.activity, preview ? "skip" : { threadId });
+  const scheduled = useQuery(api.inbox.scheduled, preview ? "skip" : { threadId });
+  const present = useQuery(api.inbox.presence, preview ? "skip" : { threadId });
+  // This member is viewing it while it is on screen (the bar and the composer say "replying" themselves).
+  usePresence(threadId, "view", focused && !preview ? "viewing" : null);
+  const snoozer = useSnooze();
+  const unsnoozeM = useMutation(api.inbox.unsnooze);
+  const cancelM = useMutation(api.inbox.cancelScheduled);
+  const { online } = useConnectionState();
   const me = useQuery(api.inbox.me, {});
   const boxes = useMailboxes().mailboxes;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
@@ -186,6 +211,54 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         },
       },
     ]);
+  const openTags = () => thread && router.push({ pathname: "/tags", params: { threadId, mailbox: thread.mailbox } });
+  const openActivity = () => router.push({ pathname: "/activity", params: { threadId } });
+  // Snoozed from here, the conversation closes like an archive ("Desfazer" brings it back).
+  const snoozeTarget = () => [{ threadId, until: thread?.snoozed ? (thread.snoozedUntil ?? null) : null }];
+  const snoozeAt = (at: number) => {
+    snoozer.run(snoozeTarget(), at);
+    router.back();
+  };
+  const snoozeCustom = () => snoozer.ask(snoozeTarget(), { custom: true, then: () => router.back() });
+  const unsnooze = () => {
+    haptics.light();
+    void unsnoozeM({ threadId }).catch(() => {});
+  };
+  const cancelSend = (emailId: string) => {
+    haptics.light();
+    cancelM({ emailId })
+      .then((r) => notify(r.ok ? t("thread.sendCanceled") : t("thread.alreadySent")))
+      .catch(() => notify(t("common.error")));
+  };
+  // "Editar": cancel it (online, to know it did not go), then the composer opens with what it had.
+  const editSend = async (m: Message, emailId: string) => {
+    if (!thread) return;
+    try {
+      const r = await cancelM({ emailId });
+      if (!r.ok) return notify(t("thread.alreadySent"));
+    } catch {
+      return notify(t("common.error"));
+    }
+    const files = forwardedFiles(m.attachments).map((a) => ({ file: a.file, filename: a.filename, contentType: a.contentType }));
+    const addr = (a: { email: string; name?: string }) => (a.name ? `${a.name} <${a.email}>` : a.email);
+    const others = vm.items.some((i) => i.message._id !== m._id);
+    const restore = keepUndoneCompose({
+      mailbox: thread.mailbox,
+      ...(others ? { threadId } : {}),
+      to: m.to.map(addr),
+      cc: m.cc.map(addr),
+      bcc: (m.bcc ?? []).map(addr),
+      subject: m.subject,
+      text: writtenText(m.text),
+      attachments: files,
+    });
+    if (others) router.push({ pathname: "/compose", params: { threadId, mode: m.cc.length ? "all" : "reply", restore } });
+    else {
+      // A new conversation canceled before it went is gone: it reopens as a new message.
+      router.back();
+      router.push({ pathname: "/compose", params: { mailbox: thread.mailbox, restore } });
+    }
+  };
   const go = (to: { threadId: string; mailbox: string } | null) => {
     if (!to) return;
     haptics.selection();
@@ -208,6 +281,11 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   const unreadIcon = useToolbarIcon(Icons.markUnread, tint);
   const linkIcon = useToolbarIcon(Icons.link, tint);
   const trashIcon = useToolbarIcon(Icons.trash, tint);
+  const tagIcon = useToolbarIcon(Icons.tag, tint);
+  const snoozeIcon = useToolbarIcon(Icons.snooze, tint);
+  const wakeIcon = useToolbarIcon(Icons.wake, tint);
+  const pickIcon = useToolbarIcon(Icons.calendar, tint);
+  const activityIcon = useToolbarIcon(Icons.activity, tint);
   const icons = !!(prevIcon && nextIcon && archiveIcon && assignIcon && replyIcon && moreIcon);
 
   const chrome = (
@@ -252,6 +330,28 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
             <Stack.Toolbar.MenuAction icon={unread ? readIcon : unreadIcon} onPress={vm.toggleRead}>
               {unread ? t("thread.markRead") : t("thread.markUnread")}
             </Stack.Toolbar.MenuAction>
+            <Stack.Toolbar.MenuAction icon={tagIcon} onPress={openTags}>
+              {t("thread.tags")}
+            </Stack.Toolbar.MenuAction>
+            {thread.snoozed ? (
+              <Stack.Toolbar.MenuAction icon={wakeIcon} onPress={unsnooze}>
+                {t("thread.unsnooze")}
+              </Stack.Toolbar.MenuAction>
+            ) : (
+              <Stack.Toolbar.Menu icon={snoozeIcon} title={t("thread.snooze")}>
+                {snoozer.choices().map((x) => (
+                  <Stack.Toolbar.MenuAction key={x.key} icon={snoozeIcon} subtitle={x.detail} onPress={() => snoozeAt(x.at)}>
+                    {x.label}
+                  </Stack.Toolbar.MenuAction>
+                ))}
+                <Stack.Toolbar.MenuAction icon={pickIcon} onPress={snoozeCustom}>
+                  {t("when.pick")}
+                </Stack.Toolbar.MenuAction>
+              </Stack.Toolbar.Menu>
+            )}
+            <Stack.Toolbar.MenuAction icon={activityIcon} onPress={openActivity}>
+              {t("thread.activity")}
+            </Stack.Toolbar.MenuAction>
             <Stack.Toolbar.MenuAction icon={linkIcon} onPress={copyLink}>
               {t("thread.copyLink")}
             </Stack.Toolbar.MenuAction>
@@ -288,6 +388,8 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     : // The team list needs a connection: the sheet says so.
       [{ key: "sheet", label: t("thread.assignEllipsis"), icon: Icons.assign, onPress: assignSheet }];
 
+  const chips = threadTags(thread.tags, tagIndex);
+  const here = presenceLine(present, t);
   const header = (
     <View style={styles.header}>
       <ConnectionBanner />
@@ -297,6 +399,14 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
       <ThemedText variant="footnote" tone="secondary" numberOfLines={1} style={styles.context}>
         {own ? t("thread.context", { contact: contactOf(thread), mailbox: own }) : contactOf(thread)}
       </ThemedText>
+      {here && !preview ? (
+        <View style={styles.presence} accessibilityLiveRegion="polite">
+          <Symbol icon={here.state === "replying" ? Icons.typing : Icons.viewing} size={13} color={here.state === "replying" ? c.tint : c.secondaryLabel} />
+          <ThemedText variant="footnote" tone={here.state === "replying" ? "tint" : "secondary"} numberOfLines={1} style={styles.grow}>
+            {here.text}
+          </ThemedText>
+        </View>
+      ) : null}
       {preview ? null : (
         <View style={styles.menus}>
           <MenuButton label={t(`status.${thread.status}`)} icon={STATUS_ICON[thread.status]} items={statusItems} accessibilityLabel={t("thread.statusA11y", { status: t(`status.${thread.status}`) })} />
@@ -310,6 +420,20 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
           )}
         </View>
       )}
+      {chips.length && !preview ? (
+        <View style={styles.tags}>
+          <TagChips tags={chips} onPress={openTags} />
+        </View>
+      ) : null}
+      {thread.snoozed && thread.snoozedUntil && !preview ? (
+        <View style={[styles.images, { backgroundColor: c.fill }]}>
+          <Symbol icon={Icons.snooze} size={17} color={c.secondaryLabel} />
+          <ThemedText variant="footnote" tone="secondary" style={styles.grow} numberOfLines={2}>
+            {t("thread.snoozedUntil", { when: formatLater(thread.snoozedUntil, Date.now(), locale, clock24, zone) })}
+          </ThemedText>
+          <NativeButton label={t("thread.unsnooze")} onPress={unsnooze} />
+        </View>
+      ) : null}
       {!preview && !loadAll && blockedSenders.length ? (
         <View style={[styles.images, { backgroundColor: c.fill }]}>
           <Symbol icon={Icons.image} size={17} color={c.secondaryLabel} />
@@ -339,7 +463,9 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   );
 
   const now = Date.now();
-  const renderItem = ({ item }: { item: MessageItem }) => {
+  const renderItem = ({ item: row }: { item: TimelineItem<MessageItem> }) => {
+    if (row.kind === "event") return <ActivityLine event={row.event} ago={formatAgo(row.event.at, now, locale, clock24)} />;
+    const item = row.item;
     const id = item.message._id;
     // A preview shows only the newest message, so the peek is the end of the conversation.
     const open = preview ? id === latest : isExpanded(id, { latest, opened, all, pending: item.pending });
@@ -361,21 +487,40 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         preview={preview}
         onCollapse={id === latest || preview ? undefined : collapse}
         menu={menu}
+        scheduled={m.scheduledFor !== undefined && !preview ? scheduledProps(m) : undefined}
       />
     );
   };
 
-  const items = preview ? vm.items.filter((i) => i.message._id === latest) : waiting.length ? [...vm.items, ...waiting.map((e) => outboxItem(e, thread, me?.name ?? null, own))] : vm.items;
+  const scheduledProps = (m: Message) => {
+    const s = scheduledOf(scheduled, m);
+    return {
+      when: formatLater(m.scheduledFor!, now, locale, clock24, zone),
+      // Known to the server (it has an email id): cancel works offline too (queued); editing needs to know it did not go.
+      onCancel: s ? () => cancelSend(s.emailId) : undefined,
+      onEdit: s && online ? () => void editSend(m, s.emailId) : undefined,
+    };
+  };
+  const messages = preview ? vm.items.filter((i) => i.message._id === latest) : waiting.length ? [...vm.items, ...waiting.map((e) => outboxItem(e, thread, me?.name ?? null, own))] : vm.items;
+  // The quiet timeline between the messages (assignments, tags, snoozes, status by hand), by time.
+  const events = preview
+    ? []
+    : (activity ?? [])
+        .filter(quiet)
+        .map((e) => describe(e, { t, me: me?.userId ?? null, when: (at) => formatLater(at, now, locale, clock24, zone) }))
+        .filter((e): e is NonNullable<typeof e> => e !== null);
+  const items = mergeTimeline(messages, (i) => i.message.at, events);
   return (
     <View style={[styles.grow, { backgroundColor: c.background }]}>
       {preview ? null : chrome}
       <FlatList
         data={items}
-        keyExtractor={(i) => i.message._id}
+        keyExtractor={(i) => (i.kind === "message" ? i.item.message._id : `ev:${i.event.id}`)}
         ListHeaderComponent={header}
         renderItem={renderItem}
-        extraData={{ opened, all, loadAll, allowed }}
-        ItemSeparatorComponent={Separator}
+        extraData={{ opened, all, loadAll, allowed, scheduled, online }}
+        // A hairline after each message; a timeline line is its own divider.
+        ItemSeparatorComponent={({ leadingItem }: { leadingItem?: TimelineItem<MessageItem> }) => (leadingItem?.kind === "message" ? <Separator /> : null)}
         // The list rides the keyboard with the reply bar (react-native-keyboard-controller's chat scroll view), so the
         // end of the conversation stays above both.
         renderScrollComponent={(props) => <KeyboardChatScrollView {...props} offset={insets.bottom} />}
@@ -432,6 +577,8 @@ const styles = StyleSheet.create({
   header: { paddingBottom: 0 },
   subject: { paddingHorizontal: screenEdge, paddingTop: spacing.md },
   context: { paddingHorizontal: screenEdge, paddingTop: spacing.xs },
+  tags: { paddingHorizontal: screenEdge, paddingTop: spacing.md },
+  presence: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: screenEdge, paddingTop: spacing.xs },
   menus: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingTop: spacing.md, flexWrap: "wrap" },
   images: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: screenEdge, marginTop: spacing.md, paddingLeft: spacing.md, paddingRight: spacing.xs, paddingVertical: spacing.xs, ...corner(radius.sm) },
   expandRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.sm },

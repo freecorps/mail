@@ -2,7 +2,7 @@
 // Symbol. A choice shows the system checkmark (a Toggle inside the menu); destructive items are red.
 import { Host } from "@expo/ui";
 import { Button, Menu, Toggle } from "@expo/ui/swift-ui";
-import { accessibilityLabel, buttonBorderShape, buttonStyle, controlSize, labelStyle, menuIndicator, tint } from "@expo/ui/swift-ui/modifiers";
+import { accessibilityLabel, buttonBorderShape, disabled, buttonStyle, controlSize, labelStyle, menuIndicator, tint } from "@expo/ui/swift-ui/modifiers";
 import { useColors } from "../../theme";
 import type { MenuButtonProps } from "./types";
 
@@ -21,10 +21,16 @@ export function MenuButton({ label, icon, variant = "chip", items, accessibility
         ]}
       >
         {items.map((i) =>
-          i.checked !== undefined ? (
+          i.submenu ? (
+            <Menu key={i.key} label={i.label} {...(i.icon ? { systemImage: i.icon.ios } : {})}>
+              {i.submenu.map((s) => (
+                <Button key={s.key} label={s.label} {...(s.icon ? { systemImage: s.icon.ios } : {})} modifiers={s.disabled ? [disabled(true)] : []} onPress={s.onPress} />
+              ))}
+            </Menu>
+          ) : i.checked !== undefined ? (
             <Toggle key={i.key} label={i.label} isOn={i.checked} {...(i.icon ? { systemImage: i.icon.ios } : {})} onIsOnChange={() => i.onPress()} />
           ) : (
-            <Button key={i.key} label={i.label} {...(i.icon ? { systemImage: i.icon.ios } : {})} role={i.destructive ? "destructive" : "default"} onPress={i.onPress} />
+            <Button key={i.key} label={i.label} {...(i.icon ? { systemImage: i.icon.ios } : {})} role={i.destructive ? "destructive" : "default"} modifiers={i.disabled ? [disabled(true)] : []} onPress={i.onPress} />
           ),
         )}
       </Menu>
