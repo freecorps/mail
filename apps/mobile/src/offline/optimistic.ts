@@ -2,7 +2,7 @@
 // restored after a restart is still shown: the reply appears in the thread with a "sending" mark, the thread moves to
 // "waiting", unread counters drop, and the server's answer replaces all of it when the queue drains.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-react-native";
-import { INBOX_VIEWS, type Mailbox, type Message, type Page, type SentArgs, type SentThread, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCounts, type ViewPage } from "../api";
+import { INBOX_VIEWS, type Draft, type SaveDraftArgs, type Mailbox, type Message, type Page, type SentArgs, type SentThread, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCounts, type ViewPage } from "../api";
 import { viewKeeps } from "./replica";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
@@ -193,6 +193,44 @@ function mailboxOf(store: OptimisticLocalStore, threadId: string): string | null
   return null;
 }
 
+/** Removes a draft from every cached `inbox:drafts` answer. */
+function dropDraft(store: Store, id: string) {
+  for (const { args, value } of store.getAllQueries<any>("inbox:drafts") as Array<{ args: { threadId?: string }; value: Draft[] | undefined }>) {
+    if (value?.some((d) => d._id === id)) store.setQuery<any>("inbox:drafts", args, value.filter((d) => d._id !== id));
+  }
+}
+
+/** Puts a saved draft into the cached `inbox:drafts` answers it belongs to (the server's upsert rules), newest first. */
+function saveDraftLocally(store: Store, a: SaveDraftArgs, at: number) {
+  const cached = store.getAllQueries<any>("inbox:drafts") as Array<{ args: { threadId?: string }; value: Draft[] | undefined }>;
+  // By id; a reply, note or forward also by thread and kind (one per thread and kind on the server).
+  const same = (d: Draft) => (a.id ? d._id === a.id : a.kind !== "compose" && d.threadId === a.threadId && d.kind === a.kind);
+  // One id for the draft in every list it shows in.
+  const id = a.id ?? cached.flatMap((q) => q.value ?? []).find(same)?._id ?? tempId(at);
+  for (const { args, value } of cached) {
+    if (!value || (args.threadId !== undefined && args.threadId !== a.threadId)) continue;
+    const prev = value.find(same);
+    const draft: Draft = {
+      _id: id,
+      _creationTime: prev?._creationTime ?? at,
+      userId: prev?.userId ?? "",
+      kind: a.kind,
+      ...(a.threadId ? { threadId: a.threadId } : {}),
+      ...(a.messageId ? { messageId: a.messageId } : {}),
+      mailbox: a.mailbox ?? prev?.mailbox ?? "",
+      to: a.to ?? [],
+      cc: a.cc ?? [],
+      bcc: a.bcc ?? [],
+      subject: a.subject ?? "",
+      text: a.text,
+      ...(a.bodyHtml ? { bodyHtml: a.bodyHtml } : {}),
+      attachments: a.attachments ?? [],
+      updatedAt: at,
+    };
+    store.setQuery<any>("inbox:drafts", args, [draft, ...value.filter((d) => !same(d))]);
+  }
+}
+
 export function inboxOptimisticUpdates(now: () => number = Date.now): Record<string, OptimisticUpdate> {
   const updates: Record<string, OptimisticUpdate> = {
     "inbox:reply": (store, args: { threadId: string; text: string }) => append(store, args, "outbound", now()),
@@ -256,6 +294,10 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
       sentNow(store, thread, at);
     },
   };
+  // Drafts: the cached `inbox:drafts` answers follow saves, deletes and sends, so a draft written offline is there when
+  // the conversation or the composer opens again (the queued mutations reach the server later, in order).
+  updates["inbox:saveDraft"] = (store, args: SaveDraftArgs) => saveDraftLocally(store, args, now());
+  updates["inbox:deleteDraft"] = (store, { id }: { id: string }) => dropDraft(store, id);
   // A deleted conversation leaves every loaded list at once (the conversation screen has already closed).
   updates["inbox:deleteThread"] = (store, { threadId }: { threadId: string }) => {
     const found = patchLoaded(store, threadId, (t) => t);
@@ -290,5 +332,13 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
     const mailbox = mailboxOf(store, args.threadId);
     if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text }, rec);
   };
+  // A send with `draftId` deletes that draft (on the server in the same transaction; here at once).
+  for (const name of ["inbox:reply", "inbox:note", "inbox:compose", "inbox:forward"] as const) {
+    const base = updates[name]!;
+    updates[name] = (store, args: { draftId?: string }, rec) => {
+      base(store, args, rec);
+      if (args.draftId) dropDraft(store, args.draftId);
+    };
+  }
   return updates;
 }

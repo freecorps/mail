@@ -82,10 +82,13 @@ API, inbox for `support@`/`privacy@`, mobile app. MIT. Docs for people: `README.
 | Segmented thread filter | iOS: a `Stack.Toolbar.Menu` (UIMenu) in the navigation bar; Android: Compose `FilterChip`s in the list header, compose as a `FloatingActionButton` (`native/list-chrome.*`) |
 | Long-press ActionSheet/Alert | `native/row-menu.*`: `Link.Menu` (UIContextMenu) on iOS, Compose `DropdownMenu` on Android; also exposed as accessibility actions |
 | `EmptyState` | `native/empty-state.*`: SwiftUI `ContentUnavailableView`; Material layout on Android (Compose has no equivalent) |
+| Status / assignee / mode / "⋯" menus | `native/menu-button.*`: SwiftUI `Menu` (a `Toggle` per choice for the checkmark); Compose `DropdownMenu` opened by an `AssistChip` or an `IconButton` |
+| Conversation actions | `Stack.Toolbar placement="bottom"` (iOS toolbar; Material floating toolbar on Android) + `native/reply-fab.android.tsx` |
 | Pastel avatars, status pills in rows | `thread-row.tsx`: neutral monogram (grey gradient on iOS, Material tonal on Android), status as small SF Symbols / Material Symbols, the assignee as a mini monogram |
 | (new) list actions | swipe actions in `swipe-row.tsx` (Gesture Handler + Reanimated; no native swipe exists for `FlatList` rows), `Link.Preview` in `native/row-menu.ios`, Edit mode with `Stack.Toolbar` (bottom) while the tab bar hides, undo in `native/undo-banner.*` (Compose `SnackbarHost` on Android, a capsule on iOS: no system toast) |
 
-Kept custom on purpose (no native control on either platform): `Avatar`, `UnreadDot`, `StatusPill`/`Chip` (small
+Kept custom on purpose (no native control on either platform): the composer's recipient tokens (`token-field.tsx`;
+UISearchToken is for search bars only), `Avatar`, `UnreadDot`, `StatusPill`/`Chip` (small
 tinted labels inside virtualized `FlatList` rows), `ConnectionBanner` in list headers (the mailbox list shows the
 same state as a native list row), attachment tiles and the message cards. The thread list stays a `FlatList`
 (`@expo/ui` `List` is for short fixed lists). Screenshots: `apps/mobile/docs/screenshots/`. Theme tokens live in

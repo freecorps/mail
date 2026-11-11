@@ -4,6 +4,7 @@ import { getCalendars, getLocales } from "expo-localization";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { pickLocale, type Locale } from "./i18n";
 import { DEFAULT_LIST_PREFS, parseListPrefs, type ListPrefs } from "./model/list-actions";
+import { DEFAULT_UNDO_SEND, parseUndoDelay, type UndoSendDelay } from "./model/outbox";
 import { parseSenders, senderKey } from "./model/thread-view";
 
 export type LanguagePref = "system" | Locale;
@@ -122,4 +123,37 @@ export function allowImagesFrom(email: string) {
   imageSenders = new Set([...imageSenders, key]);
   emitImages();
   AsyncStorage.setItem(IMAGES_KEY, JSON.stringify([...imageSenders])).catch(() => {});
+}
+
+// Undo send: how long a message waits before it goes out (0, 5, 10 or 20 s; default 5). Per device.
+const UNDO_KEY = "ember-mail:undo-send";
+let undoDelay: UndoSendDelay = DEFAULT_UNDO_SEND;
+let undoLoaded = false;
+let undoEdited = false;
+const undoListeners = new Set<() => void>();
+const subscribeUndo = (l: () => void) => {
+  if (!undoLoaded) {
+    undoLoaded = true;
+    AsyncStorage.getItem(UNDO_KEY)
+      .then((raw) => {
+        if (undoEdited) return;
+        undoDelay = parseUndoDelay(raw);
+        undoListeners.forEach((x) => x());
+      })
+      .catch(() => {});
+  }
+  undoListeners.add(l);
+  return () => void undoListeners.delete(l);
+};
+const getUndo = () => undoDelay;
+
+export function useUndoSendDelay(): UndoSendDelay {
+  return useSyncExternalStore(subscribeUndo, getUndo, getUndo);
+}
+
+export function setUndoSendDelay(v: UndoSendDelay) {
+  undoEdited = true;
+  undoDelay = v;
+  undoListeners.forEach((x) => x());
+  AsyncStorage.setItem(UNDO_KEY, String(v)).catch(() => {});
 }

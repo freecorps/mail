@@ -6,13 +6,14 @@ import { Stack } from "expo-router";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
-import { AccessibilityInfo, StyleSheet } from "react-native";
+import { AccessibilityInfo, AppState, StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useReducedMotion } from "react-native-reanimated";
 import { Loading, UndoBanner } from "../components/ui";
 import { emberClient } from "../ember";
 import { I18nProvider } from "../i18n";
+import { outbox } from "../model/outbox";
 import { undoStore } from "../model/undo";
 import { useLanguagePref } from "../prefs";
 import { SessionProvider, useSession } from "../session";
@@ -53,6 +54,13 @@ function RootStack() {
     const sub = AccessibilityInfo.addEventListener("screenReaderChanged", apply);
     return () => sub.remove();
   }, []);
+  // A message waiting out its undo delay goes now when the app leaves the screen (timers stop in the background).
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => {
+      if (s === "background") outbox.flushAll();
+    });
+    return () => sub.remove();
+  }, []);
   if (phase === "loading") return <Loading />;
   return (
     <>
@@ -60,7 +68,16 @@ function RootStack() {
         <Stack.Protected guard={phase === "member"}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="thread/[threadId]" options={{ ...list, headerShown: true, headerLargeTitleEnabled: false, title: "" }} />
-          <Stack.Screen name="compose" options={{ presentation: "modal", headerShown: true }} />
+          {/* The full composer: a form sheet with detents on iOS (pull down to half to read the conversation), the
+              Material full-screen dialog on Android (close and send in its top app bar). */}
+          <Stack.Screen
+            name="compose"
+            options={
+              process.env.EXPO_OS === "ios"
+                ? { presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.5, 1], sheetInitialDetentIndex: 1, sheetGrabberVisible: true }
+                : { presentation: "modal", headerShown: true }
+            }
+          />
           <Stack.Screen name="assign" options={{ presentation: "formSheet", headerShown: true, sheetAllowedDetents: [0.5, 1], sheetGrabberVisible: true }} />
         </Stack.Protected>
         <Stack.Protected guard={phase === "signedOut"}>

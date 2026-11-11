@@ -5,36 +5,35 @@
 // with a reply FAB) has Arquivar, Atribuir, Responder and Mais (encaminhar, não lida, copiar link, excluir). Remote
 // images wait behind one compact row ("Carregar imagens", or always for that sender on this device). Responder opens
 // the reply bar in place of the toolbar.
-import { Host, TextInput, type TextInputRef } from "@expo/ui";
 import { useQuery } from "@freecorps/ember-react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Linking from "expo-linking";
 import { router, Stack, useIsFocused, useIsPreview, useLocalSearchParams } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
-import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
-import Animated, { interpolate, useAnimatedStyle } from "react-native-reanimated";
+import { KeyboardChatScrollView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, type ThreadStatus } from "../api";
 import { Icons, Symbol, useToolbarIcon, type IconSpec } from "../components/icons";
 import { CollapsedMessage, ExpandedMessage } from "../components/message-item";
 import { ReplyFab } from "../components/native/reply-fab";
-import { UploadStrip } from "../components/Uploads";
-import { ConnectionBanner, EmptyState, IconButton, Loading, MenuButton, Segmented, Separator, ThemedText } from "../components/ui";
+import { QuickReply, threadDraft } from "../components/quick-reply";
+import { ConnectionBanner, EmptyState, Loading, MenuButton, Separator, ThemedText } from "../components/ui";
 import type { MenuItem } from "../components/native";
 import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
 import { contactOf } from "../lib/format";
 import { haptics } from "../lib/haptics";
-import { useUploadOne, useUploads, type AttachmentArg } from "../lib/uploads";
 import { replyAllCc } from "../model/forward";
 import { useMembers, useThread, type MessageItem } from "../model/thread";
+import type { Message, Thread } from "../api";
 import { useThreadNeighbors } from "../model/thread-order";
 import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, senderKey, STATUS_CHOICES } from "../model/thread-view";
-import { composerMode, isPersonal, useMailboxes } from "../model/threads";
+import { useOutbox, type OutboxEntry } from "../model/outbox";
+import { isPersonal, useMailboxes } from "../model/threads";
 import { notify, offerUndoArchive } from "../model/undo";
 import { allowImagesFrom, useImageSenders } from "../prefs";
-import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
+import { corner, radius, screenEdge, spacing, useColors } from "../theme";
 
 const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
   open: Icons.statusOpen,
@@ -112,15 +111,28 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   }, [vm.items, allowed]);
 
   // ---- Composer ---------------------------------------------------------------------------------------------------
-  const [composing, setComposing] = useState(false);
-  // Marked as spam (or otherwise closed to replies) while the bar is open: it closes, and nothing can be sent.
-  useEffect(() => {
-    if (!vm.canReply) setComposing(false);
-  }, [vm.canReply]);
+  // The quick reply bar replaces the toolbar while it is open: from Responder (focused), or when the member has a
+  // reply/note draft of this thread (restored, from this device or another).
+  const [opened_, setOpenBar] = useState<"focus" | null>(null);
+  const [closedDraft, setClosedDraft] = useState<string | null>(null);
+  const draft = threadDraft(useQuery(api.inbox.drafts, preview ? "skip" : { threadId }));
+  const barOpen = !preview && vm.canReply && (opened_ !== null || (!!draft && closedDraft !== `${draft._id}:${draft.updatedAt}`));
   const startReply = useCallback(() => {
     if (!vm.canReply) return;
-    setComposing(true);
+    setOpenBar("focus");
   }, [vm.canReply]);
+  const closeBar = useCallback(() => {
+    setOpenBar(null);
+    // A draft left in place keeps the bar; one the bar just closed over (sent, emptied) does not reopen it.
+    setClosedDraft(draft ? `${draft._id}:${draft.updatedAt}` : null);
+  }, [draft]);
+  const reopenBar = useCallback(() => {
+    setClosedDraft(null);
+    setOpenBar("focus");
+  }, []);
+  const insets = useSafeAreaInsets();
+  // What waits out the undo-send delay shows as pending messages at the end.
+  const waiting = useOutbox(threadId);
 
   // ---- Actions ----------------------------------------------------------------------------------------------------
   const lastMail = [...vm.items].reverse().find((i) => i.message.direction !== "note" && !i.pending)?.message ?? null;
@@ -195,7 +207,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
       ) : null}
-      {thread && icons && !composing ? (
+      {thread && icons && !barOpen ? (
         <Stack.Toolbar placement="bottom">
           <Stack.Toolbar.Button icon={archiveIcon} accessibilityLabel={closed ? t("thread.unarchive") : t("thread.archive")} onPress={archive}>
             {closed ? t("thread.unarchive") : t("thread.archive")}
@@ -337,10 +349,9 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     );
   };
 
-  const items = preview ? vm.items.filter((i) => i.message._id === latest) : vm.items;
+  const items = preview ? vm.items.filter((i) => i.message._id === latest) : waiting.length ? [...vm.items, ...waiting.map((e) => outboxItem(e, thread, me?.name ?? null))] : vm.items;
   return (
-    // Follows the keyboard's real frame (react-native-keyboard-controller), on both platforms.
-    <KeyboardAvoidingView style={[styles.grow, { backgroundColor: c.background }]} behavior="padding">
+    <View style={[styles.grow, { backgroundColor: c.background }]}>
       {preview ? null : chrome}
       <FlatList
         data={items}
@@ -349,137 +360,52 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         renderItem={renderItem}
         extraData={{ opened, all, loadAll, allowed }}
         ItemSeparatorComponent={Separator}
+        // The list rides the keyboard with the reply bar (react-native-keyboard-controller's chat scroll view), so the
+        // end of the conversation stays above both.
+        renderScrollComponent={(props) => <KeyboardChatScrollView {...props} offset={insets.bottom} />}
         // Android: room for the floating toolbar and the FAB over the end of the conversation.
-        contentContainerStyle={{ paddingBottom: !ios && !composing && !preview ? 96 : spacing.lg }}
+        contentContainerStyle={{ paddingBottom: !ios && !barOpen && !preview ? 96 : spacing.lg }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {preview ? null : composing && vm.canReply ? (
-        <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} onClose={() => setComposing(false)} />
+      {preview ? null : barOpen ? (
+        <QuickReply thread={thread} messages={vm.items.map((i) => i.message)} others={others} notes={!personal} focus={opened_ === "focus"} onClose={closeBar} onUndone={reopenBar} />
       ) : !vm.canReply ? (
-        // Android: above the floating toolbar, which covers the bottom of the screen.
-        <ThemedText variant="subheadline" tone="secondary" style={[styles.spam, !ios && thread && icons ? { paddingBottom: 96 } : null]}>
+        // Android: above the floating toolbar, which covers the bottom of the screen; iOS: above the home indicator.
+        <ThemedText variant="subheadline" tone="secondary" style={[styles.spam, { paddingBottom: !ios && thread && icons ? 96 : insets.bottom + spacing.lg }]}>
           {t("thread.spamNoReply")}
         </ThemedText>
       ) : !ios && icons ? (
         <ReplyFab label={t("thread.reply")} onPress={startReply} />
       ) : null}
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
-/**
- * The reply bar (opened by Responder; closes when it is left empty). `notes: false` (a personal mailbox): replies
- * only. `others`: who else was on the latest message received; "Todos" (reply all) copies them.
- */
-function Composer({
-  onReply,
-  onNote,
-  notes = true,
-  others = [],
-  onClose,
-}: {
-  onReply(text: string, attachments?: AttachmentArg[], cc?: string[]): Promise<unknown>;
-  onNote(text: string): Promise<unknown>;
-  notes?: boolean;
-  others?: string[];
-  onClose(): void;
-}) {
-  const c = useColors();
-  const { t } = useI18n();
-  const insets = useSafeAreaInsets();
-  const input = useRef<TextInputRef>(null);
-  const [picked, setMode] = useState<"reply" | "note">("reply");
-  const [all, setAll] = useState(false);
-  const mode = composerMode(picked, notes);
-  const replyAll = mode === "reply" && all && others.length > 0;
-  const [text, setText] = useState("");
-  const uploads = useUploads(useUploadOne());
-  const keyboard = useReanimatedKeyboardAnimation();
-  const rest = Math.max(insets.bottom, spacing.sm);
-  const inset = useAnimatedStyle(() => ({ paddingBottom: interpolate(keyboard.progress.value, [0, 1], [rest, spacing.sm]) }));
-  const placeholder = mode === "reply" ? t("thread.replyPlaceholder") : t("thread.notePlaceholder");
-  useEffect(() => {
-    const id = setTimeout(() => input.current?.focus(), 50);
-    return () => clearTimeout(id);
-  }, []);
-  // Left empty, the bar closes, but not when the field lost focus to one of the bar's own controls (the file picker,
-  // the mode control): the close waits a moment, focus coming back cancels it, and picking a file holds it.
-  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const holding = useRef(false);
-  const latest = useRef({ text, files: uploads.items.length });
-  latest.current = { text, files: uploads.items.length };
-  const cancelClose = () => {
-    if (closing.current) clearTimeout(closing.current);
-    closing.current = null;
+/** A reply waiting out its undo-send delay, shown as the conversation's next message (pending). */
+function outboxItem(e: OutboxEntry, t: Thread, author: string | null): MessageItem {
+  const message: Message = {
+    _id: e.id,
+    _creationTime: e.at,
+    threadId: t._id,
+    mailbox: t.mailbox,
+    direction: "outbound",
+    references: [],
+    from: { email: t.mailbox },
+    fromEmail: t.mailbox,
+    to: [{ email: t.contact, ...(t.contactName ? { name: t.contactName } : {}) }],
+    cc: (e.cc ?? []).map((x) => ({ email: x })),
+    subject: t.subject,
+    text: e.text,
+    snippet: e.text.slice(0, 140),
+    searchText: "",
+    attachments: [],
+    autoSubmitted: false,
+    at: e.at,
+    ...(author ? { author } : {}),
   };
-  useEffect(() => cancelClose, []);
-  const attach = () => {
-    holding.current = true;
-    void uploads
-      .add()
-      .catch(() => {})
-      .finally(() => {
-        holding.current = false;
-        input.current?.focus();
-      });
-  };
-  const send = () => {
-    const body = text.trim();
-    if (!body || (mode === "reply" && (uploads.busy || uploads.failed))) return;
-    const files = mode === "reply" ? uploads.attachments : [];
-    void (mode === "reply" ? onReply(body, files.length ? files : undefined, replyAll ? others : undefined) : onNote(body)).catch(() => {});
-    input.current?.clear();
-    setText("");
-    if (mode === "reply") uploads.clear();
-    haptics.success();
-    input.current?.blur();
-    onClose();
-  };
-  return (
-    <Animated.View style={[styles.composer, { backgroundColor: c.surface, borderTopColor: c.separator }, inset]}>
-      {notes || others.length > 0 ? (
-        <Segmented<"reply" | "all" | "note">
-          label={t("thread.modeLabel")}
-          value={replyAll ? "all" : mode}
-          onChange={(v) => {
-            setAll(v === "all");
-            setMode(v === "note" ? "note" : "reply");
-            input.current?.focus();
-          }}
-          options={[
-            { value: "reply", label: t("thread.replyMode") },
-            ...(others.length > 0 ? [{ value: "all" as const, label: t("thread.replyAll") }] : []),
-            ...(notes ? [{ value: "note" as const, label: t("thread.noteMode") }] : []),
-          ]}
-        />
-      ) : null}
-      {mode === "reply" ? <UploadStrip items={uploads.items} onRemove={uploads.remove} /> : null}
-      <View style={styles.inputRow}>
-        {mode === "reply" ? <IconButton icon={Icons.attach} label={t("attach.add")} onPress={attach} /> : null}
-        <Host matchContents={{ vertical: true }} style={[styles.input, { backgroundColor: mode === "note" ? c.noteBackground : c.groupedBackground, borderColor: c.separator }]}>
-          <TextInput
-            ref={input}
-            multiline
-            placeholder={placeholder}
-            accessibilityLabel={placeholder}
-            onChangeText={setText}
-            onFocus={cancelClose}
-            onBlur={() => {
-              cancelClose();
-              closing.current = setTimeout(() => {
-                if (!holding.current && !input.current?.isFocused() && !latest.current.text.trim() && !latest.current.files) onClose();
-              }, 600);
-            }}
-            textStyle={{ fontSize: type.callout.fontSize, color: c.labelText }}
-            style={styles.field}
-          />
-        </Host>
-        <IconButton icon={mode === "reply" ? Icons.send : Icons.note} label={mode === "reply" ? t("thread.send") : t("thread.addNote")} onPress={send} disabled={!text.trim() || (mode === "reply" && (uploads.busy || uploads.failed))} />
-      </View>
-    </Animated.View>
-  );
+  return { message, pending: true, cid: {} };
 }
 
 const styles = StyleSheet.create({
@@ -491,9 +417,5 @@ const styles = StyleSheet.create({
   images: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginHorizontal: screenEdge, marginTop: spacing.md, paddingLeft: spacing.md, paddingRight: spacing.xs, paddingVertical: spacing.xs, ...corner(radius.sm) },
   expandRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.sm },
   pressed: { opacity: 0.5 },
-  composer: { borderTopWidth: StyleSheet.hairlineWidth },
-  inputRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.sm, paddingHorizontal: spacing.md },
-  input: { flex: 1, minHeight: 40, maxHeight: 140, ...corner(radius.lg), borderWidth: StyleSheet.hairlineWidth, overflow: "hidden" },
-  field: { paddingHorizontal: spacing.md, paddingVertical: spacing.md },
   spam: { textAlign: "center", padding: spacing.lg },
 });

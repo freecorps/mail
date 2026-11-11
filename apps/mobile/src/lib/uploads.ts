@@ -70,6 +70,15 @@ export function useUploads(uploadOne: UploadOne, pick: () => Promise<PickedFile[
     aborts.current.get(id)?.abort();
     setItems((xs) => xs.filter((x) => x.id !== id));
   }, []);
+  /** Files already uploaded (a restored draft, an undone send): shown as ready. */
+  const restore = useCallback((files: readonly AttachmentArg[]) => {
+    if (!files.length) return;
+    setItems((xs) => {
+      const have = new Set(xs.map((x) => x.file));
+      const more = files.filter((f) => !have.has(f.file)).map((f) => ({ id: `u${++seq.current}`, name: f.filename, type: f.contentType, size: 0, loaded: 0, status: "ready" as const, file: f.file }));
+      return [...xs, ...more];
+    });
+  }, []);
   const clear = useCallback(() => {
     aborts.current.forEach((a) => a.abort());
     setItems([]);
@@ -78,5 +87,5 @@ export function useUploads(uploadOne: UploadOne, pick: () => Promise<PickedFile[
   const busy = items.some((x) => x.status === "uploading");
   const failed = items.some((x) => x.status === "failed");
   const attachments: AttachmentArg[] = items.filter((x) => x.status === "ready").map((x) => ({ file: x.file!, filename: x.name, contentType: x.type }));
-  return { items, add, remove, clear, busy, failed, attachments };
+  return { items, add, remove, restore, clear, busy, failed, attachments };
 }
