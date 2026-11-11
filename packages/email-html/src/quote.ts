@@ -64,7 +64,9 @@ function elementEnd(html: string, start: number): number {
 
 /**
  * The attribution line right before a quote ("<div>Em 5 de nov., Ana escreveu:</div><blockquote …>"): the cut moves
- * back to the tag that holds it, so the line collapses with the quote.
+ * back to the tag that holds it, so the line collapses with the quote. Only a real attribution moves it: the text from
+ * that tag to the quote starts with "On"/"Em"/… and ends with "wrote:"/"escreveu:"/… (a body that merely ends in
+ * "he wrote:" keeps its cut). Tag names match in any case (`<DIV>`).
  */
 function withAttribution(html: string, cut: number): number {
   const from = Math.max(0, cut - 600);
@@ -74,10 +76,14 @@ function withAttribution(html: string, cut: number): number {
   const words = new RegExp(SAID, "gi");
   for (let m = words.exec(before); m; m = words.exec(before)) last = m.index;
   if (last < 0) return cut;
-  // The last opening div/p/span (or a <br>) before the "…wrote:" text starts the attribution.
-  const head = before.slice(0, last);
-  const open = Math.max(head.lastIndexOf("<div"), head.lastIndexOf("<p"), head.lastIndexOf("<span"), head.lastIndexOf("<br"));
-  return open >= 0 ? from + open : cut;
+  // The opening div/p/span (or a <br>) before the "…wrote:" text whose text starts the attribution; the closest first
+  // (`<div>On Tue, <span>Ana</span> wrote:</div>` walks back past the span to the div).
+  const opens = [...before.slice(0, last).matchAll(/<(?:div|p|span|br)\b/gi)].map((m) => m.index);
+  for (let i = opens.length - 1; i >= 0; i--) {
+    const line = visibleText(before.slice(opens[i]!));
+    if (ATTRIBUTION_START.test(line)) return from + opens[i]!;
+  }
+  return cut;
 }
 
 /** Splits a trailing quote off an HTML message; null when there is none (or nothing would be left above it). */
@@ -101,7 +107,9 @@ export function splitQuotedHtml(html: string): QuoteSplit | null {
 }
 
 const QUOTED = /^\s*>/;
-const OUTLOOK_SEPARATOR = /^\s*-{2,}\s*(original message|mensagem original|mensaje original|message d'origine|ursprüngliche nachricht)\s*-{2,}\s*$/i;
+/** Outlook's "-----Original Message-----", in the languages a support inbox meets most. */
+const ORIGINAL = "(?:original message|mensagem original|mensaje original|message d'origine|ursprüngliche nachricht)";
+const OUTLOOK_SEPARATOR = new RegExp(`^\\s*-{2,}\\s*${ORIGINAL}\\s*-{2,}\\s*$`, "i");
 const UNDERSCORES = /^\s*_{10,}\s*$/;
 const HEADER_FROM = /^\s*(from|de|von|da)\s*:/i;
 const HEADER_NEXT = /^\s*(sent|date|enviad[oa](?: em)?|data|fecha|gesendet|envoyé|inviato|to|para|subject|assunto)\s*:/i;
@@ -141,7 +149,7 @@ export function splitQuotedText(text: string): QuoteSplit | null {
 
 const SNIPPET_SAID = new RegExp(SAID, "gi");
 const SNIPPET_START = /\s(?:>\s*)?(?:on|em|el|le|am|il|op)\s/gi;
-const SNIPPET_SEPARATOR = /\s-{2,}\s*(?:original message|mensagem original|mensaje original)\s*-{2,}/i;
+const SNIPPET_SEPARATOR = new RegExp(`\\s-{2,}\\s*${ORIGINAL}\\s*-{2,}`, "i");
 
 /**
  * Where a one-line snippet's attribution starts, or -1. For each "wrote:" in turn, the closest "On"/"Em"/… before it

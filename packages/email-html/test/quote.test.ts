@@ -27,6 +27,15 @@ describe("HTML quotes", () => {
     expect(text(s.quote)).toBe("Em 5 de nov. de 2026, Acme escreveu: Pode mandar o comprovante?");
   });
 
+  it("the attribution moves the cut only when it is one: any tag case, a span inside it, never a body ending in wrote:", () => {
+    const upper = `<P>Segue.</P><DIV>Em 5 de nov. de 2026, Acme escreveu:</DIV><BLOCKQUOTE type="cite"><P>Pode mandar?</P></BLOCKQUOTE>`;
+    expect(text(splitQuotedHtml(upper)!.body)).toBe("Segue.");
+    const span = `<p>Segue.</p><div>On Wed, Nov 5, 2026, <span>Acme</span> wrote:</div><blockquote type="cite"><p>Send it?</p></blockquote>`;
+    expect(text(splitQuotedHtml(span)!.quote)).toBe("On Wed, Nov 5, 2026, Acme wrote: Send it?");
+    const said = `<p>Please note what he wrote:</p><blockquote type="cite"><p>It breaks on save.</p></blockquote>`;
+    expect(text(splitQuotedHtml(said)!.body)).toBe("Please note what he wrote:");
+  });
+
   it("the quote keeps the message's styles (it renders in a frame of its own)", () => {
     const html = `<html><head><style>.x{color:red}</style></head><body><p class="x">Ok.</p><blockquote type="cite"><p class="x">Old</p></blockquote></body></html>`;
     const s = splitQuotedHtml(html)!;
@@ -107,6 +116,8 @@ describe("snippets", () => {
     );
     expect(snippetWithoutQuote("Thanks! On Wed, Nov 5, 2026 at 10:12 AM Acme <s@acme.test> wrote: > We fixed it")).toBe("Thanks!");
     expect(snippetWithoutQuote("Ok. -----Original Message----- From: Acme")).toBe("Ok.");
+    expect(snippetWithoutQuote("Merci. -----Message d'origine----- De: Acme")).toBe("Merci.");
+    expect(snippetWithoutQuote("Danke. -----Ursprüngliche Nachricht----- Von: Acme")).toBe("Danke.");
     expect(snippetWithoutQuote("Perfect. > On 5 Nov, Acme wrote: > x")).toBe("Perfect.");
     expect(snippetWithoutQuote("Em breve mando o comprovante, obrigado")).toBe("Em breve mando o comprovante, obrigado");
     expect(snippetWithoutQuote("> only a quote")).toBe("> only a quote");
