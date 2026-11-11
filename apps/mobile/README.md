@@ -4,6 +4,20 @@ An Expo app (SDK 58, iOS first, Android ready) for the self-hosted mail service 
 Team members use it to read and answer `support@`/`privacy@` mail and to get a push for each new message.
 The UI is in Portuguese (pt-BR) by default, with English as the alternative, and follows dark mode.
 
+| Caixas | Conversas | Conversa | Nova mensagem | Etiquetas | Ajustes |
+|---|---|---|---|---|---|
+| ![Caixas](docs/screenshots/home-light-ios.png) | ![Conversas](docs/screenshots/inbox-light-ios.png) | ![Conversa](docs/screenshots/thread-light-ios.png) | ![Nova mensagem](docs/screenshots/compose-light-ios.png) | ![Etiquetas](docs/screenshots/tags-sheet-light-ios.png) | ![Ajustes](docs/screenshots/settings-light-ios.png) |
+| ![Caixas, escuro](docs/screenshots/home-dark-ios.png) | ![Conversas, escuro](docs/screenshots/inbox-dark-ios.png) | ![Conversa, escuro](docs/screenshots/thread-dark-ios.png) | ![Nova mensagem, escuro](docs/screenshots/compose-dark-ios.png) | ![Etiquetas, escuro](docs/screenshots/tags-sheet-dark-ios.png) | ![Ajustes, escuro](docs/screenshots/settings-dark-ios.png) |
+
+iPad (list and conversation side by side; English UI):
+
+| Light | Dark |
+|---|---|
+| ![iPad split](docs/screenshots/split-light-ipad.png) | ![iPad split, dark](docs/screenshots/split-dark-ipad.png) |
+
+Screenshots: iPhone 18 Pro and iPad Pro 13-inch simulators (iOS 27.2), development build, the demo seed below
+(`bun run seed:dev`). The other files in `docs/screenshots/` come from earlier waves (Android among them).
+
 ## Features
 
 | | How |
@@ -23,6 +37,8 @@ The UI is in Portuguese (pt-BR) by default, with English as the alternative, and
 | Snooze | "Adiar": a swipe kind (Ajustes › Ações de deslizar), a submenu of the row's context menu and of Mais (Hoje à noite 18:00, Amanhã 08:00, Próxima semana segunda 08:00, in the device's time zone; "Escolher data e hora…" opens a sheet with SwiftUI's graphical date picker / Material's date and time dialogs). The thread leaves every list and count but **Adiadas** (a home view, soonest to wake first) at once, with "Desfazer"; the conversation says "Adiada até …" with **Retomar**. |
 | Send later | "Enviar mais tarde" beside Enviar in the full composer (a toolbar menu) and in the reply bar's mode menu: Amanhã de manhã, Amanhã à tarde, Segunda de manhã, or a picked time (`sendAt`, same `requestId` and offline queue as a send). Files past 10 MB in all would go as links, which a scheduled send can't carry: the option is disabled with that explanation before the server would refuse. A scheduled message shows "Agendada para …" with **Cancelar envio** (`inbox:cancelScheduled`) and **Editar** (cancel, then the composer reopens with what it had). |
 | Timeline, presence, Bcc | Quiet lines between the messages from `inbox:activity` ("Caio atribuiu a você · 2 h"; delivery and a reply's own status change stay out) and the whole timeline in Mais › Atividade. The conversation heartbeats `inbox:setPresence` (viewing while on screen, replying while the reply bar or composer is open; never queued offline, left in the background) and shows "Bia está respondendo…" from `inbox:presence`. The composer has Cco; a sent message lists its Bcc. |
+| iPad and keyboard | A window from about 678 pt wide shows the list and the open conversation side by side (`src/model/split.ts`; the list column is 320 to 420 pt); narrower windows use the phone's navigation. A hardware keyboard has Mail's and Gmail's keys: ⌘N, ⌘R, ⌘⇧R, ⌘F, ⌘↩, E (archive), J/K or the arrows (next / previous), Esc. They are UIKeyCommands from `modules/mail-keys`, so the ⌘-hold overlay lists what works on the current screen. |
+| Motion | Little moves, and only transforms and opacity on the UI thread (`src/theme/motion.ts`): swipe rows follow the finger and settle on a spring carrying its velocity, the edge action arms with a haptic at the full-swipe point (half the row's own width), rows close an archived row's gap in 220 ms, the undo capsule rises in 220 ms, the first load crossfades from the skeleton. Nothing animates after a hardware shortcut (`src/model/key-motion.ts`). Reduce Motion: no movement, fades only. Screens, sheets, menus and tabs are the platform's own. |
 | Push | `inbox:registerDevice` after sign-in, then `support:onInbound` pushes each new inbound message to the mailbox's members. A tap opens the thread (`embermail://thread/<id>`), including from a cold start. |
 
 ## Native UI
@@ -50,16 +66,24 @@ device and searchable. Sign-out wipes the replica.
 # terminal 1: the mail service on Miniflare (Better Auth, local R2, the email() handler)
 cd apps/api && EMBER_ADMIN_TOKEN=dev-admin bunx ember dev
 
-# terminal 2: mailboxes, a member (bia@acme.test / ember-mail-dev-123), and inbound mail through the local email trigger
+# terminal 2: mailboxes, a member (bia@acme.test / ember-mail-dev-123), inbound mail through the local email trigger, and
+# a few tags
 cd apps/mobile && bun run seed:dev
 
-# terminal 3: Metro; open in Expo Go (iOS Simulator: press i) or a development build
-cd apps/mobile && EMBER_URL=http://127.0.0.1:8787 bunx expo start
+# terminal 3: a development build once (it builds ios/ or android/, both git-ignored), then Metro for it
+cd apps/mobile && EMBER_URL=http://127.0.0.1:8787 bunx expo run:ios      # or run:android
+cd apps/mobile && EMBER_URL=http://127.0.0.1:8787 bunx expo start --dev-client
 ```
 
-The app runs in Expo Go, because every native module it uses ships with Expo Go. Push needs a development
-build on a device.
+Use a development build: the app has local native modules (`modules/mail-keys`, `modules/mail-system`) and home-screen
+widgets, which Expo Go does not include. Push needs a development build on a device. Run Metro without `CI=1`: in CI
+mode it does not watch files, so edits never reach the app.
 
+- Worst-case data (`break-ui`): `SEED_WORST=1 bun run seed:dev` adds plausible extremes on `.test` addresses (an 80-character
+  name, an address with no name and a `+tag`, a one-letter name, emoji, CJK, Arabic, Vietnamese and Polish, no subject,
+  an unbreakable file name as subject, twelve tags on one conversation, the 40-character tag name the server allows);
+  `SEED_WORST_BULK=150` adds that many unread conversations (counts past 99). Development data only: nothing of it is in
+  the app. Run it on a fresh `ember dev` state (`apps/api/.ember/state`) to go back to the demo.
 - Use `127.0.0.1`, not `localhost`: `ember dev` pins Better Auth's base URL to `http://127.0.0.1:<port>`, and sign-in
   from any other origin fails with "Invalid origin".
 - Android emulator: `adb reverse tcp:8787 tcp:8787` and `adb reverse tcp:8081 tcp:8081`, then the same URL works.
@@ -132,6 +156,9 @@ app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outsi
   - Android: native Jetpack Glance widgets in `modules/mail-system` (Material 3 with the wallpaper's dynamic colors,
     the ember scheme before Android 12). They read the snapshots from the app's SharedPreferences. `expo-widgets`'
     Android side cannot open a deep link or use dynamic colors, so it is excluded from Android autolinking.
+- **`modules/mail-keys`** (iOS): a local Expo module with one view at the root that declares the hardware keyboard's
+  commands (UIKeyCommand) for what the screens on display handle (`src/keys.tsx`, `src/model/shortcuts.ts`). Bare
+  letters and arrows stand down while a text field is editing; chords (⌘N, ⌘↩) work everywhere.
 - **`modules/mail-system`**: a local Expo module, for what Expo has no JS API for.
   - iOS: `beginBackgroundTask` / `endBackgroundTask` (UIApplication) for the notification actions.
   - iOS: the quick action that cold-starts the app. Under the UIScene life cycle Expo forwards it as `performActionFor`
@@ -161,6 +188,18 @@ before (the runtime version is the fingerprint, `fingerprint.config.cjs`; the ap
 a new build with `eas build --local` on the macOS runner, submitted to TestFlight. A build by hand works the same way
 on a Mac with Xcode: `eas build --local --platform ios --profile production --output app.ipa`, then
 `eas submit --platform ios --profile production --path app.ipa`.
+
+## Known limits
+
+- Android has not been checked end to end in this round (the emulator was unavailable); its screenshots are from
+  earlier waves.
+- Widgets are drawn from a snapshot the app writes (at most every 15 s and when it goes to the background), so they lag
+  the inbox while the app is closed. Lock-screen widgets are iOS only.
+- On the iOS 27.2 simulator a software keyboard shows while a system menu (a row's context menu, Mais) is open, with no
+  field focused; not seen on a device yet.
+- Inbound mail without a subject is stored by Ember's email component as English "(no subject)"; the app shows its own
+  "(sem assunto)" for it.
+- Push needs a development build on a device (Expo Go has no push).
 
 ## Tests
 
