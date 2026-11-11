@@ -431,6 +431,10 @@ describe("optimistic updates", () => {
     u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
     expect(s.dump("inbox:search")[0][0]).toMatchObject({ threadId: "t1", status: "closed", unreadCount: 0 });
     expect(s.dump("inbox:search")[0][1]).toMatchObject({ threadId: "t2", status: "open", unreadCount: 2 });
+    u["inbox:addTag"]!(s, { threadId: "t1", tag: "g1" }, rec);
+    expect(s.dump("inbox:search")[0][0].tags).toEqual(["g1"]);
+    u["inbox:removeTag"]!(s, { threadId: "t1", tag: "g1" }, rec);
+    expect(s.dump("inbox:search")[0][0].tags).toEqual([]);
   });
 
   it("a new conversation shows on top of the views it belongs to, and their counts grow", () => {

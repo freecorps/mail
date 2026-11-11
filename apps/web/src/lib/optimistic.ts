@@ -163,6 +163,7 @@ function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Threa
         unreadCount: h.unreadCount ?? 0,
         assignee: h.assignee,
         assigneeName: h.assigneeName,
+        ...(h.tags?.length ? { tags: h.tags } : {}),
       } as unknown as Thread);
       return {
         ...h,
@@ -170,6 +171,8 @@ function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Threa
         unreadCount: t.unreadCount,
         assignee: t.assignee ?? undefined,
         assigneeName: t.assigneeName ?? undefined,
+        // Tag chips and the tag menu on a search result follow add/remove/set at once, as list rows do.
+        tags: t.tags ?? [],
       };
     });
     store.setQuery<any>("inbox:search", args, next);
