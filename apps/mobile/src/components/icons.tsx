@@ -2,7 +2,7 @@
 // so each platform gets its own family (never SF glyphs on Android or Material glyphs on iOS).
 import { SymbolView, unstable_getMaterialSymbolSourceAsync, type AndroidSymbol, type SymbolViewProps } from "expo-symbols";
 import { useEffect, useState } from "react";
-import type { ColorValue, ImageSourcePropType } from "react-native";
+import { useWindowDimensions, type ColorValue, type ImageSourcePropType } from "react-native";
 import { useColors } from "../theme";
 
 export type SFSymbol = Extract<SymbolViewProps["name"], string>;
@@ -119,10 +119,16 @@ export const Icons = {
 /** A decorative glyph (hidden from screen readers; the surrounding control carries the label). */
 export function Symbol({ icon: spec, size = 22, color, weight }: { icon: IconSpec; size?: number; color?: ColorValue; weight?: "regular" | "medium" | "semibold" }) {
   const c = useColors();
+  // Android: expo-symbols draws the Material Symbol as a font glyph that follows the system font scale inside a box of
+  // `size`, so at a large text size the glyph outgrew its box and was cut. The box grows with it (the glyph keeps its
+  // place beside the text it goes with, which grows too).
+  const { fontScale } = useWindowDimensions();
+  const box = process.env.EXPO_OS === "android" && fontScale > 1 ? Math.ceil(size * fontScale) : null;
   return (
     <SymbolView
       name={{ ios: spec.ios, android: spec.android }}
       size={size}
+      {...(box ? { style: { width: box, height: box } } : {})}
       tintColor={color ?? c.tint}
       {...(weight ? { weight } : {})}
       accessibilityElementsHidden
