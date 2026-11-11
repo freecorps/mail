@@ -22,6 +22,25 @@ export function toChips(input: string): Chip[] {
 /** A chip already made (one recipient, never split again: a name may hold a comma). */
 export const chipOf = (value: string): Chip => ({ value, valid: isRecipient(value) });
 
+/**
+ * A field's chips plus what is still typed in it (not a chip yet), as a send takes them: the typed text split as the
+ * field would split it, once per address against the chips and within itself (case-insensitive).
+ */
+export function withTyped(chips: readonly string[], typed: string): string[] {
+  const have = new Set(chips.map(chipEmail));
+  const more: string[] = [];
+  for (const c of toChips(typed)) {
+    const key = chipEmail(c.value);
+    if (have.has(key)) continue;
+    have.add(key);
+    more.push(c.value);
+  }
+  return more.length ? [...chips, ...more] : [...chips];
+}
+
+/** The chips of a field that are not a recipient (what the field's error names). */
+export const invalidChips = (values: readonly string[]): string[] => values.filter((v) => !chipOf(v).valid);
+
 /** The address inside a chip ("Bia <b@x.com>" → b@x.com), lower case. */
 export const chipEmail = (value: string) => (/<([^>]+)>\s*$/.exec(value)?.[1] ?? value).trim().toLowerCase();
 

@@ -32,6 +32,10 @@ export interface ThreadRow {
   assigneeName: string | null;
   /** Created offline / not confirmed by the server yet. */
   pending: boolean;
+  /** Tag ids (search hits carry none). */
+  tags?: string[];
+  /** When it wakes, while snoozed. */
+  snoozedUntil?: number | null;
 }
 
 /** DOM id of a thread row (keyboard cursor scrolls it into view). */
@@ -55,6 +59,8 @@ export function threadRow(t: Thread): ThreadRow {
     assignee: t.assignee ?? null,
     assigneeName: t.assigneeName ?? null,
     pending: isOptimisticId(t._id),
+    tags: t.tags ?? [],
+    snoozedUntil: t.snoozed ? (t.snoozedUntil ?? null) : null,
   };
 }
 
@@ -82,6 +88,10 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       status: h.status ?? null,
       assignee: h.assignee ?? null,
       assigneeName: h.assigneeName ?? null,
+      // Its tags too (Ember 0.7.2; none from an older server), so the tag menu on a hit toggles the right way.
+      tags: h.tags ?? [],
+      // A hit carries its wake time only while snoozed: Desfazer and "Adiada até …" read it like a list row's.
+      snoozedUntil: h.snoozedUntil ?? null,
       pending: false,
     });
   }
@@ -124,10 +134,12 @@ export const viewTakesTabs = (view: View | null) => view === null || view === "a
  * The list: a view across mailboxes (`view`), or one mailbox's list (`filter`: a status, Sent, Spam); a search query of
  * two characters or more replaces either (across every mailbox in a view, in the mailbox otherwise).
  */
-export function useThreadList(o: { mailbox: string; view?: View | null; filter: ThreadFilter; query: string }) {
-  const view = o.view ?? null;
+export function useThreadList(o: { mailbox: string; view?: View | null; tag?: string | null; filter: ThreadFilter; query: string }) {
+  // A tag's list is the "all" view narrowed to it.
+  const tag = o.tag ?? null;
+  const view = o.view ?? (tag ? "all" : null);
   const [limit, setLimit] = useState({ key: "", n: PAGE });
-  const key = `${view ?? o.mailbox}\u0000${o.filter}`;
+  const key = `${view ?? o.mailbox}\u0000${tag ?? ""}\u0000${o.filter}`;
   const n = limit.key === key ? limit.n : PAGE;
   const q = o.query.trim();
   const searching = q.length >= MIN_QUERY;
@@ -145,7 +157,12 @@ export function useThreadList(o: { mailbox: string; view?: View | null; filter: 
   const across = useQuerySnapshot(
     api.inbox.view,
     !searching && view
-      ? { view, ...(viewTakesTabs(view) && status && status !== "spam" ? { status } : {}), limit: Math.min(n, VIEW_MAX) }
+      ? {
+          view,
+          ...(viewTakesTabs(view) && status && status !== "spam" ? { status } : {}),
+          ...(tag ? { tag } : {}),
+          limit: Math.min(n, VIEW_MAX),
+        }
       : "skip",
   );
   const list = view ? across : sentView ? sent : inbox;
@@ -176,8 +193,8 @@ export function useThreadList(o: { mailbox: string; view?: View | null; filter: 
   const rows = devRows ?? kept;
   return {
     rows,
-    /** Rows in date order (lists), not by relevance (search): the list groups them by day. */
-    dated: !searching,
+    /** Rows in date order (lists), not by relevance (search) nor by when they wake (Adiadas): grouped by day. */
+    dated: !searching && view !== "snoozed",
     searching,
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,
@@ -211,7 +228,10 @@ export function useViewCounts() {
  * The number beside a view, as on mobile: unread messages for "all" and "unread" (what a mail app counts), the
  * threads themselves for "assigned" and "waiting" (a to-do list, worked on whether read or not). Null when zero.
  */
-export function viewBadge(view: View, counts: Record<View, { threads: number; unread: number; capped: boolean }> | null): string | null {
+export function viewBadge(
+  view: View,
+  counts: Partial<Record<View, { threads: number; unread: number; capped: boolean }>> | null,
+): string | null {
   const c = counts?.[view];
   if (!c) return null;
   const n = view === "all" || view === "unread" ? c.unread : c.threads;

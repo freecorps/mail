@@ -2,9 +2,11 @@
 // translation is a type error. `{name}` placeholders are filled by `translate`.
 
 import { adminEn, adminPtBR } from "./admin";
+import { featuresEn, featuresPtBR } from "./features";
 
 const ptBR = {
   ...adminPtBR,
+  ...featuresPtBR,
   "app.name": "Ember Mail",
   "common.cancel": "Cancelar",
   "common.close": "Fechar",
@@ -356,6 +358,7 @@ export const LOCALES: Locale[] = ["pt-BR", "en"];
 
 const en: Record<StringKey, string> = {
   ...adminEn,
+  ...featuresEn,
   "app.name": "Ember Mail",
   "common.cancel": "Cancel",
   "common.close": "Close",

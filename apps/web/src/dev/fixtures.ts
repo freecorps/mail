@@ -1,5 +1,5 @@
 // Dev only (break-ui): realistic worst cases for the sidebar and Hoje. Names and addresses use `.test`/`example.com`.
-import type { Mailbox, Thread, View, ViewCount } from "@/lib/api";
+import type { Mailbox, TagDoc, Thread, ViewCount, ViewCounts } from "@/lib/api";
 import type { DevData } from "./data";
 
 const MIN = 60_000;
@@ -29,6 +29,31 @@ const WORST_BOXES: Mailbox[] = [
 ];
 
 const count = (threads: number, unread: number, capped = false): ViewCount => ({ threads, unread, capped });
+
+const tag = (i: number, mailbox: string, name: string, color: string): TagDoc => ({
+  _id: `fx_tag_${i}`,
+  _creationTime: 0,
+  mailbox,
+  name,
+  nameKey: name.toLowerCase(),
+  color,
+  order: i,
+  createdAt: 0,
+});
+
+const COLORS = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "indigo", "purple", "pink"];
+/** 20 tags in one mailbox (the most a thread takes), with names at the 40-character limit, RTL, CJK and emoji. */
+const WORST_TAGS: TagDoc[] = [
+  tag(0, "support", "Urgente — cliente enterprise com contrato", "red"),
+  tag(1, "support", "Reembolso", "orange"),
+  tag(2, "support", "退款", "yellow"),
+  tag(3, "support", "استرداد", "green"),
+  tag(4, "support", "🦊 VIP", "pink"),
+  tag(5, "support", "Benachrichtigungseinstellungen-Problem", "blue"),
+  tag(6, "support", "a", "gray"),
+  ...Array.from({ length: 13 }, (_, i) => tag(7 + i, "support", `Etiqueta ${i + 7}`, COLORS[i % COLORS.length]!)),
+  tag(20, "privacy", "Reembolso", "teal"),
+];
 
 const thread = (i: number, o: Partial<Thread>): Thread => ({
   _id: `fx_${i}`,
@@ -76,7 +101,9 @@ function worstThreads(now: number): { mine: Thread[]; waiting: Thread[] } {
 
 export interface Fixture {
   mailboxes: Mailbox[];
-  counts: Record<View, ViewCount>;
+  counts: ViewCounts;
+  /** The tags (`inbox:tags`): the worst case has 20 in one mailbox, long and non-Latin names. */
+  tags: TagDoc[];
   /** The threads `inbox:view` returns for `assigned` (TODAY_ROWS + 1) and `waiting` (newest first). */
   view: (now: number) => { assigned: { page: Thread[]; isDone: boolean }; waiting: { page: Thread[]; isDone: boolean } };
   hasSpam: boolean;
@@ -96,6 +123,7 @@ function worstList(now: number): Thread[] {
       status: "waiting",
       assignee: "u-aleksandra",
       assigneeName: "Aleksandra Wiśniewska-Kowalczyk",
+      tags: WORST_TAGS.slice(0, 20).map((t) => t._id),
       lastMessageAt: now - 2 * MIN,
     }),
     thread(31, {
@@ -103,6 +131,9 @@ function worstList(now: number): Thread[] {
       subject: "Invoice",
       snippet: "https://northwind-industries-holdings.example.com/billing/invoices/2026/11/INV-0000482913-final-v2.pdf",
       status: "closed",
+      tags: ["fx_tag_0", "fx_tag_5"],
+      snoozed: true,
+      snoozedUntil: now + 365 * DAY,
       assignee: "u-jo",
       assigneeName: "Jo",
       lastMessageAt: now - 30 * 60 * MIN,
@@ -123,7 +154,7 @@ function worstList(now: number): Thread[] {
       assigneeName: "🦊 Fox",
       lastMessageAt: now - 20 * DAY,
     }),
-    thread(34, { contactName: "J", subject: "?", snippet: "", lastMessageAt: now - 40 * DAY }),
+    thread(34, { contactName: "J", subject: "?", snippet: "", tags: ["fx_tag_6"], lastMessageAt: now - 40 * DAY }),
   ];
   return [...extra, ...w.mine, ...w.waiting.slice(0, 30)].sort((a, b) => b.lastMessageAt - a.lastMessageAt);
 }
@@ -131,7 +162,15 @@ function worstList(now: number): Thread[] {
 export const FIXTURES: Record<DevData, Fixture> = {
   worst: {
     mailboxes: WORST_BOXES,
-    counts: { all: count(40_000, 12_483), assigned: count(1_284, 312, true), unread: count(1, 1), waiting: count(0, 0) },
+    counts: {
+      all: count(40_000, 12_483),
+      assigned: count(1_284, 312, true),
+      unread: count(1, 1),
+      waiting: count(0, 0),
+      snoozed: count(12_483, 0),
+      tags: Object.fromEntries(WORST_TAGS.map((t, i) => [t._id, count(i === 0 ? 12_483 : i * 7, i % 3 ? 0 : i * 13)])),
+    },
+    tags: WORST_TAGS,
     view: (now) => {
       const w = worstThreads(now);
       return {
@@ -144,14 +183,23 @@ export const FIXTURES: Record<DevData, Fixture> = {
   },
   empty: {
     mailboxes: [],
-    counts: { all: count(0, 0), assigned: count(0, 0), unread: count(0, 0), waiting: count(0, 0) },
+    counts: { all: count(0, 0), assigned: count(0, 0), unread: count(0, 0), waiting: count(0, 0), snoozed: count(0, 0), tags: {} },
+    tags: [],
     view: () => ({ assigned: { page: [], isDone: true }, waiting: { page: [], isDone: true } }),
     hasSpam: false,
     list: () => [],
   },
   one: {
     mailboxes: [box("support", "Atendimento", "support@example.com", 1)],
-    counts: { all: count(1, 1), assigned: count(1, 1), unread: count(1, 1), waiting: count(1, 0) },
+    counts: {
+      all: count(1, 1),
+      assigned: count(1, 1),
+      unread: count(1, 1),
+      waiting: count(1, 0),
+      snoozed: count(1, 0),
+      tags: { fx_tag_0: count(1, 1) },
+    },
+    tags: [tag(0, "support", "A", "red")],
     view: (now) => ({
       assigned: { page: [thread(1, { contactName: "J", subject: "1", unreadCount: 1, lastMessageAt: now - MIN })], isDone: true },
       waiting: { page: [thread(2, { contactName: "dana", status: "waiting", lastMessageAt: now - 25 * 60 * MIN })], isDone: true },
@@ -161,7 +209,15 @@ export const FIXTURES: Record<DevData, Fixture> = {
   },
   huge: {
     mailboxes: [box("support", "Atendimento", "support@example.com", 1_000)],
-    counts: { all: count(1_000, 1_000), assigned: count(0, 0), unread: count(1_000, 1_000), waiting: count(0, 0) },
+    counts: {
+      all: count(1_000, 1_000),
+      assigned: count(0, 0),
+      unread: count(1_000, 1_000),
+      waiting: count(0, 0),
+      snoozed: count(0, 0),
+      tags: {},
+    },
+    tags: [],
     view: () => ({ assigned: { page: [], isDone: true }, waiting: { page: [], isDone: true } }),
     hasSpam: false,
     list: (now) =>

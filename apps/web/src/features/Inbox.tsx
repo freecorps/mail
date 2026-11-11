@@ -22,7 +22,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup, type PanelImperat
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/context";
 import { api, VIEWS, type Me, type View } from "@/lib/api";
-import { setOptimisticViewer } from "@/lib/optimistic";
+import { isOptimisticId, setOptimisticViewer } from "@/lib/optimistic";
 import { PANES, useMediaQuery, WIDE } from "@/lib/media";
 import { badge, useHasSpam, useViewCounts, viewTakesTabs, type ThreadRow } from "@/model/threads";
 import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/prefs";
@@ -43,6 +43,10 @@ import { openWindow } from "@/model/dock";
 import { scheduledSends } from "@/model/outbox";
 import type { ComposerHandle } from "./Composer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
+import { PickerHost } from "./Pickers";
+import { openPicker, type TagTarget } from "@/model/picker";
+import { useAllTags } from "@/model/tags";
+import { snoozeTargetOf, type SnoozeTarget } from "@/model/snooze";
 import { Sidebar, type Folder } from "./Sidebar";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
@@ -87,9 +91,14 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const adminSection = me.admin ? route.admin : null;
 
   // The list: a view across mailboxes (`?v=`), or the mailbox's (a status tab, Sent or Spam).
-  const view = route.view;
+  const { tags: allTags, loading: tagsLoading } = useAllTags();
+  // A tag's list (`?g=`): the "all" view narrowed to it; an unknown tag (deleted, or not visible) is ignored once the
+  // tags are known. Until then the link is taken at its word, so its list loads first, not the mailbox's.
+  const tagDoc = route.tag ? (allTags.find((x) => x._id === route.tag) ?? null) : null;
+  const tag = tagDoc?._id ?? (route.tag && tagsLoading ? route.tag : null);
+  const view = route.view ?? (tag ? "all" : null);
   const folder: Folder | null = !view && (route.filter === "sent" || route.filter === "spam") ? route.filter : null;
-  const list_ = useThreadList({ mailbox: mailbox ?? "", view, filter: route.filter, query: route.query });
+  const list_ = useThreadList({ mailbox: mailbox ?? "", view, tag, filter: route.filter, query: route.query });
   const rows = mailbox || view ? list_.rows : NO_ROWS;
   const counts = useViewCounts();
   const hasSpam = useHasSpam(view ? null : mailbox);
@@ -175,7 +184,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const personal = useMemo(() => new Set(boxes.mailboxes.filter((b) => b.personal).map((b) => b.name)), [boxes.mailboxes]);
 
   // Multi-select, per list: going to another view, mailbox, status or search starts with nothing selected.
-  const listPlace = `${view ?? ""}\u0000${mailbox ?? ""}\u0000${route.filter}\u0000${route.query}`;
+  const listPlace = `${view ?? ""}\u0000${tag ?? ""}\u0000${mailbox ?? ""}\u0000${route.filter}\u0000${route.query}`;
   const [selection, setSelection] = useState<{ place: string; ids: ReadonlySet<string> }>({ place: listPlace, ids: new Set() });
   const selected = selection.place === listPlace ? selection.ids : EMPTY_SET;
   const anchor = useRef<string | null>(null);
@@ -341,6 +350,23 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           if (!s.thread) return;
           requestContextToggle();
           return;
+        case "snooze":
+        case "tags": {
+          // The selection, else the open conversation, else the cursor's row (never one the server has not confirmed).
+          const picked = visibleSelection(s.selected, s.rows);
+          const rows = picked.length ? picked : target ? s.rows.filter((r) => r.threadId === target) : [];
+          let list: Array<TagTarget & SnoozeTarget> = rows
+            .filter((r) => !r.pending)
+            .map((r) => ({ ...snoozeTargetOf(r), mailbox: r.mailbox, tags: r.tags ?? [] }));
+          if (!list.length && target) {
+            const th = client.localQueryResult(api.inbox.thread, { threadId: target }).value?.thread;
+            if (th && !isOptimisticId(th._id)) list = [{ ...snoozeTargetOf(th), mailbox: th.mailbox, tags: th.tags ?? [] }];
+          }
+          if (!list.length) return;
+          e.preventDefault();
+          openPicker(action === "snooze" ? { kind: "snooze", targets: list } : { kind: "tags", targets: list });
+          return;
+        }
         case "help":
           setHelpOpen(true);
           return;
@@ -358,7 +384,14 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const goView = useCallback(
     (v: View) => {
       setCursor(null);
-      navigate({ admin: null, view: v, filter: "all", thread: null }, { push: true });
+      navigate({ admin: null, view: v, tag: null, filter: "all", thread: null }, { push: true });
+    },
+    [navigate],
+  );
+  const goTag = useCallback(
+    (id: string) => {
+      setCursor(null);
+      navigate({ admin: null, view: null, tag: id, filter: "all", thread: null }, { push: true });
     },
     [navigate],
   );
@@ -366,29 +399,32 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     (name: string) => {
       setCursor(null);
       const filter = route.filter === "sent" || route.filter === "spam" ? "all" : route.filter;
-      navigate({ admin: null, view: null, mailbox: name, filter, thread: null }, { push: true });
+      navigate({ admin: null, view: null, tag: null, mailbox: name, filter, thread: null }, { push: true });
     },
     [navigate, route.filter],
   );
   const goFolder = useCallback(
     (name: string, f: Folder) => {
       setCursor(null);
-      navigate({ admin: null, view: null, mailbox: name, filter: f, thread: null }, { push: true });
+      navigate({ admin: null, view: null, tag: null, mailbox: name, filter: f, thread: null }, { push: true });
     },
     [navigate],
   );
 
   const mailboxLabel = current?.displayName ?? mailbox ?? t("mailboxes.title");
-  const title = view ? t(`views.${view}`) : folder ? t(`threads.filter.${folder}`) : mailboxLabel;
+  const title = tagDoc ? tagDoc.name : view ? t(`views.${view}`) : folder ? t(`threads.filter.${folder}`) : mailboxLabel;
   const empty = view
-    ? { title: view === "all" ? t("threads.empty") : t(`views.empty.${view}`), hint: t("threads.emptyHintView") }
+    ? {
+        title: view === "all" ? t("threads.empty") : t(`views.empty.${view}`),
+        hint: view === "snoozed" ? t("views.emptyHint.snoozed") : t("threads.emptyHintView"),
+      }
     : folder === "sent"
       ? { title: t("threads.empty"), hint: t("threads.emptyHintSent") }
       : folder === "spam"
         ? { title: t("threads.empty"), hint: t("threads.emptyHintSpam") }
         : { title: t("threads.empty"), hint: t("threads.emptyHint") };
   // Phones only: on md+ the sidebar has the destinations, so the title is plain text (nothing dead in the tab order).
-  const place = view ? `v:${view}` : folder ? `f:${folder}` : `m:${mailbox ?? ""}`;
+  const place = tag ? `g:${tag}` : view ? `v:${view}` : folder ? `f:${folder}` : `m:${mailbox ?? ""}`;
   const picker = (
     <DropdownMenu>
       <h1 className="hidden truncate text-base font-semibold md:block">{title}</h1>
@@ -402,6 +438,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           onValueChange={(v) => {
             const [kind, value] = [v.slice(0, 1), v.slice(2)];
             if (kind === "v") goView(value as View);
+            else if (kind === "g") goTag(value);
             else if (kind === "m") goMailbox(value);
             else if (mailbox) goFolder(mailbox, value as Folder);
           }}
@@ -412,6 +449,17 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
               {t(`views.${v}`)}
             </DropdownMenuRadioItem>
           ))}
+          {allTags.length > 0 && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground">{t("tags.title")}</DropdownMenuLabel>
+              {allTags.map((x) => (
+                <DropdownMenuRadioItem key={x._id} value={`g:${x._id}`}>
+                  <span className="min-w-0 flex-1 truncate">{x.name}</span>
+                </DropdownMenuRadioItem>
+              ))}
+            </>
+          )}
           <DropdownMenuSeparator />
           <DropdownMenuLabel className="text-xs text-muted-foreground">{t("mailboxes.title")}</DropdownMenuLabel>
           {boxes.mailboxes.map((b) => (
@@ -456,6 +504,10 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       view={view}
       filter={route.filter}
       counts={counts}
+      tags={allTags}
+      tag={tag}
+      onTag={goTag}
+      onManageTags={() => openPicker({ kind: "manageTags", mailbox: tagDoc?.mailbox ?? (view ? null : mailbox) })}
       hasSpam={hasSpam}
       inAdmin={!!adminSection}
       onAdmin={me.admin ? () => navigate({ admin: "overview", thread: null }, { push: true }) : undefined}
@@ -505,11 +557,11 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     <ThreadList
       className="h-full w-full"
       title={title}
-      subtitle={folder ? mailboxLabel : undefined}
+      subtitle={folder ? mailboxLabel : tagDoc ? (mailboxNames[tagDoc.mailbox] ?? tagDoc.mailbox) : undefined}
       mailboxPicker={picker}
       tabs={viewTakesTabs(view) && !folder}
       empty={empty}
-      mailboxNames={view ? mailboxNames : undefined}
+      mailboxNames={view && !tag ? mailboxNames : undefined}
       personal={personal}
       actions={layoutMenu}
       wide={roomy && mode === "focus"}
@@ -663,6 +715,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       )}
       <ComposeDock mailboxes={boxes.mailboxes} defaultMailbox={view ? null : mailbox} onOpenThread={(id) => open(id)} />
       <ComposerDialogs mailboxes={boxes.mailboxes} />
+      <PickerHost />
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
       {thread && !adminSection && createPortal(thread, threadHost)}
       {import.meta.env.DEV && <DataToggle />}
@@ -677,6 +730,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           threadId={adminSection ? null : route.thread}
           layouts={roomy}
           onView={goView}
+          onTag={goTag}
           onMailbox={goMailbox}
           onFolder={goFolder}
           onOpenThread={(id) => navigate({ admin: null, thread: id }, { push: true })}

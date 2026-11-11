@@ -13,6 +13,8 @@ export interface ForwardSource {
   text: string;
   /** Names of the original's files, which go along. */
   files: string[];
+  /** Their sizes (when known), for "Enviar mais tarde": they count toward the 10 MB a scheduled send takes. */
+  sizes?: Array<number | undefined>;
 }
 
 /** What an undone or failed send gives back to a window. */
@@ -22,7 +24,6 @@ export interface Restore {
   cc: string[];
   subject: string;
   html: string;
-  /** Kept as the draft had it, though the field is hidden until Ember sends `bcc` (ComposeDock `BCC_ENABLED`). */
   bcc: string[];
   /** The body as text (what the send checks and sends; the editor does not report its initial content). */
   text: string;

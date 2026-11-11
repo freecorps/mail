@@ -12,6 +12,8 @@ export interface UndoneSend {
   all: boolean;
   signature: boolean;
   files: AttachmentArg[];
+  /** The reply's blind copies (the Cco row shows again with them); none when absent. */
+  bcc?: string[];
 }
 
 const kept = new Map<string, UndoneSend>();

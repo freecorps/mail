@@ -13,6 +13,8 @@ export interface Route {
   admin: AdminSection | null;
   /** A view across mailboxes (`?v=`); when set, the list is the view's, not the mailbox's. */
   view: View | null;
+  /** A tag's threads (`?g=<tagId>`): the "all" view narrowed to it (in its mailbox). */
+  tag: string | null;
   mailbox: string | null;
   filter: ThreadFilter;
   thread: string | null;
@@ -27,6 +29,7 @@ export function parseRoute(search: string): Route {
   return {
     admin: a && ADMIN_SECTIONS.includes(a) ? a : null,
     view: v && VIEWS.includes(v) ? v : null,
+    tag: p.get("g") || null,
     mailbox: p.get("m") || null,
     filter: f && THREAD_FILTERS.includes(f) ? f : "all",
     thread: p.get("t") || null,
@@ -38,6 +41,7 @@ export function formatRoute(r: Route): string {
   const p = new URLSearchParams();
   if (r.admin) p.set("a", r.admin);
   if (r.view) p.set("v", r.view);
+  if (r.tag) p.set("g", r.tag);
   if (r.mailbox) p.set("m", r.mailbox);
   if (r.filter !== "all") p.set("f", r.filter);
   if (r.query) p.set("q", r.query);

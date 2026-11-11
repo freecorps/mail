@@ -4,8 +4,11 @@
 import { useState } from "react";
 import { openWindow } from "@/model/dock";
 import {
+  AlarmClock,
+  AlarmClockOff,
   Archive,
   ArchiveRestore,
+  CalendarClock,
   Check,
   CircleDot,
   Columns2,
@@ -26,6 +29,8 @@ import {
   Settings,
   ShieldAlert,
   Sun,
+  Tag,
+  Tags,
   UserRound,
   UserRoundX,
   type LucideIcon,
@@ -53,6 +58,10 @@ import { ADMIN_SECTIONS, type AdminSection } from "@/model/route";
 import { useMembers } from "@/model/thread";
 import { isPersonal, MIN_QUERY, useDebounced } from "@/model/threads";
 import { mailboxIcon, VIEW_ICON, type Folder } from "@/lib/nav";
+import { formatAt, snoozePresets } from "@/lib/when";
+import { openPicker } from "@/model/picker";
+import { snoozeTargetOf, useSnooze } from "@/model/snooze";
+import { TAG_LIMITS, tagsOf, tagToggle, useAllTags, useTagActions } from "@/model/tags";
 
 export interface PaletteProps {
   open: boolean;
@@ -68,6 +77,7 @@ export interface PaletteProps {
   /** The reading modes apply (wide window). */
   layouts: boolean;
   onView: (view: View) => void;
+  onTag: (tagId: string) => void;
   onMailbox: (name: string) => void;
   onFolder: (name: string, folder: Folder) => void;
   onOpenThread: (threadId: string) => void;
@@ -95,7 +105,12 @@ const MODE_ICON: Record<ReadingMode, LucideIcon> = { split: Columns3, full: Colu
 const STATUSES: ThreadStatus[] = ["open", "waiting", "closed"];
 
 function Body(p: PaletteProps & { close: () => void }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const { tags: allTags } = useAllTags();
+  const snoozer = useSnooze();
+  const tagActions = useTagActions();
+  // Mounted on open: the presets' times are from then.
+  const [openedAt] = useState(() => Date.now());
   const prefs = usePrefs();
   const [query, setQuery] = useState("");
   const q = useDebounced(query, 150).trim();
@@ -204,6 +219,57 @@ function Body(p: PaletteProps & { close: () => void }) {
                 onSelect={run(() => swallow(assign({ threadId: th._id, userId: null })))}
               />
             )}
+            {snoozePresets(openedAt).map((x) => (
+              <Item
+                key={x.id}
+                id={`snooze:${x.id}`}
+                icon={AlarmClock}
+                label={t("palette.snooze", { name: t(`snooze.${x.id}`) })}
+                hint={formatAt(x.at, openedAt, locale)}
+                onSelect={run(() => snoozer.snooze([snoozeTargetOf(th)], x.at))}
+              />
+            ))}
+            <Item
+              icon={CalendarClock}
+              label={t("palette.snoozePick")}
+              keys={["h"]}
+              onSelect={run(() =>
+                openPicker({
+                  kind: "snooze",
+                  date: true,
+                  targets: [snoozeTargetOf(th)],
+                }),
+              )}
+            />
+            {th.snoozed && (
+              <Item
+                icon={AlarmClockOff}
+                label={t("palette.unsnooze")}
+                onSelect={run(() => snoozer.unsnooze(th._id, snoozeTargetOf(th).snoozedUntil))}
+              />
+            )}
+            <Item
+              icon={Tags}
+              label={t("palette.tagMenu")}
+              keys={["l"]}
+              onSelect={run(() => openPicker({ kind: "tags", targets: [{ threadId: th._id, mailbox: th.mailbox, tags: th.tags ?? [] }] }))}
+            />
+            {tagsOf(allTags, th.mailbox).map((x) => {
+              const on = th.tags?.includes(x._id) ?? false;
+              // At the most tags a conversation takes, adding is off (as in the tag menu), saying why.
+              const blocked = tagToggle([{ tags: th.tags ?? [] }], x._id) === "blocked";
+              return (
+                <Item
+                  key={x._id}
+                  id={`tag:${x._id}`}
+                  icon={Tag}
+                  label={t(on ? "palette.tagRemove" : "palette.tagAdd", { name: x.name })}
+                  disabled={blocked}
+                  hint={blocked ? t("tags.limit", { count: TAG_LIMITS.perThread }) : undefined}
+                  onSelect={run(() => tagActions.toggle([{ threadId: th._id, tags: th.tags ?? [] }], x))}
+                />
+              );
+            })}
           </CommandGroup>
         )}
 
@@ -252,6 +318,16 @@ function Body(p: PaletteProps & { close: () => void }) {
               label={b.displayName ?? b.name}
               hint={b.address}
               onSelect={run(() => p.onMailbox(b.name))}
+            />
+          ))}
+          {allTags.map((x) => (
+            <Item
+              key={x._id}
+              id={`go-tag:${x._id}`}
+              icon={Tag}
+              label={t("tags.view", { name: x.name })}
+              hint={names[x.mailbox] ?? x.mailbox}
+              onSelect={run(() => p.onTag(x._id))}
             />
           ))}
           {current && (
@@ -308,6 +384,11 @@ function Body(p: PaletteProps & { close: () => void }) {
         <CommandGroup heading={t("palette.actions")}>
           <Item icon={PenSquare} label={t("threads.compose")} keys={["c"]} onSelect={run(p.onCompose)} />
           <Item icon={PanelLeft} label={t("shortcuts.sidebar")} keys={["["]} onSelect={run(p.onToggleSidebar)} />
+          <Item
+            icon={Tags}
+            label={t("palette.manageTags")}
+            onSelect={run(() => openPicker({ kind: "manageTags", mailbox: th?.mailbox ?? p.mailbox }))}
+          />
           <Item icon={Keyboard} label={t("account.shortcuts")} keys={["?"]} onSelect={run(p.onShortcuts)} />
         </CommandGroup>
 
@@ -382,6 +463,7 @@ function Item({
   hint,
   keys,
   current = false,
+  disabled = false,
   onSelect,
 }: {
   /** Makes the cmdk value unique when labels can repeat (two members or mailboxes with the same name). */
@@ -392,12 +474,13 @@ function Item({
   keys?: string[];
   /** The preference already in use. */
   current?: boolean;
+  disabled?: boolean;
   onSelect: () => void;
 }) {
   const { t } = useI18n();
   const currentLabel = t("common.current");
   return (
-    <CommandItem value={id ? `${label}\u0000${id}` : label} keywords={hint ? [hint] : undefined} onSelect={onSelect}>
+    <CommandItem value={id ? `${label}\u0000${id}` : label} keywords={hint ? [hint] : undefined} disabled={disabled} onSelect={onSelect}>
       <Icon aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {hint && <span className="max-w-48 shrink-0 truncate text-xs text-muted-foreground">{hint}</span>}

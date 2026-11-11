@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
+  AlarmClock,
   Archive,
   ArchiveRestore,
   Check,
@@ -14,6 +15,7 @@ import {
   Search,
   SearchX,
   ShieldAlert,
+  Tags,
   UserRound,
   X,
 } from "lucide-react";
@@ -37,6 +39,13 @@ import { toTarget, useThreadActions } from "@/model/actions";
 import { cursorIndex, listItems, loadMoreDue, selectable, visibleSelection, type ListItem } from "@/model/listItems";
 import { rowDomId, STATUS_TABS, type ThreadFilter, type ThreadRow } from "@/model/threads";
 import { AssignItems } from "./AssignMenu";
+import { SnoozeItems } from "./SnoozeMenu";
+import { TagChips } from "@/components/TagChip";
+import type { TagDoc } from "@/lib/api";
+import { formatAtShort } from "@/lib/when";
+import { openPicker } from "@/model/picker";
+import { snoozeTargetOf, useSnooze } from "@/model/snooze";
+import { threadTags, useTagIndex } from "@/model/tags";
 
 export interface ThreadListProps {
   title: string;
@@ -90,6 +99,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   const { density } = usePrefs();
   const scroller = useRef<HTMLDivElement>(null);
   const actions = useThreadActions();
+  const tagIndex = useTagIndex();
 
   const items = useMemo(() => listItems(p.rows, { grouped: p.dated, now, locale }), [p.rows, p.dated, now, locale]);
   const headers = useMemo(() => items.flatMap((it, i) => (it.kind === "group" ? [i] : [])), [items]);
@@ -222,6 +232,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
                       showStatus={statusShown(it.row.status)}
                       mailboxName={p.mailboxNames ? (p.mailboxNames[it.row.mailbox] ?? it.row.mailbox) : null}
                       personal={p.personal.has(it.row.mailbox)}
+                      tagIndex={tagIndex}
                       onOpen={p.onOpen}
                       onSelect={p.onSelect}
                       actions={actions}
@@ -345,11 +356,14 @@ const Row = memo(function Row({
   showStatus,
   mailboxName,
   personal,
+  tagIndex,
   onOpen,
   onSelect,
   actions,
 }: {
   row: ThreadRow;
+  /** Tags by id (stable until a tag changes, so the memo holds). */
+  tagIndex: ReadonlyMap<string, TagDoc>;
   now: number;
   /** Under a date header (the time can leave the day out). */
   dated: boolean;
@@ -368,6 +382,10 @@ const Row = memo(function Row({
   const StatusIcon = showStatus && r.status ? STATUS_ICON[r.status] : undefined;
   const target = [toTarget(r)];
   const archived = r.status === "closed";
+  const tags = threadTags(r.tags, tagIndex);
+  const snoozed = r.snoozedUntil ?? null;
+  const snoozer = useSnooze();
+  const snoozeTarget = [snoozeTargetOf(r)];
   return (
     <div
       className={cn(
@@ -437,24 +455,66 @@ const Row = memo(function Row({
                 <span className="sr-only">{t("list.assignedTo", { name: r.assigneeName })}</span>
               </span>
             )}
-            <time className="text-xs text-muted-foreground tabular-nums" dateTime={new Date(r.at).toISOString()}>
-              {dated ? formatRowTime(r.at, now, locale) : formatWhen(r.at, now, locale)}
-            </time>
+            {snoozed ? (
+              // In "Adiadas": when it comes back, not when it last moved.
+              <time
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground tabular-nums"
+                dateTime={new Date(snoozed).toISOString()}
+                title={t("snooze.rowA11y", { when: formatAtShort(snoozed, now, locale) })}
+              >
+                <AlarmClock className="size-3" aria-hidden="true" />
+                <span className="sr-only">{t("snooze.rowA11y", { when: "" })}</span>
+                {formatAtShort(snoozed, now, locale)}
+              </time>
+            ) : (
+              <time className="text-xs text-muted-foreground tabular-nums" dateTime={new Date(r.at).toISOString()}>
+                {dated ? formatRowTime(r.at, now, locale) : formatWhen(r.at, now, locale)}
+              </time>
+            )}
           </span>
         </span>
-        <span className={cn("mt-0.5 block truncate text-ui", r.unread ? "text-foreground" : "text-foreground/75")}>
-          {r.unread && <span className="sr-only">{t("threads.unread")}: </span>}
-          {r.subject.trim() || t("thread.noSubject")}
+        {/* Tags sit on the preview line (the subject keeps its room); compact rows have none, so they move up. */}
+        <span className="mt-0.5 flex min-w-0 items-center gap-2">
+          <span className={cn("min-w-0 flex-1 truncate text-ui", r.unread ? "text-foreground" : "text-foreground/75")}>
+            {r.unread && <span className="sr-only">{t("threads.unread")}: </span>}
+            {r.subject.trim() || t("thread.noSubject")}
+          </span>
+          {tags.length > 0 && <TagChips tags={tags} max={2} className="hidden max-w-[40%] shrink-0 compact:flex" />}
         </span>
-        {r.snippet && <span className="mt-0.5 line-clamp-1 text-ui text-muted-foreground compact:hidden">{r.snippet}</span>}
+        {(r.snippet || tags.length > 0) && (
+          <span className="mt-0.5 flex min-w-0 items-center gap-2 compact:hidden">
+            <span className="line-clamp-1 min-w-0 flex-1 text-ui text-muted-foreground">{r.snippet}</span>
+            {tags.length > 0 && <TagChips tags={tags} max={3} className="max-w-[65%] shrink-0" />}
+          </span>
+        )}
       </button>
-      {/* Hover actions, in the time's place (none on a row the server has not confirmed yet). Snooze slots in first once
-          the API has it (plan E2). A pointer affordance: hidden, they take no taps (a tap there opens the row), and they
+      {/* Hover actions, in the time's place (none on a row the server has not confirmed yet), snooze first. A pointer affordance: hidden, they take no taps (a tap there opens the row), and they
           show for a hovering pointer (`group-hover` only applies where the device can hover), keyboard focus in the row
           (focus-visible, not the focus a tap leaves), or their open menu (`aria-expanded`: the tooltip around the trigger
           overrides the menu's `data-state`). */}
       {!r.pending && (
         <div className="pointer-events-none absolute top-[calc(var(--row-y)-4px)] right-1.5 z-10 flex items-center opacity-0 transition-opacity duration-(--motion-hover) group-hover/row:pointer-events-auto group-hover/row:opacity-100 group-has-[:focus-visible]/row:pointer-events-auto group-has-[:focus-visible]/row:opacity-100 has-[[aria-expanded=true]]:pointer-events-auto has-[[aria-expanded=true]]:opacity-100">
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="size-7 text-muted-foreground hover:text-foreground"
+                    aria-label={t("snooze.action")}
+                    aria-keyshortcuts="h"
+                  >
+                    <AlarmClock className="size-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("snooze.action")}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="end" className="w-64">
+              <SnoozeItems targets={snoozeTarget} onResume={snoozed ? () => snoozer.unsnooze(r.threadId, snoozed) : undefined} />
+            </DropdownMenuContent>
+          </DropdownMenu>
           <QuickAction label={archived ? t("thread.unarchive") : t("thread.archive")} onClick={() => actions.archive(target)}>
             {archived ? <ArchiveRestore /> : <Archive />}
           </QuickAction>
@@ -530,6 +590,8 @@ function BulkBar({
   const unread = rows.some((r) => r.unread);
   const assignable = rows.every((r) => !personal.has(r.mailbox) && !r.pending);
   const assignees = new Set(rows.map((r) => r.assignee));
+  const confirmed = rows.filter((r) => !r.pending);
+  const oneMailbox = new Set(rows.map((r) => r.mailbox)).size === 1;
   return (
     <div
       className={cn("flex h-7 items-center gap-1", className)}
@@ -560,6 +622,35 @@ function BulkBar({
       <BarAction label={unread ? t("thread.markRead") : t("thread.markUnread")} onClick={() => actions.toggleRead(targets)}>
         {unread ? <MailOpen /> : <Mail />}
       </BarAction>
+      <DropdownMenu>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" className="size-7" aria-label={t("snooze.action")} aria-keyshortcuts="h">
+                <AlarmClock />
+              </Button>
+            </DropdownMenuTrigger>
+          </TooltipTrigger>
+          <TooltipContent className="flex items-center gap-2">
+            {t("snooze.action")}
+            <Kbd className="border-background/20 bg-background/15 text-background">h</Kbd>
+          </TooltipContent>
+        </Tooltip>
+        <DropdownMenuContent align="end" className="w-64">
+          <SnoozeItems targets={confirmed.map(snoozeTargetOf)} />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {oneMailbox && (
+        <BarAction
+          label={t("tags.title")}
+          kbd="l"
+          onClick={() =>
+            openPicker({ kind: "tags", targets: confirmed.map((r) => ({ threadId: r.threadId, mailbox: r.mailbox, tags: r.tags ?? [] })) })
+          }
+        >
+          <Tags />
+        </BarAction>
+      )}
       {assignable && (
         <DropdownMenu>
           <Tooltip>

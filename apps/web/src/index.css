@@ -59,6 +59,18 @@
   --monogram-bottom: oklch(0.6 0.01 65);
   --monogram-text: oklch(0.995 0.002 75);
 
+  /* Tag colors (Ember's TAG_COLORS): a dot on a neutral chip, so the list keeps the accent for unread. */
+  --tag-gray: oklch(0.6 0.01 65);
+  --tag-red: oklch(0.58 0.19 27);
+  --tag-orange: oklch(0.66 0.16 55);
+  --tag-yellow: oklch(0.76 0.15 90);
+  --tag-green: oklch(0.6 0.14 150);
+  --tag-teal: oklch(0.6 0.1 190);
+  --tag-blue: oklch(0.58 0.15 250);
+  --tag-indigo: oklch(0.52 0.17 275);
+  --tag-purple: oklch(0.55 0.18 305);
+  --tag-pink: oklch(0.62 0.18 350);
+
   /* Elevation: stone-tinted shadows (never pure black on a warm page). */
   --elevation-hairline: 0 1px 2px 0 oklch(0.35 0.03 55 / 0.05);
   --elevation-raised:
@@ -118,6 +130,16 @@
   --monogram-top: oklch(0.52 0.008 70);
   --monogram-bottom: oklch(0.41 0.008 65);
   --monogram-text: oklch(0.97 0.004 75);
+  --tag-gray: oklch(0.66 0.01 70);
+  --tag-red: oklch(0.68 0.17 25);
+  --tag-orange: oklch(0.74 0.14 55);
+  --tag-yellow: oklch(0.82 0.13 90);
+  --tag-green: oklch(0.72 0.13 150);
+  --tag-teal: oklch(0.72 0.1 190);
+  --tag-blue: oklch(0.7 0.13 250);
+  --tag-indigo: oklch(0.68 0.14 275);
+  --tag-purple: oklch(0.7 0.15 305);
+  --tag-pink: oklch(0.72 0.15 350);
 
   /* On a dark page a shadow alone disappears: a faint light edge on top carries the elevation. */
   --elevation-hairline: 0 1px 2px 0 oklch(0.08 0.01 50 / 0.4);
@@ -199,6 +221,16 @@
   --color-monogram-top: var(--monogram-top);
   --color-monogram-bottom: var(--monogram-bottom);
   --color-monogram-text: var(--monogram-text);
+  --color-tag-gray: var(--tag-gray);
+  --color-tag-red: var(--tag-red);
+  --color-tag-orange: var(--tag-orange);
+  --color-tag-yellow: var(--tag-yellow);
+  --color-tag-green: var(--tag-green);
+  --color-tag-teal: var(--tag-teal);
+  --color-tag-blue: var(--tag-blue);
+  --color-tag-indigo: var(--tag-indigo);
+  --color-tag-purple: var(--tag-purple);
+  --color-tag-pink: var(--tag-pink);
 }
 
 @layer base {

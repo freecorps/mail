@@ -1,8 +1,20 @@
 // The open conversation: a header with status and assignee as menus and previous/next, the messages as one column
 // of email "paper" separated by hairlines (older ones collapsed to a line, the latest open, quoted text behind
 // "•••"), internal notes as tinted blocks, the composer under them, and the context panel (`i`) at the side.
-import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import {
+  createContext,
+  Fragment,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import {
+  AlarmClock,
   Archive,
   ArchiveRestore,
   ArrowLeft,
@@ -24,6 +36,7 @@ import {
   PanelRight,
   ShieldAlert,
   StickyNote,
+  Tags,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -56,6 +69,18 @@ import { Composer, type ComposerHandle } from "./Composer";
 import { ContextPanel, Files } from "./ContextPanel";
 import { EmailFrame } from "./EmailFrame";
 import { Confirm } from "./admin/parts";
+import { SnoozeItems } from "./SnoozeMenu";
+import { TagMenu } from "./TagMenu";
+import { ActivityLine, PresenceBadge, ScheduledBar, SnoozedBanner } from "./ThreadState";
+import { TagChip } from "@/components/TagChip";
+import { textToHtml } from "@/lib/editorText";
+import { placeEntries, useActivity } from "@/model/activity";
+import { useOwnPresence, usePresence } from "@/model/presence";
+import { isScheduled } from "@/model/schedule";
+import { snoozeTargetOf, useSnooze } from "@/model/snooze";
+import { useInFlight } from "@/model/inflight";
+import { threadTags, useTagActions, useTagIndex } from "@/model/tags";
+import type { ActivityEntry, Address } from "@/lib/api";
 
 /** Width of the conversation pane from which the context panel sits beside the messages (else it covers them). */
 const SIDE_PANEL_MIN = 760;
@@ -79,12 +104,31 @@ export function ThreadView({
   showBack?: boolean;
   /** The signed-in member is an admin: they may delete a shared mailbox's conversation. */
   admin?: boolean;
-  composerRef: Ref<ComposerHandle>;
+  composerRef: RefObject<ComposerHandle | null>;
   /** Opens another thread (a forwarded message's new conversation, an earlier conversation of the contact). */
   onOpenThread?: (threadId: string) => void;
 }) {
   const { t, locale } = useI18n();
   const vm = useThread(threadId);
+  const tagIndex = useTagIndex();
+  const tagActions = useTagActions();
+  const snoozer = useSnooze();
+  const activity = useActivity(threadId, vm.thread !== null);
+  const others_ = usePresence(threadId);
+  const [replying, setReplying] = useState(false);
+  useOwnPresence(threadId, replying, vm.thread !== null);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const cancelM = useMutation(api.inbox.cancelScheduled);
+  // Per scheduled email: canceling one never holds up another.
+  const cancels = useInFlight();
+  const after = useMemo(
+    () =>
+      placeEntries(
+        vm.items.map((i) => i.message),
+        activity.entries ?? [],
+      ),
+    [vm.items, activity.entries],
+  );
   const actions = useThreadActions();
   const scheduled = useScheduled(threadId);
   const boxes = useMailboxes().mailboxes;
@@ -145,6 +189,48 @@ export function ThreadView({
   // Over the messages, the panel is the top layer: Escape hides it before it closes the conversation.
   useEscapeCloses(roomy === false && overlay, toggleContext);
 
+  /** Cancels a scheduled send; with `edit`, its content goes back into a composer (the reply box, or a window). */
+  const cancelSend = (m: Message, edit: boolean) => {
+    const emailId = m.emailId;
+    if (!emailId) return;
+    const chip = (a: Address) => (a.name ? `${a.name} <${a.email}>` : a.email);
+    const files = m.attachments.map((a) => ({ file: a.file, filename: a.filename, contentType: a.contentType }));
+    const html = m.html ?? textToHtml(m.text);
+    void cancels.run(emailId, () =>
+      cancelM({ emailId }).then(
+        (r) => {
+          if (!r.ok) return void toast(t("schedule.gone"));
+          if (r.threadDeleted && edit) {
+            // A new conversation canceled before it went is gone: it comes back as a "Nova mensagem" window.
+            openWindow(
+              {
+                kind: "compose",
+                restore: {
+                  mailbox: m.mailbox,
+                  to: m.to.map(chip),
+                  cc: m.cc.map(chip),
+                  bcc: (m.bcc ?? []).map(chip),
+                  subject: m.subject,
+                  html,
+                  text: m.text,
+                  attachments: files,
+                  signature: true,
+                  draftId: null,
+                },
+              },
+              { always: true },
+            );
+          } else if (edit) {
+            composerRef.current?.load({ html, cc: m.cc.map(chip), bcc: (m.bcc ?? []).map(chip), attachments: files });
+          }
+          toast(edit ? t("schedule.editing") : t("schedule.canceled"));
+          if (r.threadDeleted) onBack();
+        },
+        (e: unknown) => void toast.error(e instanceof Error ? e.message : String(e)),
+      ),
+    );
+  };
+
   const forward = (m: Message) => {
     const opened = openWindow({
       kind: "forward",
@@ -165,6 +251,7 @@ export function ThreadView({
           formatFull(m.at, locale),
         ),
         files: forwardedFiles(m.attachments).map((a) => a.filename),
+        sizes: forwardedFiles(m.attachments).map((a) => a.size),
       },
     });
     if (!opened) toast(t("compose.tooMany"));
@@ -274,6 +361,9 @@ export function ThreadView({
   const archived = th.status === "closed";
   const unread = th.unreadCount > 0;
   const target = [{ threadId, status: th.status, unread }];
+  const tags = threadTags(th.tags, tagIndex);
+  const snoozeTarget = [snoozeTargetOf(th)];
+  const snoozedUntil = snoozeTarget[0]!.snoozedUntil ?? null;
   return (
     <Pane onBack={onBack} showBack={showBack}>
       <div ref={pane} className="relative flex min-h-0 flex-1">
@@ -284,6 +374,45 @@ export function ThreadView({
                 {th.subject.trim() || t("thread.noSubject")}
               </h2>
               <div className="-mr-1.5 flex shrink-0 items-center">
+                <DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t("snooze.action")}
+                          aria-keyshortcuts="h"
+                          className={cn("text-muted-foreground hover:text-foreground", snoozedUntil && "text-foreground")}
+                        >
+                          <AlarmClock />
+                        </Button>
+                      </DropdownMenuTrigger>
+                    </TooltipTrigger>
+                    <TooltipContent className="flex items-center gap-2">
+                      {t("snooze.action")}
+                      <Kbd className="border-background/20 bg-background/15 text-background">h</Kbd>
+                    </TooltipContent>
+                  </Tooltip>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <SnoozeItems
+                      targets={snoozeTarget}
+                      onResume={snoozedUntil ? () => snoozer.unsnooze(threadId, snoozedUntil) : undefined}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <TagMenu targets={[{ threadId, mailbox: th.mailbox, tags: th.tags ?? [] }]} open={tagsOpen} onOpenChange={setTagsOpen}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={t("tags.button")}
+                    aria-keyshortcuts="l"
+                    title={t("tags.button")}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Tags />
+                  </Button>
+                </TagMenu>
                 <Action label={archived ? t("thread.unarchive") : t("thread.archive")} kbd="e" onClick={() => actions.archive(target)}>
                   {archived ? <ArchiveRestore /> : <Archive />}
                 </Action>
@@ -298,13 +427,16 @@ export function ThreadView({
                 <Action label={t("context.toggle")} kbd="i" pressed={contextShown} onClick={toggleContext}>
                   <PanelRight />
                 </Action>
-                <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
-                <Action label={t("thread.prev")} kbd="k" onClick={onPrev} disabled={!onPrev}>
-                  <ChevronLeft />
-                </Action>
-                <Action label={t("thread.next")} kbd="j" onClick={onNext} disabled={!onNext}>
-                  <ChevronRight />
-                </Action>
+                {/* Phones have no j/k and little room: the subject gets it (Voltar is there). */}
+                <span className="contents max-sm:hidden">
+                  <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
+                  <Action label={t("thread.prev")} kbd="k" onClick={onPrev} disabled={!onPrev}>
+                    <ChevronLeft />
+                  </Action>
+                  <Action label={t("thread.next")} kbd="j" onClick={onNext} disabled={!onNext}>
+                    <ChevronRight />
+                  </Action>
+                </span>
               </div>
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
@@ -314,8 +446,15 @@ export function ThreadView({
               {!personal && (
                 <AssigneeMenu mailbox={th.mailbox} assignee={th.assignee ?? null} name={th.assigneeName ?? null} onAssign={vm.assign} />
               )}
+              {tags.map((x) => (
+                <TagChip key={x._id} tag={x} className="h-6" onRemove={() => tagActions.toggle([{ threadId, tags: th.tags ?? [] }], x)} />
+              ))}
+              <span className="ml-auto flex min-w-0 items-center">
+                <PresenceBadge rows={others_} />
+              </span>
             </div>
           </header>
+          {snoozedUntil && <SnoozedBanner until={snoozedUntil} onResume={() => snoozer.unsnooze(threadId, snoozedUntil)} />}
           <Confirm
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
@@ -374,19 +513,36 @@ export function ThreadView({
                 const item = vm.items[f.index]!;
                 const m = item.message;
                 const open = isOpen(m._id);
+                const lines: ActivityEntry[] = after[f.index] ?? [];
                 return (
-                  <li key={m._id} className={cn(m.direction !== "note" && "border-b last:border-b-0")}>
-                    {open ? (
-                      <MessageBlock
-                        item={item}
-                        urls={vm.attachmentUrls}
-                        onCollapse={m._id === lastId && count === 1 ? undefined : () => toggle(m._id)}
-                        onForward={item.pending || m.direction === "note" ? undefined : () => forward(m)}
-                      />
-                    ) : (
-                      <CollapsedMessage item={item} onExpand={() => toggle(m._id)} />
-                    )}
-                  </li>
+                  <Fragment key={m._id}>
+                    <li className={cn(m.direction !== "note" && "border-b last:border-b-0")}>
+                      {open ? (
+                        <MessageBlock
+                          item={item}
+                          scheduled={
+                            isScheduled(m) && !item.pending && m.emailId
+                              ? {
+                                  busy: cancels.busy.has(m.emailId),
+                                  onEdit: () => cancelSend(m, true),
+                                  onCancel: () => cancelSend(m, false),
+                                }
+                              : undefined
+                          }
+                          urls={vm.attachmentUrls}
+                          onCollapse={m._id === lastId && count === 1 ? undefined : () => toggle(m._id)}
+                          onForward={item.pending || m.direction === "note" ? undefined : () => forward(m)}
+                        />
+                      ) : (
+                        <CollapsedMessage item={item} onExpand={() => toggle(m._id)} />
+                      )}
+                    </li>
+                    {lines.map((e) => (
+                      <li key={e._id} className="border-b">
+                        <ActivityLine entry={e} inline />
+                      </li>
+                    ))}
+                  </Fragment>
                 );
               })}
               {scheduled.map((x) => (
@@ -400,6 +556,7 @@ export function ThreadView({
           <Composer
             key={threadId}
             ref={composerRef}
+            onActivity={setReplying}
             threadId={threadId}
             mailbox={th.mailbox}
             mailboxLabel={boxes.find((b) => b.name === th.mailbox)?.displayName ?? th.mailbox}
@@ -417,6 +574,7 @@ export function ThreadView({
             items={vm.items}
             urls={vm.attachmentUrls}
             overlay={!roomy}
+            activity={activity.entries}
             onClose={toggleContext}
             onOpenThread={(id) => onOpenThread?.(id)}
           />
@@ -597,11 +755,14 @@ function CollapsedMessage({ item, onExpand }: { item: MessageItem; onExpand: () 
 /** One open message: the header row, then the body as the sender wrote it (HTML on white paper, or text). */
 function MessageBlock({
   item,
+  scheduled,
   urls,
   onCollapse,
   onForward,
 }: {
   item: MessageItem;
+  /** A scheduled send still waiting: its bar (Editar, Cancelar envio) replaces the delivery marker. */
+  scheduled?: { busy: boolean; onEdit: () => void; onCancel: () => void };
   urls: Record<string, string | null>;
   onCollapse?: () => void;
   onForward?: () => void;
@@ -660,6 +821,11 @@ function MessageBlock({
             {t("thread.to", { to: m.to.map(displayAddress).join(", ") })}
           </span>
         )}
+        {!!m.bcc?.length && (
+          <span className="block truncate text-xs text-muted-foreground">
+            {t("schedule.noBcc", { list: m.bcc.map(displayAddress).join(", ") })}
+          </span>
+        )}
       </span>
     </>
   );
@@ -683,7 +849,7 @@ function MessageBlock({
           <time className="text-xs text-muted-foreground tabular-nums" dateTime={new Date(m.at).toISOString()}>
             {item.pending ? t("thread.sending") : formatFull(m.at, locale)}
           </time>
-          {!item.pending && <DeliveryMarker message={m} />}
+          {!item.pending && !isScheduled(m) && <DeliveryMarker message={m} />}
         </div>
         {onForward && (
           <Tooltip>
@@ -703,6 +869,14 @@ function MessageBlock({
         )}
       </header>
       <div className="mt-3">
+        {isScheduled(m) && (
+          <ScheduledBar
+            at={m.scheduledFor}
+            busy={!scheduled || scheduled.busy}
+            onEdit={scheduled?.onEdit ?? (() => {})}
+            onCancel={scheduled?.onCancel ?? (() => {})}
+          />
+        )}
         {m.html && !item.pending ? (
           <HtmlBody html={m.html} cid={item.cid} title={t("thread.messageFrame", { from: name })} />
         ) : (
