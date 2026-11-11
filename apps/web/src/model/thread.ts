@@ -1,7 +1,9 @@
 // View model of the thread screen: the conversation, attachment URLs, and the actions (all optimistic; queued while
 // reconnecting; see lib/optimistic.ts).
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnectionState, useMutation, useQuerySnapshot } from "@freecorps/ember-react";
+import { useDevData } from "@/dev/data";
+import { fixtureThread } from "@/dev/fixtures";
 import { api, type Message, type Thread } from "@/lib/api";
 import { isOptimisticId } from "@/lib/optimistic";
 import type { LoadStatus, Source } from "./threads";
@@ -64,7 +66,15 @@ export function messageItems(messages: readonly Message[], urls: Record<string, 
 }
 
 export function useThread(threadId: string) {
-  const s = useQuerySnapshot(api.inbox.thread, { threadId });
+  // Dev only (break-ui): a fixture row of `?data=` opens its fixture conversation; production builds drop it.
+  const dev = useDevData();
+  const [devNow] = useState(() => Date.now());
+  const fx = useMemo(
+    () => (import.meta.env.DEV && dev && threadId.startsWith("fx_") ? fixtureThread(dev, threadId, devNow) : null),
+    [dev, threadId, devNow],
+  );
+  const live = useQuerySnapshot(api.inbox.thread, fx ? "skip" : { threadId });
+  const s = fx ? { ...live, status: "success" as const, value: fx, error: undefined, source: "server" as const } : live;
   const urlsSnap = useQuerySnapshot(api.inbox.attachments, { threadId });
   const { online } = useConnectionState();
   const markRead = useMutation(api.inbox.markRead);
@@ -81,10 +91,10 @@ export function useThread(threadId: string) {
   // Opening an unread thread marks it read, once per visit (marking it unread again afterwards sticks).
   const marked = useRef(false);
   useEffect(() => {
-    if (!thread || marked.current || isOptimisticId(thread._id)) return;
+    if (!thread || marked.current || isOptimisticId(thread._id) || fx) return;
     marked.current = true;
     if (thread.unreadCount > 0) markRead({ threadId }).catch(() => {});
-  }, [thread, threadId, markRead]);
+  }, [thread, threadId, markRead, fx]);
 
   const swallow = (p: Promise<unknown>) => void p.catch(() => {});
   const toggleRead = useCallback(() => {

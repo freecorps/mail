@@ -44,7 +44,9 @@ export function Mailboxes() {
               <Card className="flex h-full flex-col gap-3 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate font-medium">{b.displayName ?? b.name}</p>
+                    <p dir="auto" className="truncate font-medium">
+                      {b.displayName ?? b.name}
+                    </p>
                     <p className="truncate font-mono text-xs text-muted-foreground">{b.address}</p>
                   </div>
                   {!b.owner && (

@@ -1,10 +1,8 @@
-// Strings of the admin screen (features/admin). Spread into the tables of strings.ts, so a key missing in English is
-// a type error there too.
+// Strings of the admin screen (features/admin), loaded with its chunk: AdminView registers them (`registerStrings`).
+// A key missing in English is a type error (`adminEn` is typed by the Portuguese keys). The few the inbox shows before
+// the screen loads (its name, the section names in ⌘K) are in adminShell.ts.
 
 export const adminPtBR = {
-  "admin.title": "Administração",
-  "admin.open": "Administração",
-  "admin.back": "Voltar às caixas",
   "admin.yes": "Sim",
   "admin.no": "Não",
   "admin.none": "—",
@@ -14,14 +12,6 @@ export const adminPtBR = {
   "admin.copy": "Copiar",
   "admin.copied": "Copiado",
 
-  "admin.section.overview": "Visão geral",
-  "admin.section.domains": "Domínios",
-  "admin.section.mailboxes": "Caixas",
-  "admin.section.members": "Pessoas",
-  "admin.section.keys": "Chaves de API",
-  "admin.section.emails": "E-mails enviados",
-  "admin.section.suppressions": "Supressões",
-  "admin.section.webhooks": "Webhooks",
   "admin.webhooks.intro":
     "Avisos assinados (Standard Webhooks) quando chega um e-mail ou muda a entrega de um enviado. Caixas pessoais nunca saem por aqui.",
   "admin.webhooks.new": "Novo webhook",
@@ -227,9 +217,6 @@ export const adminPtBR = {
 export type AdminKey = keyof typeof adminPtBR;
 
 export const adminEn: Record<AdminKey, string> = {
-  "admin.title": "Administration",
-  "admin.open": "Administration",
-  "admin.back": "Back to the mailboxes",
   "admin.yes": "Yes",
   "admin.no": "No",
   "admin.none": "—",
@@ -239,14 +226,6 @@ export const adminEn: Record<AdminKey, string> = {
   "admin.copy": "Copy",
   "admin.copied": "Copied",
 
-  "admin.section.overview": "Overview",
-  "admin.section.domains": "Domains",
-  "admin.section.mailboxes": "Mailboxes",
-  "admin.section.members": "People",
-  "admin.section.keys": "API keys",
-  "admin.section.emails": "Sent emails",
-  "admin.section.suppressions": "Suppressions",
-  "admin.section.webhooks": "Webhooks",
   "admin.webhooks.intro":
     "Signed callbacks (Standard Webhooks) when mail arrives or a sent email's delivery changes. Personal mailboxes never go out here.",
   "admin.webhooks.new": "New webhook",

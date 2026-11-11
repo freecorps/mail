@@ -36,20 +36,18 @@ import { DataToggle } from "@/dev/DataToggle";
 import { Slot } from "@/components/Reparent";
 import { useHost } from "@/lib/host";
 import { requestContextToggle } from "@/lib/contextPanel";
-import { ComposeDock } from "./ComposeDock";
-import { ComposerDialogs } from "./composer/Dialogs";
 import { loadEditor } from "./editor/load";
-import { openWindow } from "@/model/dock";
+import { openWindow, useComposerDialog, useDock } from "@/model/dock";
 import { scheduledSends } from "@/model/outbox";
 import type { ComposerHandle } from "./Composer";
-import { ShortcutsDialog } from "./ShortcutsDialog";
-import { PickerHost } from "./Pickers";
-import { openPicker, type TagTarget } from "@/model/picker";
+
+import { loadTagCommand } from "./tagCommandLoad";
+import { openPicker, usePicker, type TagTarget } from "@/model/picker";
 import { useAllTags } from "@/model/tags";
 import { snoozeTargetOf, type SnoozeTarget } from "@/model/snooze";
 import { Sidebar, type Folder } from "./Sidebar";
 import { ThreadList } from "./ThreadList";
-import { ThreadView } from "./ThreadView";
+import { ThreadSkeleton } from "./ThreadPane";
 import { Today } from "./Today";
 
 // Split out of the main bundle: the palette loads while the browser is idle after the inbox shows (it opens with no
@@ -57,6 +55,25 @@ import { Today } from "./Today";
 const loadPalette = () => import("./CommandPalette");
 const CommandPalette = lazy(() => loadPalette().then((m) => ({ default: m.CommandPalette })));
 const LazyAdminView = lazy(() => import("./admin/AdminView").then((m) => ({ default: m.AdminView })));
+// Not first paint: the compose windows, the signature / saved-reply dialogs and the shortcuts sheet are chunks of their
+// own, mounted the first time they are needed and kept mounted after (their exit animations and state survive).
+// The conversation (ThreadView with the composer, the context panel, the HTML frame): fetched when idle, so the list
+// paints first; until it is in, an open conversation shows its skeleton. The pickers (snooze, tags, send-at) likewise.
+const loadThread = () => import("./ThreadView");
+const ThreadView = lazy(() => loadThread().then((m) => ({ default: m.ThreadView })));
+const loadPickers = () => import("./Pickers");
+const PickerHost = lazy(() => loadPickers().then((m) => ({ default: m.PickerHost })));
+const loadDock = () => import("./ComposeDock");
+const ComposeDock = lazy(() => loadDock().then((m) => ({ default: m.ComposeDock })));
+const ComposerDialogs = lazy(() => import("./composer/Dialogs").then((m) => ({ default: m.ComposerDialogs })));
+const ShortcutsDialog = lazy(() => import("./ShortcutsDialog").then((m) => ({ default: m.ShortcutsDialog })));
+
+/** True from the first render where `now` is true on (a lazily loaded part, once needed, stays mounted). */
+function useOnce(now: boolean): boolean {
+  const [seen, setSeen] = useState(now);
+  if (now && !seen) setSeen(true);
+  return seen || now;
+}
 const AdminView = (p: React.ComponentProps<typeof LazyAdminView>) => (
   <Suspense fallback={null}>
     <LazyAdminView {...p} />
@@ -108,6 +125,10 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     idle(() => {
       void loadPalette();
       void loadEditor();
+      void loadDock();
+      void loadThread();
+      void loadPickers();
+      void loadTagCommand();
     });
   }, []);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -128,6 +149,10 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, [t]);
   const [helpOpen, setHelpOpen] = useState(false);
+  const dockUsed = useOnce(useDock().length > 0);
+  const dialogsUsed = useOnce(useComposerDialog() !== null);
+  const helpUsed = useOnce(helpOpen);
+  const pickersUsed = useOnce(usePicker() !== null);
   const composer = useRef<ComposerHandle>(null);
   const threadHost = useHost();
   const search = useRef<HTMLInputElement>(null);
@@ -595,20 +620,23 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const at = route.thread ? rows.findIndex((r) => r.threadId === route.thread) : -1;
   const prevId = at > 0 ? rows[at - 1]!.threadId : null;
   const nextId = at >= 0 && at < rows.length - 1 ? rows[at + 1]!.threadId : null;
+  const closeThread = () => navigate({ thread: null }, { push: true });
   const thread = route.thread ? (
-    <ThreadView
-      key={route.thread}
-      threadId={route.thread}
-      onBack={() => navigate({ thread: null }, { push: true })}
-      // Stepping replaces the history entry, as j/k do (Back leaves the conversation, not each step).
-      onPrev={prevId ? () => step(prevId) : undefined}
-      onNext={nextId ? () => step(nextId) : undefined}
-      showBack={overlay}
-      composerRef={composer}
-      // From the context panel (an earlier conversation): the list cursor follows, so j/k continue from it.
-      onOpenThread={open}
-      admin={me.admin}
-    />
+    <Suspense fallback={<ThreadSkeleton onBack={closeThread} showBack={overlay} />}>
+      <ThreadView
+        key={route.thread}
+        threadId={route.thread}
+        onBack={closeThread}
+        // Stepping replaces the history entry, as j/k do (Back leaves the conversation, not each step).
+        onPrev={prevId ? () => step(prevId) : undefined}
+        onNext={nextId ? () => step(nextId) : undefined}
+        showBack={overlay}
+        composerRef={composer}
+        // From the context panel (an earlier conversation): the list cursor follows, so j/k continue from it.
+        onOpenThread={open}
+        admin={me.admin}
+      />
+    </Suspense>
   ) : null;
 
   const today = <Today mailboxNames={mailboxNames} onOpen={open} onView={goView} />;
@@ -650,7 +678,9 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   );
 
   return (
-    <div className="flex h-full flex-col">
+    // Edge to edge on a phone (viewport-fit=cover): the shell pads its content off the notch, the home indicator and,
+    // in landscape, the rounded corners.
+    <div className="flex h-full flex-col pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]">
       {!online && (
         <output className="flex items-center justify-center gap-2 bg-status-waiting/15 px-4 py-1.5 text-xs font-medium text-foreground">
           <WifiOff className="size-3.5" aria-hidden="true" />
@@ -705,7 +735,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       )}
       {!route.thread && !adminSection && !wide && (
         <Button
-          className="fixed right-4 bottom-4 size-12 rounded-full shadow-raised"
+          className="fixed right-[calc(1rem+env(safe-area-inset-right))] bottom-[calc(1rem+env(safe-area-inset-bottom))] size-12 rounded-full shadow-raised"
           size="icon"
           aria-label={t("threads.compose")}
           onClick={() => newMessage(mailbox)}
@@ -713,10 +743,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           <PenSquare aria-hidden="true" />
         </Button>
       )}
-      <ComposeDock mailboxes={boxes.mailboxes} defaultMailbox={view ? null : mailbox} onOpenThread={(id) => open(id)} />
-      <ComposerDialogs mailboxes={boxes.mailboxes} />
-      <PickerHost />
-      <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      {/* One boundary each: a part still loading never blanks one already on screen. */}
+      <Suspense fallback={null}>
+        {dockUsed && <ComposeDock mailboxes={boxes.mailboxes} defaultMailbox={view ? null : mailbox} onOpenThread={(id) => open(id)} />}
+      </Suspense>
+      <Suspense fallback={null}>{dialogsUsed && <ComposerDialogs mailboxes={boxes.mailboxes} />}</Suspense>
+      <Suspense fallback={null}>{helpUsed && <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />}</Suspense>
+      <Suspense fallback={null}>{pickersUsed && <PickerHost />}</Suspense>
       {thread && !adminSection && createPortal(thread, threadHost)}
       {import.meta.env.DEV && <DataToggle />}
       <Suspense fallback={null}>

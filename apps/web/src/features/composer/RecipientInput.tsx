@@ -97,8 +97,10 @@ export function RecipientInput({
   };
 
   return (
-    <div className="relative min-w-0 flex-1">
-      <div className="flex max-h-32 min-h-9 flex-wrap items-center gap-1 overflow-y-auto py-1">
+    // `trailing` (Cc / Cco) sits beside the chips, not among them: with many recipients the chips scroll, and the
+    // buttons would wrap onto a line of their own and scroll away with them.
+    <div className="relative flex min-w-0 flex-1 items-start gap-1">
+      <div className="flex max-h-32 min-h-9 min-w-0 flex-1 flex-wrap items-center gap-1 overflow-y-auto py-1">
         {chips.map((c, i) => {
           const m = /^(.*?)\s*<([^>]+)>\s*$/.exec(c.value);
           // The name as written, without the quotes a name with a comma gets.
@@ -112,7 +114,10 @@ export function RecipientInput({
                 c.valid ? "bg-secondary text-secondary-foreground" : "border-destructive/50 bg-destructive/10 text-destructive",
               )}
             >
-              <span className="min-w-0 truncate">{shown}</span>
+              {/* Isolated: a right-to-left name or address keeps its own order without flipping the chip. */}
+              <span dir="auto" className="min-w-0 truncate">
+                {shown}
+              </span>
               <button
                 type="button"
                 aria-label={t("compose.removeChip", { value: c.value })}
@@ -189,8 +194,8 @@ export function RecipientInput({
           }}
           className="h-7 min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
-        {trailing}
       </div>
+      {trailing && <div className="flex h-9 shrink-0 items-center py-1">{trailing}</div>}
       {options.length > 0 && (
         <div
           id={listId}

@@ -5,7 +5,8 @@ import { ArrowLeft, Ban, Globe, Inbox as InboxIcon, KeyRound, LayoutDashboard, S
 import { useAction } from "@freecorps/ember-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/context";
-import type { StringKey } from "@/i18n/strings";
+import { adminEn, adminPtBR } from "@/i18n/admin";
+import { registerStrings, type StringKey } from "@/i18n/strings";
 import { api, type ServerInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ADMIN_SECTIONS, type AdminSection } from "@/model/route";
@@ -17,6 +18,9 @@ import { Members } from "./Members";
 import { Overview } from "./Overview";
 import { SectionBoundary } from "./parts";
 import { Webhooks } from "./Webhooks";
+
+// This chunk carries the admin screen's strings: in the tables before any section renders.
+registerStrings({ "pt-BR": adminPtBR, en: adminEn });
 
 const ICONS: Record<AdminSection, typeof Globe> = {
   overview: LayoutDashboard,
@@ -68,7 +72,8 @@ export function AdminView(p: { section: AdminSection; onSection: (s: AdminSectio
                   onClick={() => p.onSection(s)}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "pressable flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm whitespace-nowrap",
+                    // The inbox sidebar's item: same height (density), type and padding.
+                    "pressable flex h-(--item-h) w-full items-center gap-2.5 rounded-md px-2 text-left text-ui whitespace-nowrap",
                     active ? "bg-selected font-medium text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
                   )}
                 >

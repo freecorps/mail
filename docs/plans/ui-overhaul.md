@@ -251,6 +251,6 @@ Release e bump.
 
 | Tarefa | Status |
 |---|---|
-| Passada de movimento + break-ui | todo |
-| Admin + web no celular | todo |
+| Passada de movimento + break-ui | web em review (`ui/web/08-polish`); mobile todo |
+| Admin + web no celular | web em review (`ui/web/08-polish`) |
 | Screenshots + READMEs | todo |

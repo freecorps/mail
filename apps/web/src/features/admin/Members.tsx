@@ -49,7 +49,9 @@ export function Members() {
                 <Card className="flex flex-wrap items-center gap-3 px-4 py-3">
                   <Avatar name={r.name ?? r.email ?? r.userId} className="size-8" />
                   <div className="min-w-40 flex-1">
-                    <p className="truncate text-sm font-medium">{r.name ?? r.email ?? r.userId}</p>
+                    <p dir="auto" className="truncate text-sm font-medium">
+                      {r.name ?? r.email ?? r.userId}
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {r.email ? `${r.email} · ` : ""}
                       {t("admin.members.requestedAt", { when: formatWhen(r.requestedAt, now, locale) })}
@@ -94,9 +96,12 @@ export function Members() {
               <li key={m.userId} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <Avatar name={label(m)} className="size-8" />
                 <div className="min-w-40 flex-1">
-                  <p className="flex items-center gap-2 truncate text-sm font-medium">
-                    {label(m)}
-                    {mine && <span className="text-xs font-normal text-muted-foreground">({t("admin.members.you")})</span>}
+                  {/* `truncate` on the flex line itself never cut the name (ellipsis needs a block box): the name does. */}
+                  <p className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                    <span dir="auto" className="min-w-0 truncate">
+                      {label(m)}
+                    </span>
+                    {mine && <span className="shrink-0 text-xs font-normal text-muted-foreground">({t("admin.members.you")})</span>}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {m.admin && (

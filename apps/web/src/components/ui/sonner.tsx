@@ -7,6 +7,8 @@ const Toaster = ({ theme, ...props }: ToasterProps) => {
     <Sonner
       theme={theme ?? "system"}
       className="toaster group"
+      // Phones: above the home indicator (the page runs edge to edge, viewport-fit=cover).
+      mobileOffset={{ bottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

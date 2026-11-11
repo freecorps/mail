@@ -111,7 +111,13 @@ cd apps/web && MAIL_API_URL=http://127.0.0.1:8790 bun run dev
 
 In dev only, `?data=worst` (or `empty`, `one`, `huge`) swaps the sidebar's, Hoje's and the thread list's data for the worst-case fixtures in
 `src/dev/fixtures.ts` (long and RTL names, unbreakable addresses, 12,483 unread, capped counts, empty subjects), with a
-Demo / Worst case / Empty / One / 1,000 rows switch at the bottom of the screen. Production builds drop it.
+Demo / Worst case / Empty / One / 1,000 rows switch at the bottom of the screen. A fixture row opens its fixture
+conversation (the worst one, `?t=fx_30`, has 20 tags, a paragraph of a subject, 14 Cc, long attachment names, an RTL
+note and a 1400px HTML table). Production builds drop it (the fixtures' top level is marked pure, so the bundler can).
+
+The first load is the inbox shell and the list. The conversation, the compose windows, the pickers, the tag menu, ⌘K,
+the editor and the admin screen (with its strings) are chunks of their own, fetched while the browser is idle or on
+first use.
 
 The root `bun run check` runs typecheck, `vp check`, every test and this build. CI runs the same.
 

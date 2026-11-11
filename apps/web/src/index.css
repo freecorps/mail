@@ -255,6 +255,15 @@
   [role="tab"] {
     touch-action: manipulation;
   }
+  /* A long press on a control selects its label or pops the link callout on iOS; content text stays selectable. */
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"] {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";
@@ -286,6 +295,26 @@
   }
 }
 
+/*
+ * Keyboard opens instantly: a menu, popover, tooltip, dialog or compose window that a key opened (or closed) appears
+ * and leaves without its enter/exit animation (src/lib/modality.ts sets `data-modality`). Radix's presence sees no
+ * animation and unmounts at once. Pointer-opened surfaces keep their motion.
+ */
+[data-modality="keyboard"] :is([data-slot$="-content"], [data-slot$="-overlay"], [data-compose-window]) {
+  animation: none !important;
+}
+/* Space on a focused button is `:active` too: the press scale is pointer feedback only. */
+[data-modality="keyboard"] :is(.pressable, [data-slot="button"]):active {
+  transform: none !important;
+}
+
+/* Toasts (sonner): its 400ms default with a plain `ease` runs past the UI budget; same tokens as everything else.
+   `html` outranks the stylesheet sonner injects later. Only the durations change, so sonner's own `transition: none` states (swiping, reduced motion) still win. */
+html [data-sonner-toaster] [data-sonner-toast] {
+  transition-duration: 260ms, 200ms, 260ms, 160ms;
+  transition-timing-function: var(--ease-out);
+}
+
 /* Reduced motion: fewer and gentler, not none. Fades stay (they explain what appeared); scale, slide and press
    movement go. The enter/exit variables are tw-animate-css's. */
 @media (prefers-reduced-motion: reduce) {
@@ -313,7 +342,8 @@
 @media (pointer: coarse) {
   input,
   textarea,
-  select {
+  select,
+  [contenteditable="true"] {
     font-size: 16px;
   }
 }

@@ -17,7 +17,6 @@ import {
   AlarmClock,
   Archive,
   ArchiveRestore,
-  ArrowLeft,
   Ban,
   Check,
   CheckCheck,
@@ -47,7 +46,6 @@ import { Avatar } from "@/components/Avatar";
 import { Kbd } from "@/components/Kbd";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/context";
 import { plural } from "@/i18n/strings";
@@ -68,7 +66,8 @@ import { AssignItems } from "./AssignMenu";
 import { Composer, type ComposerHandle } from "./Composer";
 import { ContextPanel, Files } from "./ContextPanel";
 import { EmailFrame } from "./EmailFrame";
-import { Confirm } from "./admin/parts";
+import { Confirm } from "@/components/Confirm";
+import { Pane, ThreadSkeleton } from "./ThreadPane";
 import { SnoozeItems } from "./SnoozeMenu";
 import { TagMenu } from "./TagMenu";
 import { ActivityLine, PresenceBadge, ScheduledBar, SnoozedBanner } from "./ThreadState";
@@ -84,6 +83,8 @@ import type { ActivityEntry, Address } from "@/lib/api";
 
 /** Width of the conversation pane from which the context panel sits beside the messages (else it covers them). */
 const SIDE_PANEL_MIN = 760;
+/** Tags the header shows before "+N" (a thread takes up to 20; all of them would push the messages off a phone). */
+const HEADER_TAGS = 6;
 
 export function ThreadView({
   threadId,
@@ -118,6 +119,7 @@ export function ThreadView({
   const [replying, setReplying] = useState(false);
   useOwnPresence(threadId, replying, vm.thread !== null);
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [allTags, setAllTags] = useState(false);
   const cancelM = useMutation(api.inbox.cancelScheduled);
   // Per scheduled email: canceling one never holds up another.
   const cancels = useInFlight();
@@ -334,26 +336,7 @@ export function ThreadView({
       </Pane>
     );
   }
-  if (!vm.thread) {
-    return (
-      <Pane onBack={onBack} showBack={showBack}>
-        <div className="space-y-3 border-b px-4 py-4 sm:px-6" aria-busy="true">
-          <Skeleton className="h-6 w-2/3" />
-          <div className="flex gap-2">
-            <Skeleton className="h-5 w-16 rounded-full" />
-            <Skeleton className="h-5 w-24 rounded-full" />
-          </div>
-        </div>
-        <div className="space-y-3 px-4 py-5 sm:px-6" aria-hidden="true">
-          <div className="flex items-center gap-3">
-            <Skeleton className="size-8 rounded-full" />
-            <Skeleton className="h-4 w-40" />
-          </div>
-          <Skeleton className="h-48 w-full" />
-        </div>
-      </Pane>
-    );
-  }
+  if (!vm.thread) return <ThreadSkeleton onBack={onBack} showBack={showBack} />;
 
   const th = vm.thread;
   // Ember quotes the latest message received; its attribution line is written here, in the UI language.
@@ -370,10 +353,17 @@ export function ThreadView({
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="border-b px-4 pt-3 pb-3 sm:px-6">
             <div className="flex items-start gap-3">
-              <h2 className="min-w-0 flex-1 pt-0.5 text-base font-semibold text-balance [overflow-wrap:anywhere] sm:text-lg">
+              {/* A subject can run to a paragraph: three lines here, all of it in the title. */}
+              <h2
+                dir="auto"
+                title={th.subject.trim() || undefined}
+                className="line-clamp-3 min-w-0 flex-1 pt-0.5 text-base font-semibold text-balance [overflow-wrap:anywhere] sm:text-lg"
+              >
                 {th.subject.trim() || t("thread.noSubject")}
               </h2>
-              <div className="-mr-1.5 flex shrink-0 items-center">
+              {/* Phones: the actions move up into the Voltar bar (its right side is empty), so the subject gets the width.
+                  `bottom` is relative to the pane under that bar: its 6px padding and 1px border. */}
+              <div className="-mr-1.5 flex shrink-0 items-center max-sm:absolute max-sm:right-2 max-sm:bottom-[calc(100%+7px)] max-sm:mr-0">
                 <DropdownMenu>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -441,14 +431,27 @@ export function ThreadView({
             </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted-foreground">
               {th.number > 0 && <span className="font-mono tabular-nums">#{th.number}</span>}
-              <span className="min-w-0 truncate">{contactOf(th)}</span>
+              <span dir="auto" className="max-w-full min-w-0 truncate">
+                {contactOf(th)}
+              </span>
               <StatusMenu status={th.status} onPick={(s) => actions.setStatus(target, s)} />
               {!personal && (
                 <AssigneeMenu mailbox={th.mailbox} assignee={th.assignee ?? null} name={th.assigneeName ?? null} onAssign={vm.assign} />
               )}
-              {tags.map((x) => (
+              {(allTags ? tags : tags.slice(0, HEADER_TAGS)).map((x) => (
                 <TagChip key={x._id} tag={x} className="h-6" onRemove={() => tagActions.toggle([{ threadId, tags: th.tags ?? [] }], x)} />
               ))}
+              {tags.length > HEADER_TAGS && (
+                <button
+                  type="button"
+                  aria-expanded={allTags}
+                  aria-label={allTags ? t("tags.showFewer") : t("tags.showMore", { count: tags.length - HEADER_TAGS })}
+                  onClick={() => setAllTags((v) => !v)}
+                  className="pressable h-6 rounded-full px-1.5 text-xs text-muted-foreground tabular-nums hover:bg-accent hover:text-foreground"
+                >
+                  {allTags ? t("tags.showFewer") : `+${tags.length - HEADER_TAGS}`}
+                </button>
+              )}
               <span className="ml-auto flex min-w-0 items-center">
                 <PresenceBadge rows={others_} />
               </span>
@@ -581,23 +584,6 @@ export function ThreadView({
         )}
       </div>
     </Pane>
-  );
-}
-
-function Pane({ children, onBack, showBack }: { children: React.ReactNode; onBack: () => void; showBack: boolean }) {
-  const { t } = useI18n();
-  return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      <div className={cn("border-b px-2 py-1.5", !showBack && "md:hidden")}>
-        <Button variant="ghost" size="sm" onClick={onBack} aria-keyshortcuts="Escape">
-          <ArrowLeft aria-hidden="true" />
-          <span className="md:hidden">{t("thread.back")}</span>
-          <span className="hidden md:inline">{t("layout.back")}</span>
-          <Kbd className="ml-1 hidden md:inline-flex">Esc</Kbd>
-        </Button>
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -807,14 +793,19 @@ function MessageBlock({
       <Avatar name={name} className="size-8" />
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-baseline gap-1.5 text-sm">
-          <span className="truncate font-medium">{name}</span>
+          {/* The name wins the room: a long address shrinks first (down to a hint of itself). */}
+          <span dir="auto" className="min-w-0 truncate font-medium">
+            {name}
+          </span>
           {outbound && (
             <span className="inline-flex shrink-0 self-center text-primary" title={t("thread.sentBy")}>
               <CornerUpRight className="size-3.5" aria-hidden="true" />
               <span className="sr-only">{t("thread.sentBy")}</span>
             </span>
           )}
-          <span className="hidden min-w-0 truncate text-xs text-muted-foreground sm:inline">{outbound ? m.fromEmail : m.from.email}</span>
+          <span className="hidden min-w-12 shrink-[100] truncate text-xs text-muted-foreground sm:inline">
+            {outbound ? m.fromEmail : m.from.email}
+          </span>
         </span>
         {m.to.length > 0 && (
           <span className="block truncate text-xs text-muted-foreground">

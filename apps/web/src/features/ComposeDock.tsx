@@ -58,7 +58,9 @@ export function ComposeDock({
   );
   if (!windows.length) return null;
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-row-reverse items-end gap-3 px-4">
+    // Clear of the home indicator and a landscape notch (`viewport-fit=cover`): docked and minimized windows stay
+    // reachable. A phone's open window covers the screen and pads itself.
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex flex-row-reverse items-end gap-3 pr-[calc(1rem+env(safe-area-inset-right))] pb-[env(safe-area-inset-bottom)] pl-[calc(1rem+env(safe-area-inset-left))]">
       {windows.map((w) => (
         <ComposeWindow
           key={w.key}

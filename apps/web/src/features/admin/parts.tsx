@@ -1,19 +1,9 @@
-// Small pieces shared by the admin sections: section header, tone pills, a copy button, a confirm dialog, the
-// project picker, and `useRun` (runs a call, toasts its failure).
+// Small pieces shared by the admin sections: section header, tone pills, a copy button, the confirm dialog (shared
+// with the inbox, components/Confirm.tsx), the project picker, and `useRun` (runs a call, toasts its failure).
 import { Component, useState, type ReactNode } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, CircleAlert, Copy } from "lucide-react";
 import { useQuerySnapshot } from "@freecorps/ember-react";
 import { toast } from "sonner";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -56,29 +46,45 @@ export function Pill({ tone = "muted", children, className }: { tone?: Tone; chi
   );
 }
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("rounded-lg border bg-card text-card-foreground", className)}>{children}</div>;
-}
-
-export function Loading({ rows = 3 }: { rows?: number }) {
+export function Card({ children, className, ...rest }: { children: ReactNode; className?: string; "aria-busy"?: boolean }) {
   return (
-    <div className="space-y-2" aria-busy="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <Skeleton key={i} className="h-14 w-full" />
-      ))}
+    <div className={cn("rounded-lg border bg-card text-card-foreground", className)} {...rest}>
+      {children}
     </div>
   );
 }
 
+/** The sections' lists while they load: the same card of hairline rows they render, like the inbox's skeleton rows. */
+export function Loading({ rows = 3 }: { rows?: number }) {
+  return (
+    <Card className="divide-y" aria-busy>
+      {Array.from({ length: rows }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-3" aria-hidden="true">
+          <Skeleton className="size-8 shrink-0 rounded-full" />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Skeleton className="h-3.5" style={{ width: `${28 + ((i * 17) % 24)}%` }} />
+            <Skeleton className="h-3" style={{ width: `${44 + ((i * 23) % 30)}%` }} />
+          </div>
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+/** Nothing here yet: a quiet line in the section's card (the inbox's empty state, without the big icon). */
 export function Empty({ children }: { children: ReactNode }) {
-  return <p className="rounded-lg border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">{children}</p>;
+  return <p className="rounded-lg border bg-card px-6 py-10 text-center text-sm text-pretty text-muted-foreground">{children}</p>;
 }
 
 export function Failure({ message }: { message: string }) {
   const { t } = useI18n();
   return (
-    <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-      {t("admin.failed", { message })}
+    <p
+      role="alert"
+      className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive [overflow-wrap:anywhere]"
+    >
+      <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <span className="min-w-0">{t("admin.failed", { message })}</span>
     </p>
   );
 }
@@ -109,32 +115,7 @@ export function CopyButton({ value, label }: { value: string; label?: string }) 
   );
 }
 
-export function Confirm(p: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  body: string;
-  action: string;
-  onConfirm: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <AlertDialog open={p.open} onOpenChange={p.onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{p.title}</AlertDialogTitle>
-          <AlertDialogDescription>{p.body}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={p.onConfirm}>
-            {p.action}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
+export { Confirm } from "@/components/Confirm";
 
 /** The sending project to browse (emails, suppressions): "default", the keys' projects, the shared mailboxes'. */
 export function ProjectPicker(p: { value: string | null; onChange: (project: string) => void; id?: string }) {
