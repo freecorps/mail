@@ -43,9 +43,45 @@ function adjustViewCounts(store: Store, before: Thread, after: Thread) {
  * with it.
  */
 function patchThread(store: Store, threadId: string, patch: (t: Thread) => Thread): Thread | null {
-  const found = patchLoaded(store, threadId, patch);
-  if (found) adjustViewCounts(store, found.before, found.after);
-  return found?.after ?? null;
+  let found = patchLoaded(store, threadId, patch);
+  // Loaded nowhere any more (an archive dropped it from the only list showing it): the copy kept when it was dropped
+  // lets a later patch, such as "Desfazer", put it back.
+  const last = dropped.get(threadId);
+  if (!found && last) found = { before: last, after: patch(last) };
+  if (!found) return null;
+  if (dropped.has(threadId)) remember(found.after);
+  rejoin(store, found.after);
+  adjustViewCounts(store, found.before, found.after);
+  return found.after;
+}
+
+/** Threads an optimistic patch dropped from a list (newest last), so a later patch can bring them back. */
+const dropped = new Map<string, Thread>();
+function remember(t: Thread) {
+  dropped.delete(t._id);
+  dropped.set(t._id, t);
+  if (dropped.size > 200) dropped.delete(dropped.keys().next().value!);
+}
+
+const newerFirst = (a: Thread, b: Thread) => b.lastMessageAt - a.lastMessageAt;
+/** Whether `t` falls inside what a page has loaded (a complete list, or not older than its last row). */
+const inLoadedRange = (v: { page: Thread[]; isDone: boolean }, t: Thread) => v.isDone || !v.page.length || t.lastMessageAt >= v.page[v.page.length - 1]!.lastMessageAt;
+
+/**
+ * Puts `t` into every loaded list it now belongs to and is missing from (an unarchived thread back in "Abertas" and the
+ * views), in date order, as the server's answer will.
+ */
+function rejoin(store: Store, t: Thread) {
+  for (const { args, value } of store.getAllQueries<any>("inbox:threads") as Array<{ args: ThreadsArgs; value: Page<Thread> | undefined }>) {
+    if (!value || args.mailbox !== t.mailbox || (args.status !== undefined && args.status !== t.status)) continue;
+    if (value.page.some((x) => x._id === t._id) || !inLoadedRange(value, t)) continue;
+    store.setQuery<any>("inbox:threads", args, { ...value, page: [...value.page, t].sort(newerFirst) });
+  }
+  for (const { args, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
+    if (!value || !viewKeeps(args.view, args.status)(t)) continue;
+    if (value.page.some((x) => x._id === t._id) || !inLoadedRange(value, t)) continue;
+    store.setQuery<any>("inbox:view", args, { ...value, page: [...value.page, t].sort(newerFirst) });
+  }
 }
 
 function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Thread): { before: Thread; after: Thread } | null {
@@ -64,17 +100,21 @@ function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Th
     const next = patch(value.page[i]!);
     found ??= next;
     // A status filter the thread no longer matches drops it from that list.
-    const page = args.status !== undefined && args.status !== next.status ? value.page.filter((_, j) => j !== i) : value.page.map((t, j) => (j === i ? next : t));
+    const drop = args.status !== undefined && args.status !== next.status;
+    if (drop) remember(next);
+    const page = drop ? value.page.filter((_, j) => j !== i) : value.page.map((t, j) => (j === i ? next : t));
     store.setQuery<any>("inbox:threads", args, { ...value, page });
   }
   // The cross-mailbox views: patched in place, or dropped when it no longer belongs (read in "unread", archived in
-  // "waiting"); one it now joins comes with the server's answer.
+  // "waiting"); `rejoin` adds it to the ones it now belongs to.
   for (const { args, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
     const i = value ? value.page.findIndex((t) => t._id === threadId) : -1;
     if (!value || i < 0) continue;
     const next = patch(value.page[i]!);
     found ??= next;
-    const page = viewKeeps(args.view, args.status)(next) ? value.page.map((t, j) => (j === i ? next : t)) : value.page.filter((_, j) => j !== i);
+    const keep = viewKeeps(args.view, args.status)(next);
+    if (!keep) remember(next);
+    const page = keep ? value.page.map((t, j) => (j === i ? next : t)) : value.page.filter((_, j) => j !== i);
     store.setQuery<any>("inbox:view", args, { ...value, page });
   }
   // The Sent view lists it too, whatever its status: patched in place (its place is when the mailbox last wrote).

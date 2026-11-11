@@ -52,8 +52,14 @@ export function useSwipeGroup(): SwipeGroup {
   const methods = useMemo(
     () => ({
       claim(close: () => void) {
-        if (current.current && current.current !== close) current.current();
-        current.current = close;
+        // The open row closes; the dragged one becomes current only once it settles open (`settled`), so a drag that
+        // springs back closed never leaves the group "open" with its tap-to-close layer over every row.
+        if (current.current && current.current !== close) {
+          const previous = current.current;
+          current.current = null;
+          setAnyOpen(false);
+          previous();
+        }
       },
       settled(close: () => void, open: boolean) {
         if (open) {

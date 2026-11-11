@@ -20,7 +20,10 @@ export function UndoBanner(_: UndoBannerProps) {
   useEffect(() => {
     if (!entry) return;
     host.current
-      ?.showSnackbar({ message: entry.message, actionLabel: t("undo.action"), duration: "short" })
+      // Compose snackbars can't be dismissed from outside, so they keep their own clock: "long" (10 s, stretched by
+      // Compose for accessibility services) is never shorter than the store's window; the undo stays valid until it
+      // closes, whatever the store shows meanwhile.
+      ?.showSnackbar({ message: entry.message, actionLabel: t("undo.action"), duration: "long" })
       .then((r) => {
         if (r === "actionPerformed") {
           undoStore.dismiss(entry.id);

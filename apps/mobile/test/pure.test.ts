@@ -228,6 +228,16 @@ describe("optimistic updates", () => {
     setReplicaUser(null);
   });
 
+  it("undo of an archive brings the thread back to a filtered list that had dropped it", () => {
+    const t = thread({ _id: "email$threads_undo", status: "open", lastMessageAt: 50 });
+    const older = thread({ _id: "email$threads_old", status: "open", lastMessageAt: 10 });
+    const s = fakeStore([["inbox:threads", open, page([t, older])]]);
+    up["inbox:setStatus"]!(s.store, { threadId: t._id, status: "closed" }, rec);
+    expect(s.get("inbox:threads", open).page.map((x: Thread) => x._id)).toEqual([older._id]);
+    up["inbox:setStatus"]!(s.store, { threadId: t._id, status: "open" }, rec);
+    expect(s.get("inbox:threads", open).page.map((x: Thread) => x._id)).toEqual([t._id, older._id]);
+  });
+
   it("archive, assign (name from the loaded member list), compose", () => {
     const s = fakeStore([
       ["inbox:threads", all, page([thread()])],
