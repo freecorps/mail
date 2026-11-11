@@ -101,7 +101,10 @@ export const ExpandedMessage = memo(function ExpandedMessage({
       ? t("thread.sending")
       : t("thread.queued")
     : m.direction === "inbound"
-      ? m.from.email
+      ? // No display name: the name line is already the address.
+        who === m.from.email
+        ? null
+        : m.from.email
       : note
         ? null
         : t("thread.to", { to: recipients || "—" });
