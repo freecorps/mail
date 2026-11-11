@@ -114,3 +114,15 @@ export function parseRecipients(input: string): { valid: string[]; invalid: stri
   }
   return { valid, invalid };
 }
+
+/**
+ * The attribution line over the quoted message in a reply, in the UI language ("Em 5 de nov. de 2026 às 10:12, Marina
+ * Costa escreveu:"); Ember puts it above the `gmail_quote` so mail clients fold the quote.
+ */
+export function quoteHeader(at: number, name: string, locale: Locale): string {
+  return translate(locale, "compose.quoteHeader", {
+    date: new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(at),
+    time: new Intl.DateTimeFormat(locale, { timeStyle: "short" }).format(at),
+    name,
+  });
+}

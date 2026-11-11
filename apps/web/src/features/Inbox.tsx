@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Columns2, Columns3, LayoutList, PenSquare, Settings, WifiOff } from "lucide-react";
 import { useConnectionState, useEmberClient, useMutation } from "@freecorps/ember-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -35,7 +36,11 @@ import { DataToggle } from "@/dev/DataToggle";
 import { Slot } from "@/components/Reparent";
 import { useHost } from "@/lib/host";
 import { requestContextToggle } from "@/lib/contextPanel";
-import { ComposeDialog } from "./ComposeDialog";
+import { ComposeDock } from "./ComposeDock";
+import { ComposerDialogs } from "./composer/Dialogs";
+import { loadEditor } from "./editor/load";
+import { openWindow } from "@/model/dock";
+import { scheduledSends } from "@/model/outbox";
 import type { ComposerHandle } from "./Composer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Sidebar, type Folder } from "./Sidebar";
@@ -91,10 +96,28 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   useEffect(() => {
     const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 1500));
-    idle(() => void loadPalette());
+    idle(() => {
+      void loadPalette();
+      void loadEditor();
+    });
   }, []);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [composeOpen, setComposeOpen] = useState(false);
+  const newMessage = useCallback(
+    (from?: string | null) => {
+      if (!openWindow({ kind: "compose", mailbox: from ?? null })) toast(t("compose.tooMany"));
+    },
+    [t],
+  );
+  // A send still inside its undo window has not left: leaving the page asks first.
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!scheduledSends().length) return;
+      e.preventDefault();
+      e.returnValue = t("send.pendingLeave");
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [t]);
   const [helpOpen, setHelpOpen] = useState(false);
   const composer = useRef<ComposerHandle>(null);
   const threadHost = useHost();
@@ -205,10 +228,10 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     document.title = boxes.totalUnread > 0 ? `(${boxes.totalUnread}) ${t("app.name")}` : t("app.name");
   }, [boxes.totalUnread, t, adminSection]);
 
-  const modal = composeOpen || helpOpen || paletteOpen;
-  const state = useRef({ rows, cursor, thread: route.thread, modal, admin: !!adminSection, selected });
+  const modal = helpOpen || paletteOpen;
+  const state = useRef({ rows, cursor, thread: route.thread, modal, admin: !!adminSection, selected, mailbox: view ? null : mailbox });
   useLayoutEffect(() => {
-    state.current = { rows, cursor, thread: route.thread, modal, admin: !!adminSection, selected };
+    state.current = { rows, cursor, thread: route.thread, modal, admin: !!adminSection, selected, mailbox: view ? null : mailbox };
   });
 
   useEffect(() => {
@@ -222,6 +245,8 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       )
         return;
       const inField = isTextField(document.activeElement);
+      // Keys typed in a compose window (its buttons included) are the window's, except ⌘K.
+      const inWindow = !!document.activeElement?.closest("[data-compose-window]");
       const action = shortcutFor(e, inField);
       if (!action) return;
       // ⌘K works everywhere, the admin screen included; the other keys belong to the inbox.
@@ -230,7 +255,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
         setPaletteOpen(true);
         return;
       }
-      if (s.admin) return;
+      if (s.admin || inWindow) return;
       // Enter on a focused button/link keeps its native meaning.
       if (action === "open" && document.activeElement && document.activeElement !== document.body && e.key === "Enter") return;
       const ids = s.rows.map((r) => r.threadId);
@@ -292,7 +317,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           return;
         case "compose":
           e.preventDefault();
-          setComposeOpen(true);
+          newMessage(s.mailbox);
           return;
         case "search":
           e.preventDefault();
@@ -327,7 +352,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, open, actions, client, markUnread, toggleSidebar, setSelected]);
+  }, [navigate, open, actions, client, markUnread, toggleSidebar, setSelected, newMessage]);
 
   // Where the list goes. A view or a mailbox starts on "all" (a status tab from elsewhere may not apply); search stays.
   const goView = useCallback(
@@ -437,7 +462,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       onView={goView}
       onSelect={goMailbox}
       onFolder={goFolder}
-      onCompose={() => setComposeOpen(true)}
+      onCompose={() => newMessage(mailbox)}
       onShortcuts={() => setHelpOpen(true)}
       onPalette={() => setPaletteOpen(true)}
       collapsed={rail}
@@ -631,18 +656,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           className="fixed right-4 bottom-4 size-12 rounded-full shadow-raised"
           size="icon"
           aria-label={t("threads.compose")}
-          onClick={() => setComposeOpen(true)}
+          onClick={() => newMessage(mailbox)}
         >
           <PenSquare aria-hidden="true" />
         </Button>
       )}
-      <ComposeDialog
-        open={composeOpen}
-        onOpenChange={setComposeOpen}
-        mailboxes={boxes.mailboxes}
-        defaultMailbox={mailbox}
-        onSent={(id) => open(id)}
-      />
+      <ComposeDock mailboxes={boxes.mailboxes} defaultMailbox={view ? null : mailbox} onOpenThread={(id) => open(id)} />
+      <ComposerDialogs mailboxes={boxes.mailboxes} />
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
       {thread && !adminSection && createPortal(thread, threadHost)}
       {import.meta.env.DEV && <DataToggle />}
@@ -667,7 +687,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           onCompose={() => {
             // From Administração, compose belongs to the inbox (the sent conversation opens there).
             if (adminSection) navigate({ admin: null, thread: null }, { push: true });
-            setComposeOpen(true);
+            newMessage(mailbox);
           }}
           onShortcuts={() => setHelpOpen(true)}
           onToggleSidebar={toggleSidebar}

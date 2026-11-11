@@ -2,6 +2,7 @@
 // Sent/Spam, search conversations across every mailbox, compose, switch theme/density/layout, and, for admins, jump to
 // an admin section. No open/close animation: it is a keyboard surface used all day.
 import { useState } from "react";
+import { openWindow } from "@/model/dock";
 import {
   Archive,
   ArchiveRestore,
@@ -9,6 +10,7 @@ import {
   CircleDot,
   Columns2,
   Columns3,
+  FilePen,
   Keyboard,
   LayoutList,
   Mail,
@@ -105,6 +107,10 @@ function Body(p: PaletteProps & { close: () => void }) {
   const assign = useMutation(api.inbox.assign);
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
+  // New conversations and forwards being written (replies and notes reopen with their conversation).
+  const drafts = (useQuerySnapshot(api.inbox.drafts, {}).value ?? [])
+    .filter((d) => d.kind === "compose" || d.kind === "forward")
+    .slice(0, 8);
   const mod = modKey();
   const names = Object.fromEntries(p.mailboxes.map((b) => [b.name, b.displayName ?? b.name]));
   const current = p.mailboxes.find((b) => b.name === p.mailbox) ?? null;
@@ -262,6 +268,39 @@ function Body(p: PaletteProps & { close: () => void }) {
             </>
           )}
         </CommandGroup>
+
+        {drafts.length > 0 && (
+          <CommandGroup heading={t("palette.drafts")}>
+            {drafts.map((d) => (
+              <Item
+                key={d._id}
+                id={d._id}
+                icon={FilePen}
+                label={d.subject.trim() || t("compose.noSubject")}
+                hint={d.to.join(", ") || names[d.mailbox]}
+                onSelect={run(
+                  () =>
+                    openWindow(
+                      d.kind === "forward"
+                        ? {
+                            kind: "forward",
+                            draft: d,
+                            forward: {
+                              threadId: d.threadId ?? "",
+                              messageId: d.messageId ?? "",
+                              mailbox: d.mailbox,
+                              subject: d.subject,
+                              text: "",
+                              files: [],
+                            },
+                          }
+                        : { kind: "compose", draft: d },
+                    ) || toast(t("compose.tooMany")),
+                )}
+              />
+            ))}
+          </CommandGroup>
+        )}
 
         <CommandGroup heading={t("palette.actions")}>
           <Item icon={PenSquare} label={t("threads.compose")} keys={["c"]} onSelect={run(p.onCompose)} />

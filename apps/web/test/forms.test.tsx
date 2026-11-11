@@ -1,16 +1,17 @@
-// Form behavior: compose (one send per draft, the right error message and field, From resets per message) and
+// Form behavior: the compose window (chips, the right error message, forwarding's fixed mailbox, at most three) and
 // sign-in (the 8-character minimum is a sign-up rule only).
-import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { EmberProvider } from "@freecorps/ember-react";
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { Toaster } from "@/components/ui/sonner";
-import { ComposeDialog } from "@/features/ComposeDialog";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { ComposeDock } from "@/features/ComposeDock";
+import { closeWindow, dockWindows, openWindow } from "@/model/dock";
 import { SignIn } from "@/features/SignIn";
 import { I18nProvider } from "@/i18n";
 import type { Mailbox } from "@/lib/api";
 import { createMailClient } from "@/lib/ember";
-import { useThreadList } from "@/model/threads";
 import { mailServer } from "./mailServer";
 
 const cleanups: Array<() => void> = [];
@@ -44,83 +45,90 @@ const boxes = [
   { name: "privacy", address: "privacy@acme.test", displayName: null, unread: 0 },
 ] as unknown as Mailbox[];
 
-function Harness() {
-  const [open, setOpen] = useState(true);
+function Dock() {
   return (
-    <>
-      <button type="button" onClick={() => setOpen(true)}>
-        reopen
-      </button>
-      <ComposeDialog open={open} onOpenChange={setOpen} mailboxes={boxes} defaultMailbox="support" onSent={() => {}} />
+    <TooltipProvider>
+      <ComposeDock mailboxes={boxes} defaultMailbox="support" onOpenThread={() => {}} />
       <Toaster />
-    </>
+    </TooltipProvider>
   );
 }
 
-describe("compose dialog", () => {
-  it("empty body: its own message, aria-invalid on the body (not To)", () => {
+describe("compose window", () => {
+  afterEach(() => {
+    for (const w of [...dockWindows()]) closeWindow(w.key);
+  });
+
+  it("recipients become chips (typed list, comma), invalid ones say so, and an empty body has its own message", async () => {
     const { wrapper } = setup();
-    render(<Harness />, { wrapper });
-    fireEvent.change(screen.getByLabelText("Para"), { target: { value: "rui@user.test" } });
-    fireEvent.change(screen.getByLabelText("Mensagem"), { target: { value: "   " } });
-    fireEvent.submit(screen.getByLabelText("Para").closest("form")!);
+    act(() => void openWindow({ kind: "compose", mailbox: "support" }));
+    render(<Dock />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" }) as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "ana@user.test, nao-e-email," } });
+    expect(screen.getByText("ana@user.test")).toBeTruthy();
+    expect(screen.getByTitle("Endereço inválido: nao-e-email")).toBeTruthy();
+    fireEvent.submit(to.closest("form")!);
+    expect(screen.getByRole("alert").textContent).toBe("Endereços inválidos: nao-e-email");
+    fireEvent.click(screen.getByRole("button", { name: "Remover nao-e-email" }));
+    fireEvent.submit(to.closest("form")!);
     expect(screen.getByRole("alert").textContent).toBe("Escreva a mensagem antes de enviar.");
-    expect(screen.getByLabelText("Mensagem").getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByLabelText("Para").hasAttribute("aria-invalid")).toBe(false);
-
-    fireEvent.change(screen.getByLabelText("Para"), { target: { value: "nope" } });
-    fireEvent.submit(screen.getByLabelText("Para").closest("form")!);
-    expect(screen.getByLabelText("Para").getAttribute("aria-invalid")).toBe("true");
-    expect(screen.getByLabelText("Mensagem").hasAttribute("aria-invalid")).toBe(false);
   });
 
-  it("From is per message: a pick does not carry over to the next compose", () => {
+  it("Backspace in the empty field takes the last chip back to edit", () => {
     const { wrapper } = setup();
-    render(<Harness />, { wrapper });
-    fireEvent.change(screen.getByLabelText("De"), { target: { value: "privacy" } });
-    expect((screen.getByLabelText("De") as HTMLSelectElement).value).toBe("privacy");
-    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
-    fireEvent.click(screen.getByRole("button", { name: "reopen" }));
-    expect((screen.getByLabelText("De") as HTMLSelectElement).value).toBe("support");
+    act(() => void openWindow({ kind: "compose", mailbox: "support" }));
+    render(<Dock />, { wrapper });
+    const to = screen.getByRole("combobox", { name: "Para" }) as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "Bia <bia@acme.test>;" } });
+    expect(screen.getByText("Bia")).toBeTruthy();
+    fireEvent.keyDown(to, { key: "Backspace" });
+    expect(to.value).toBe("Bia <bia@acme.test>");
   });
 
-  it("a double submit sends once", async () => {
+  it("forwarding starts from the message: its mailbox (fixed), subject, and names the files going along", () => {
     const { wrapper } = setup();
-    const list = renderHook(() => useThreadList({ mailbox: "support", filter: "all", query: "" }), { wrapper });
-    await waitFor(() => expect(list.result.current.status).toBe("ready"));
-    render(<Harness />, { wrapper });
-    fireEvent.change(screen.getByLabelText("Para"), { target: { value: "rui@user.test" } });
-    fireEvent.change(screen.getByLabelText("Mensagem"), { target: { value: "Oi" } });
-    const form = screen.getByLabelText("Para").closest("form")!;
-    act(() => {
-      fireEvent.submit(form);
-      fireEvent.submit(form);
-    });
-    await waitFor(() => expect(list.result.current.rows.map((r) => r.pending)).toEqual([false]));
-  });
-});
-
-describe("forwarding", () => {
-  it("starts from the message: its mailbox (fixed), subject and quoted text, and names the files going along", () => {
-    const { wrapper } = setup();
-    const source = {
-      threadId: "t1",
-      messageId: "m1",
-      mailbox: "privacy",
-      subject: "Fwd: Contrato",
-      text: "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>",
-      files: ["contrato.pdf"],
-    };
-    render(<ComposeDialog open onOpenChange={() => {}} mailboxes={boxes} defaultMailbox="support" forward={source} onSent={() => {}} />, {
-      wrapper,
-    });
-    expect(screen.getByRole("heading").textContent).toBe("Encaminhar mensagem");
+    act(
+      () =>
+        void openWindow({
+          kind: "forward",
+          forward: {
+            threadId: "t1",
+            messageId: "m1",
+            mailbox: "privacy",
+            subject: "Fwd: Contrato",
+            text: "\n\n---------- Mensagem encaminhada ----------\nDe: Ana <ana@user.test>",
+            files: ["contrato.pdf"],
+          },
+        }),
+    );
+    render(<Dock />, { wrapper });
+    expect(screen.getByRole("heading").textContent).toBe("Fwd: Contrato");
     const from = screen.getByLabelText("De") as HTMLSelectElement;
     expect(from.value).toBe("privacy");
     expect(from.disabled).toBe(true);
     expect((screen.getByLabelText("Assunto") as HTMLInputElement).value).toBe("Fwd: Contrato");
-    expect((screen.getByLabelText("Mensagem") as HTMLTextAreaElement).value).toContain("Mensagem encaminhada");
     expect(screen.getByText("Vão junto: contrato.pdf")).toBeTruthy();
+  });
+
+  it("three windows at most; the same draft opens once", () => {
+    const draft = {
+      _id: "d1",
+      kind: "compose",
+      to: [],
+      cc: [],
+      bcc: [],
+      subject: "x",
+      text: "",
+      mailbox: "support",
+      attachments: [],
+    } as never;
+    expect(openWindow({ kind: "compose", draft })).toBe(true);
+    expect(openWindow({ kind: "compose", draft })).toBe(true);
+    expect(dockWindows()).toHaveLength(1);
+    expect(openWindow({ kind: "compose" })).toBe(true);
+    expect(openWindow({ kind: "compose" })).toBe(true);
+    expect(openWindow({ kind: "compose" })).toBe(false);
+    expect(dockWindows()).toHaveLength(3);
   });
 });
 

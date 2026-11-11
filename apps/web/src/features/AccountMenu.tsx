@@ -1,4 +1,4 @@
-import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, Rows2, Rows3, Settings, Sun } from "lucide-react";
+import { ChevronsUpDown, Keyboard, Languages, LogOut, Monitor, Moon, PenLine, Rows2, Rows3, Settings, Sun, Undo2 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import {
   DropdownMenu,
@@ -13,7 +13,8 @@ import {
 import { useI18n } from "@/i18n/context";
 import type { Me } from "@/lib/api";
 import { authClient } from "@/lib/auth";
-import { usePrefs, type Density, type ThemePref } from "@/lib/prefs";
+import { UNDO_SEND, usePrefs, type Density, type ThemePref, type UndoSend } from "@/lib/prefs";
+import { openComposerDialog } from "@/model/dock";
 import type { Locale } from "@/i18n/strings";
 
 export function AccountMenu({
@@ -102,6 +103,22 @@ export function AccountMenu({
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuLabel className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Undo2 className="size-3.5" aria-hidden="true" />
+          {t("account.undoSend")}
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={String(prefs.undoSend)} onValueChange={(v) => prefs.setUndoSend(Number(v) as UndoSend)}>
+          {UNDO_SEND.map((n) => (
+            <DropdownMenuRadioItem key={n} value={String(n)}>
+              {n === 0 ? t("account.undoSend.off") : t("account.undoSend.seconds", { seconds: n })}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => openComposerDialog({ kind: "signature", mailbox: null })}>
+          <PenLine aria-hidden="true" />
+          {t("signature.menu")}
+        </DropdownMenuItem>
         {me.admin && onAdmin && (
           <DropdownMenuItem onSelect={onAdmin}>
             <Settings aria-hidden="true" />
