@@ -18,6 +18,15 @@ export default createEmberWorker({
       }),
       // Test-only: an email row of the component (status, attachments), whatever project sent it.
       email: queryGeneric({ args: { id: v.string() }, handler: (ctx: any, { id }: { id: string }) => ctx.runQuery(anyComponents.email.lib.get, { id }) }),
+      // Test-only: a member's drafts as if untouched since `at`, then the daily prune (ember/crons.ts).
+      ageDrafts: mutationGeneric({
+        args: { userId: v.string(), at: v.number() },
+        handler: (ctx: any, { userId, at }: { userId: string; at: number }) => {
+          for (const d of ctx.db.query("drafts").withIndex("by_user", (q: any) => q.eq("userId", userId)).collect()) ctx.db.patch(d._id, { updatedAt: at });
+          return null;
+        },
+      }),
+      pruneDrafts: mutationGeneric({ args: {}, handler: (ctx: any) => ctx.runMutation("inbox:pruneDrafts", {}) }),
       member: mutationGeneric({
         args: { userId: v.string() },
         handler: (ctx: any, { userId }: { userId: string }) => ctx.db.query("members").withIndex("by_user", (q: any) => q.eq("userId", userId)).first(),

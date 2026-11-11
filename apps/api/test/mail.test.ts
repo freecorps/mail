@@ -846,4 +846,268 @@ describe("mail app", () => {
     expect((await call("query", "inbox:views", {})).error.message).toMatch(/unauthenticated/);
     expect((await call("query", "inbox:view", { view: "starred" }, "user:lia")).error).toBeTruthy();
   });
+
+  // ------------------------------------------------------------------------------------------- composer
+  // A shared mailbox `cs` (Cia and Caio are members, Cris an admin) and Cia's personal `cia`.
+  const composerSetup = async () => {
+    expect((await admin.inbox.upsertMailbox({ name: "cs", address: "cs@acme.test", display_name: "Suporte" })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "cia", name: "Cia", mailboxes: ["cs"] })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "caio", name: "Caio", mailboxes: ["cs"] })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "cris", name: "Cris", admin: true })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "cia", address: "cia@acme.test", owner: "cia" })).error).toBeNull();
+  };
+  const inboundTo = async (to: string, subject: string, id: string) => {
+    const m = inbound("marina@user.test", `${to}@acme.test`, mime({ from: '"Marina Costa" <marina@user.test>', to: `${to}@acme.test`, subject, text: "Preciso de ajuda.", id }));
+    await worker.email(m.msg as never, env as never, createExecutionContext());
+    expect(m.out.rejected).toBeNull();
+    const who = to === "cia" ? "cia" : "cris";
+    return ((await call("query", "inbox:threads", { mailbox: to }, `user:${who}`)).value.page as any[]).find((t) => t.subject === subject);
+  };
+  const sentEmail = async (emailId: string) => (await call("query", "testing:email", { id: emailId })).value as { text: string; html: string };
+  const upload = async (who: string, bytes: Uint8Array, contentType: string, confirm = true) => {
+    const ticket = (await call("mutation", "inbox:generateUploadUrl", { contentType, size: bytes.length }, `user:${who}`)).value;
+    if (!confirm) return ticket.storageId as string;
+    expect((await SELF.fetch(new URL(ticket.url, BASE).toString(), { method: "PUT", headers: ticket.headers ?? {}, body: bytes })).status).toBeLessThan(300);
+    const ok = await SELF.fetch(`${BASE}/api/storage/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shard: ticket.shard, storageId: ticket.storageId, token: ticket.token }) });
+    expect(ok.status).toBe(200);
+    return ticket.storageId as string;
+  };
+
+  it("signatures: none by default; a mailbox's own over the member's default; personal mailboxes; only one's own", async () => {
+    await composerSetup();
+    const t = await inboundTo("cs", "Assinatura", "sig-1@user.test");
+    const q = (fn: string, args: unknown, who: string) => call("query", fn, args, `user:${who}`);
+    const mu = (fn: string, args: unknown, who: string) => call("mutation", fn, args, `user:${who}`);
+    // Off until the member saves one: a reply goes without.
+    expect((await q("inbox:signatures", {}, "cia")).value).toEqual([]);
+    expect((await q("inbox:signature", { mailbox: "cs" }, "cia")).value).toBeNull();
+    const plain = await mu("inbox:reply", { threadId: t._id, text: "Sem assinatura." }, "cia");
+    expect(plain.error ?? null).toBeNull();
+    expect((await sentEmail(plain.value.emailId)).html).not.toContain("gmail_signature");
+
+    // A default for every mailbox, then one for her personal mailbox.
+    expect((await mu("inbox:setSignature", { text: "Cia\nEquipe" }, "cia")).error ?? null).toBeNull();
+    expect((await mu("inbox:setSignature", { mailbox: "cia", text: "Cia (pessoal)", html: "<p><b>Cia</b> pessoal</p>" }, "cia")).error ?? null).toBeNull();
+    expect((await q("inbox:signature", { mailbox: "cs" }, "cia")).value).toEqual({ text: "Cia\nEquipe", html: null, from: null });
+    expect((await q("inbox:signature", { mailbox: "cia" }, "cia")).value).toEqual({ text: "Cia (pessoal)", html: "<p><b>Cia</b> pessoal</p>", from: "cia" });
+    // Saving again replaces (one per mailbox, one default).
+    expect((await mu("inbox:setSignature", { mailbox: null, text: "Cia · Suporte" }, "cia")).error ?? null).toBeNull();
+    const mine = (await q("inbox:signatures", {}, "cia")).value as any[];
+    expect(mine.map((s) => [s.mailbox ?? null, s.text]).sort()).toEqual([[null, "Cia · Suporte"], ["cia", "Cia (pessoal)"]]);
+    expect((await q("inbox:signatures", {}, "caio")).value).toEqual([]);
+
+    // The reply carries the mailbox's effective signature, the composer's HTML and the localized quote line.
+    const rich = await mu(
+      "inbox:reply",
+      { threadId: t._id, text: "Olá, Marina!", bodyHtml: "<p>Olá, <b>Marina</b>!<script>alert(1)</script></p>", quoteHeader: "Em 10 de nov. de 2026, Marina Costa escreveu:" },
+      "cia",
+    );
+    expect(rich.error ?? null).toBeNull();
+    const e = await sentEmail(rich.value.emailId);
+    expect(e.text).toContain("-- \nCia · Suporte");
+    expect(e.html).toContain("gmail_signature");
+    expect(e.html).toContain("<b>Marina</b>");
+    expect(e.html).not.toContain("<script");
+    expect(e.html).toContain("Em 10 de nov. de 2026, Marina Costa escreveu:");
+    // signature: false sends none.
+    const none = await mu("inbox:reply", { threadId: t._id, text: "Sem.", signature: false }, "cia");
+    expect((await sentEmail(none.value.emailId)).text).not.toContain("-- \n");
+    // A new conversation from her personal mailbox: that mailbox's signature (its HTML).
+    const own = await mu("inbox:compose", { mailbox: "cia", to: ["ana@user.test"], subject: "Oi", text: "Oi Ana." }, "cia");
+    expect(own.error ?? null).toBeNull();
+    expect((await sentEmail(own.value.emailId)).html).toContain("<b>Cia</b> pessoal");
+
+    // Only mailboxes she sees; the admin never sees her personal one; a signature needs text, within the limits.
+    expect((await mu("inbox:setSignature", { mailbox: "privacy", text: "x" }, "cia")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:setSignature", { mailbox: "cia", text: "x" }, "cris")).error.message).toMatch(/no access/);
+    expect((await q("inbox:signature", { mailbox: "cia" }, "cris")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:setSignature", { text: "  " }, "cia")).error.message).toMatch(/text part/);
+    expect((await mu("inbox:setSignature", { text: "x".repeat(5001) }, "cia")).error.message).toMatch(/at most 5k/);
+    expect((await mu("inbox:setSignature", { text: "x", html: "x".repeat(20_001) }, "cia")).error.message).toMatch(/at most 20k/);
+    expect((await call("mutation", "inbox:setSignature", { text: "x" })).error.message).toMatch(/unauthenticated/);
+    expect((await call("query", "inbox:drafts", {})).error.message).toMatch(/unauthenticated/);
+    expect((await mu("inbox:setSignature", { text: "x" }, "stranger")).error.message).toMatch(/not a member/);
+
+    // Deleting the personal one falls back to the default; deleting twice says there was none.
+    expect((await mu("inbox:deleteSignature", { mailbox: "cia" }, "cia")).value).toBe(true);
+    expect((await mu("inbox:deleteSignature", { mailbox: "cia" }, "cia")).value).toBe(false);
+    expect((await q("inbox:signature", { mailbox: "cia" }, "cia")).value).toMatchObject({ text: "Cia · Suporte", from: null });
+
+    // Caio saves one for cs, then loses cs: it is no longer listed, and he cannot read it.
+    expect((await mu("inbox:setSignature", { mailbox: "cs", text: "Caio" }, "caio")).error ?? null).toBeNull();
+    expect((await q("inbox:signatures", {}, "caio")).value).toHaveLength(1);
+    expect((await admin.inbox.addMember({ user_id: "caio", mailboxes: [] })).error).toBeNull();
+    expect((await q("inbox:signatures", {}, "caio")).value).toEqual([]);
+    expect((await q("inbox:signature", { mailbox: "cs" }, "caio")).error.message).toMatch(/no access/);
+    expect((await admin.inbox.addMember({ user_id: "caio", mailboxes: ["cs"] })).error).toBeNull();
+    expect((await q("inbox:signature", { mailbox: "cs" }, "caio")).value).toMatchObject({ text: "Caio", from: "cs" });
+  });
+
+  it("drafts: the cap counts only drafts the member can still reach", async () => {
+    const mu = (fn: string, args: unknown) => call("mutation", fn, args, "user:dora");
+    expect((await admin.inbox.addMember({ user_id: "dora", mailboxes: ["cs"] })).error).toBeNull();
+    for (let i = 0; i < 200; i++) expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", text: `d${i}` })).error ?? null).toBeNull();
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", text: "one more" })).error.message).toMatch(/at most 200 drafts/);
+    // Dora moves to privacy: her cs drafts are out of reach, so they make room instead of blocking her.
+    expect((await admin.inbox.addMember({ user_id: "dora", mailboxes: ["privacy"] })).error).toBeNull();
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "privacy", text: "novo" })).error ?? null).toBeNull();
+    expect((await call("query", "inbox:drafts", {}, "user:dora")).value).toHaveLength(1);
+  });
+
+  it("drafts: private to the member, one per thread and kind, kept with their files, removed on send and after 30 days", async () => {
+    const t = await inboundTo("cs", "Rascunhos", "draft-1@user.test");
+    const q = (fn: string, args: unknown, who: string) => call("query", fn, args, `user:${who}`);
+    const mu = (fn: string, args: unknown, who: string) => call("mutation", fn, args, `user:${who}`);
+    const file = await upload("cia", new TextEncoder().encode("rascunho"), "text/plain");
+
+    const d1 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá", cc: ["fin@user.test"], attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "cia");
+    expect(d1.error ?? null).toBeNull();
+    // Saving again without the id (another device) replaces the same reply draft.
+    const d2 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "cia");
+    expect(d2.value.id).toBe(d1.value.id);
+    const note = await mu("inbox:saveDraft", { kind: "note", threadId: t._id, text: "nota" }, "cia");
+    expect(note.value.id).not.toBe(d1.value.id);
+    const list = (await q("inbox:drafts", {}, "cia")).value as any[];
+    expect(list.map((d) => d.kind)).toEqual(["note", "reply"]);
+    expect(list[1]).toMatchObject({ _id: d1.value.id, userId: "cia", kind: "reply", threadId: t._id, mailbox: "cs", to: [], cc: [], bcc: [], subject: "", text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] });
+    expect((await q("inbox:drafts", { threadId: t._id }, "cia")).value).toHaveLength(2);
+
+    // Another member of the mailbox sees none of them and cannot touch them; nor can an admin.
+    expect((await q("inbox:drafts", {}, "caio")).value).toEqual([]);
+    expect((await q("inbox:drafts", { threadId: t._id }, "caio")).value).toEqual([]);
+    expect((await mu("inbox:deleteDraft", { id: d1.value.id }, "caio")).error.message).toMatch(/draft not found/);
+    expect((await mu("inbox:saveDraft", { id: d1.value.id, kind: "reply", threadId: t._id, text: "mine" }, "cris")).error.message).toMatch(/draft not found/);
+    expect((await mu("inbox:reply", { threadId: t._id, text: "x", draftId: d1.value.id }, "caio")).error.message).toMatch(/draft not found/);
+    // Only one's own uploads; only threads and mailboxes one sees; the kind's fields.
+    expect((await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "x", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "caio")).error.message).toMatch(/not an upload of yours/);
+    expect((await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "x" }, "agent-2")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "privacy", text: "x" }, "cia")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:saveDraft", { kind: "compose", text: "x" }, "cia")).error.message).toMatch(/mailbox: required/);
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", threadId: t._id, text: "x" }, "cia")).error.message).toMatch(/no thread/);
+    expect((await mu("inbox:saveDraft", { kind: "reply", text: "x" }, "cia")).error.message).toMatch(/threadId: required/);
+    expect((await mu("inbox:saveDraft", { kind: "forward", threadId: t._id, text: "x" }, "cia")).error.message).toMatch(/not found in this thread/);
+    expect((await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "x".repeat(200_001) }, "cia")).error.message).toMatch(/at most 200k/);
+    const many = Array.from({ length: 51 }, (_, i) => `p${i}@user.test`);
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", to: many, text: "x" }, "cia")).error.message).toMatch(/at most 50 recipients/);
+    // A file still uploading may wait in a draft (it is checked when sent).
+    const pending = await upload("cia", new TextEncoder().encode("wait"), "text/plain", false);
+    const withPending = await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", to: ["x@user.test"], subject: "s", text: "t", attachments: [{ file: pending, filename: "p.txt", contentType: "text/plain" }] }, "cia");
+    expect(withPending.error ?? null).toBeNull();
+    expect((await mu("inbox:deleteDraft", { id: withPending.value.id }, "cia")).value).toBe(true);
+    expect((await mu("inbox:deleteDraft", { id: withPending.value.id }, "cia")).value).toBe(false);
+
+    // A failed send keeps the draft; a sent reply deletes it in the same transaction (and only it).
+    expect((await mu("inbox:reply", { threadId: t._id, text: "x", cc: many, draftId: d1.value.id }, "cia")).error.message).toMatch(/at most 50/);
+    expect(((await q("inbox:drafts", {}, "cia")).value as any[]).some((d) => d._id === d1.value.id)).toBe(true);
+    const sent = await mu("inbox:reply", { threadId: t._id, text: "Olá, Marina", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }], draftId: d1.value.id }, "cia");
+    expect(sent.error ?? null).toBeNull();
+    expect(((await q("inbox:drafts", {}, "cia")).value as any[]).map((d) => d._id)).toEqual([note.value.id]);
+    // A draft already gone (sent on another device) does not stop the send.
+    expect((await mu("inbox:reply", { threadId: t._id, text: "De novo", draftId: d1.value.id }, "cia")).error ?? null).toBeNull();
+    // The note, a forward and a new conversation consume theirs too.
+    expect((await mu("inbox:note", { threadId: t._id, text: "nota", draftId: note.value.id }, "cia")).error ?? null).toBeNull();
+    const inboundMsg = (await q("inbox:thread", { threadId: t._id }, "cia")).value.messages.find((m: any) => m.direction === "inbound");
+    const fwd = await mu("inbox:saveDraft", { kind: "forward", threadId: t._id, messageId: inboundMsg._id, to: ["boss@user.test"], subject: "Fwd: Rascunhos", text: "Veja." }, "cia");
+    expect(fwd.error ?? null).toBeNull();
+    expect((await mu("inbox:forward", { threadId: t._id, messageId: inboundMsg._id, to: ["boss@user.test"], subject: "Fwd: Rascunhos", text: "Veja.", draftId: fwd.value.id }, "cia")).error ?? null).toBeNull();
+    const cmp = await mu("inbox:saveDraft", { kind: "compose", mailbox: "cia", to: ["ana@user.test"], subject: "Pessoal", text: "Oi" }, "cia");
+    expect(((await q("inbox:drafts", {}, "cia")).value as any[]).map((d) => d._id)).toEqual([cmp.value.id]);
+    expect((await mu("inbox:compose", { mailbox: "cia", to: ["ana@user.test"], subject: "Pessoal", text: "Oi", draftId: cmp.value.id }, "cia")).error ?? null).toBeNull();
+    expect((await q("inbox:drafts", {}, "cia")).value).toEqual([]);
+
+    // Lost access: Caio's draft in cs is not returned while he cannot see cs.
+    const cd = await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", to: ["x@user.test"], subject: "s", text: "t" }, "caio");
+    expect(cd.error ?? null).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "caio", mailboxes: [] })).error).toBeNull();
+    expect((await q("inbox:drafts", {}, "caio")).value).toEqual([]);
+    expect((await q("inbox:drafts", { threadId: t._id }, "caio")).error.message).toMatch(/no access/);
+    expect((await admin.inbox.addMember({ user_id: "caio", mailboxes: ["cs"] })).error).toBeNull();
+    expect(((await q("inbox:drafts", {}, "caio")).value as any[]).map((d) => d._id)).toEqual([cd.value.id]);
+
+    // Deleting the conversation deletes everyone's drafts on it.
+    const doomed = await inboundTo("cs", "Rascunho apagado", "draft-2@user.test");
+    expect((await mu("inbox:saveDraft", { kind: "reply", threadId: doomed._id, text: "x" }, "caio")).error ?? null).toBeNull();
+    expect((await mu("inbox:deleteThread", { threadId: doomed._id }, "cris")).value).toMatchObject({ deleted: true });
+    expect(((await q("inbox:drafts", {}, "caio")).value as any[]).map((d) => d._id)).toEqual([cd.value.id]);
+
+    // Untouched for 30 days: removed by the daily prune; a fresher one stays.
+    const fresh = await mu("inbox:saveDraft", { kind: "compose", mailbox: "cia", to: [], subject: "", text: "novo" }, "cia");
+    await call("mutation", "testing:ageDrafts", { userId: "caio", at: Date.now() - 31 * 24 * 3600 * 1000 });
+    expect((await call("mutation", "testing:pruneDrafts", {})).value).toBe(1);
+    expect((await q("inbox:drafts", {}, "caio")).value).toEqual([]);
+    expect(((await q("inbox:drafts", {}, "cia")).value as any[]).map((d) => d._id)).toEqual([fresh.value.id]);
+  });
+
+  it("saved replies: per mailbox, read and created by its members, changed by their author or an admin", async () => {
+    const q = (fn: string, args: unknown, who: string) => call("query", fn, args, `user:${who}`);
+    const mu = (fn: string, args: unknown, who: string) => call("mutation", fn, args, `user:${who}`);
+    const r1 = await mu("inbox:saveSavedReply", { mailbox: "cs", title: "Reembolso", text: "Olá, {primeiro_nome}! Seu reembolso do pedido #{numero} saiu.", bodyHtml: "<p>Olá, {primeiro_nome}!</p>" }, "cia");
+    expect(r1.error ?? null).toBeNull();
+    expect((await mu("inbox:saveSavedReply", { mailbox: "cs", title: "  agradecimento ", text: "Obrigada, {nome}. {agente}, {caixa}" }, "caio")).error ?? null).toBeNull();
+    // Every member of the mailbox reads them, by title; stored as written (the clients fill the variables).
+    const list = (await q("inbox:savedReplies", { mailbox: "cs" }, "caio")).value as any[];
+    expect(list.map((r) => r.title)).toEqual(["agradecimento", "Reembolso"]);
+    expect(list[1]).toMatchObject({ _id: r1.value.id, mailbox: "cs", createdBy: "cia", text: "Olá, {primeiro_nome}! Seu reembolso do pedido #{numero} saiu.", bodyHtml: "<p>Olá, {primeiro_nome}!</p>" });
+    expect((await q("inbox:savedReplies", { mailbox: "cs" }, "cris")).value).toHaveLength(2);
+
+    // Only its author or an admin changes or deletes one; the author stays when an admin edits it.
+    expect((await mu("inbox:saveSavedReply", { id: r1.value.id, mailbox: "cs", title: "Meu", text: "x" }, "caio")).error.message).toMatch(/only its author or an admin/);
+    expect((await mu("inbox:deleteSavedReply", { id: r1.value.id }, "caio")).error.message).toMatch(/only its author or an admin/);
+    expect((await mu("inbox:saveSavedReply", { id: r1.value.id, mailbox: "cs", title: "Reembolso aprovado", text: "Olá, {primeiro_nome}!" }, "cris")).error ?? null).toBeNull();
+    const edited = ((await q("inbox:savedReplies", { mailbox: "cs" }, "cia")).value as any[]).find((r) => r._id === r1.value.id);
+    expect(edited).toMatchObject({ title: "Reembolso aprovado", createdBy: "cia", text: "Olá, {primeiro_nome}!" });
+    expect(edited.bodyHtml).toBeUndefined();
+    expect((await mu("inbox:saveSavedReply", { id: r1.value.id, mailbox: "cs", title: "De novo", text: "y" }, "cia")).error ?? null).toBeNull();
+    // A saved reply stays in its mailbox: editing it as another mailbox's is "not found".
+    expect((await mu("inbox:saveSavedReply", { id: r1.value.id, mailbox: "cia", title: "x", text: "y" }, "cia")).error.message).toMatch(/not found/);
+
+    // Members of other mailboxes neither read nor write them; a personal mailbox's are its owner's only.
+    expect((await q("inbox:savedReplies", { mailbox: "cs" }, "agent-2")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:saveSavedReply", { mailbox: "cs", title: "x", text: "y" }, "agent-2")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:deleteSavedReply", { id: r1.value.id }, "agent-2")).error.message).toMatch(/no access/);
+    const p = await mu("inbox:saveSavedReply", { mailbox: "cia", title: "Pessoal", text: "Abraço, {agente}" }, "cia");
+    expect(p.error ?? null).toBeNull();
+    expect((await q("inbox:savedReplies", { mailbox: "cia" }, "cia")).value).toHaveLength(1);
+    expect((await q("inbox:savedReplies", { mailbox: "cia" }, "cris")).error.message).toMatch(/no access/);
+    expect((await mu("inbox:deleteSavedReply", { id: p.value.id }, "cris")).error.message).toMatch(/no access/);
+
+    // Validation: a title and a text, within the limits.
+    expect((await mu("inbox:saveSavedReply", { mailbox: "cs", title: " ", text: "y" }, "cia")).error.message).toMatch(/title: required/);
+    expect((await mu("inbox:saveSavedReply", { mailbox: "cs", title: "x".repeat(201), text: "y" }, "cia")).error.message).toMatch(/at most 200 characters/);
+    expect((await mu("inbox:saveSavedReply", { mailbox: "cs", title: "x", text: "" }, "cia")).error.message).toMatch(/text: required/);
+    expect((await mu("inbox:saveSavedReply", { mailbox: "cs", title: "x", text: "y", bodyHtml: "x".repeat(200_001) }, "cia")).error.message).toMatch(/at most 200k/);
+
+    // The author deletes theirs; an admin deletes anyone's.
+    expect((await mu("inbox:deleteSavedReply", { id: r1.value.id }, "cia")).value).toBe(true);
+    const other = ((await q("inbox:savedReplies", { mailbox: "cs" }, "cris")).value as any[])[0];
+    expect((await mu("inbox:deleteSavedReply", { id: other._id }, "cris")).value).toBe(true);
+    expect((await q("inbox:savedReplies", { mailbox: "cs" }, "cia")).value).toEqual([]);
+    expect((await mu("inbox:deleteSavedReply", { id: other._id }, "cris")).error.message).toMatch(/not found/);
+
+    // Removing a member removes their drafts and signatures (private data); added again, they start with none.
+    expect((await admin.inbox.addMember({ user_id: "cleo", name: "Cleo", mailboxes: ["cs"] })).error).toBeNull();
+    expect((await mu("inbox:saveDraft", { kind: "compose", mailbox: "cs", text: "x" }, "cleo")).error ?? null).toBeNull();
+    expect((await mu("inbox:setSignature", { text: "Cleo" }, "cleo")).error ?? null).toBeNull();
+    const removed = await mu("console:removeMember", { userId: "cleo" }, "cris");
+    expect(removed.error ?? null).toBeNull();
+    expect(removed.value).toBe(true);
+    expect((await admin.inbox.addMember({ user_id: "cleo", name: "Cleo", mailboxes: ["cs"] })).error).toBeNull();
+    expect((await q("inbox:drafts", {}, "cleo")).value).toEqual([]);
+    expect((await q("inbox:signatures", {}, "cleo")).value).toEqual([]);
+  });
+
+  it("composer sends: files past the limit are linked in the HTML body too; text-only sends are unchanged", async () => {
+    const t = await inboundTo("cs", "Arquivo grande", "big-1@user.test");
+    const big = await upload("cia", new Uint8Array(10 * 1024 * 1024 + 1), "application/octet-stream");
+    const r = await call("mutation", "inbox:reply", { threadId: t._id, text: "Segue.", bodyHtml: "<p>Segue.</p>", signature: false, attachments: [{ file: big, filename: "a&b.bin", contentType: "application/octet-stream" }] }, "user:cia");
+    expect(r.error ?? null).toBeNull();
+    const e = await sentEmail(r.value.emailId);
+    expect(e.text).toMatch(/Arquivos para baixar \(links válidos até \d{4}-\d{2}-\d{2}\):\na&b\.bin \(10\.0 MB\): \S+/);
+    expect(e.html).toMatch(/Arquivos para baixar[^<]*<br>\s*<a href="[^"]+">a&amp;b\.bin<\/a> \(10\.0 MB\)/);
+    // A text-only reply from an old client: the text becomes the HTML (no card), as before.
+    const old = await call("mutation", "inbox:reply", { threadId: t._id, text: "Só texto." }, "user:caio");
+    expect(old.error ?? null).toBeNull();
+    expect((await sentEmail(old.value.emailId)).html).toContain("Só texto.");
+    expect((await call("mutation", "inbox:reply", { threadId: t._id, text: "x", quoteHeader: "x".repeat(1001) }, "user:caio")).error.message).toMatch(/quoteHeader: at most 1k/);
+  });
 });

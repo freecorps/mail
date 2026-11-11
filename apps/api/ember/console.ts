@@ -283,7 +283,10 @@ export const saveMember = mutation({
   },
 });
 
-/** Takes a member's access away (not one who owns a personal mailbox: make it shared or give it to someone first). */
+/**
+ * Takes a member's access away (not one who owns a personal mailbox: make it shared or give it to someone first).
+ * Their own drafts and signatures go with it; saved replies they wrote stay with their mailboxes.
+ */
 export const removeMember = mutation({
   args: { userId: v.string() },
   handler: (ctx, a) => {
@@ -293,6 +296,9 @@ export const removeMember = mutation({
     if (own) throw new Error(`they own the personal mailbox ${own.mailbox}`);
     const m = ctx.db.query("members").withIndex("by_user", (q: any) => q.eq("userId", a.userId)).first();
     if (m) ctx.db.delete(m._id);
+    for (const table of ["drafts", "signatures"] as const) {
+      for (const d of ctx.db.query(table).withIndex("by_user", (q: any) => q.eq("userId", a.userId)).collect()) ctx.db.delete(d._id);
+    }
     return !!m;
   },
 });

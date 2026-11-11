@@ -2,9 +2,24 @@
 // mailboxes, threads and search, for signed-in members only (identity from the app's auth provider: Ember auth
 // via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see every shared one; a personal mailbox
 // only its owner (ember/access.ts). Push devices register here.
-import { anyComponents as components, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
+import { anyComponents as components, internalMutationGeneric as internalMutation, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
+import { escapeHtml } from "@freecorps/ember-email";
 import { PushNotifications } from "@freecorps/ember-push";
 import { canSee, canSeeWith, ownerOf, owners, type Member } from "./access.ts";
+import {
+  checkDraft,
+  checkSavedReply,
+  checkSignature,
+  COMPOSER_LIMITS as L,
+  DRAFT_KINDS,
+  DRAFT_TTL_MS,
+  effectiveSignature,
+  sendExtras,
+  signaturesOf,
+  type DraftAttachment,
+  type DraftDoc,
+  type SavedReplyDoc,
+} from "./composer.ts";
 
 const push = new PushNotifications(components.push);
 const email = components.email.lib;
@@ -61,13 +76,14 @@ const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n 
 
 /**
  * Splits the files into attachments and links (smallest attach first, up to ATTACH_LIMIT) and appends the links to
- * the text. Every file must be uploaded (ready) already. `list`: the member's own uploads; `trusted`: files already
- * in a thread they can see (a forwarded message's attachments), which need no upload of theirs.
+ * the text, and to the composer's HTML body when there is one. Every file must be uploaded (ready) already. `list`:
+ * the member's own uploads; `trusted`: files already in a thread they can see (a forwarded message's attachments),
+ * which need no upload of theirs.
  */
-export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = []) {
+export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: string, list: AttachmentArg[] | undefined, trusted: AttachmentArg[] = [], bodyHtml?: string) {
   const own = list ?? [];
-  if (!own.length && !trusted.length) return { text, attachments: undefined };
-  if (own.length + trusted.length > 20) throw new Error("at most 20 attachments");
+  if (!own.length && !trusted.length) return { text, bodyHtml, attachments: undefined };
+  if (own.length + trusted.length > L.attachments) throw new Error(`at most ${L.attachments} attachments`);
   const files = [...trusted.map((a) => ({ ...a, trusted: true })), ...own.map((a) => ({ ...a, trusted: false }))].map(({ trusted: ok, ...a }) => {
     // Only the member's own uploads: a file id seen elsewhere (another mailbox's attachment) is refused.
     const up = ok ? null : (ctx.db.query("uploads").withIndex("by_file", (q: any) => q.eq("file", a.file)).first() as { userId: string } | null);
@@ -83,13 +99,14 @@ export function withAttachments(ctx: Ctx & { now: number }, m: Member, text: str
     if (attached + f.size <= ATTACH_LIMIT) attached += f.size;
     else link.add(f.file);
   }
-  if (!link.size) return { text, attachments: files.map(({ size: _, ...a }) => a) };
+  if (!link.size) return { text, bodyHtml, attachments: files.map(({ size: _, ...a }) => a) };
   const until = new Date(ctx.now + LINK_TTL_S * 1000).toISOString().slice(0, 10);
-  const lines = files
-    .filter((f) => link.has(f.file))
-    .map((f) => `${f.filename} (${mib(f.size)}): ${ctx.storage.getUrl(f.file, { download: f.filename, expiresIn: LINK_TTL_S })}`);
+  const head = `Arquivos para baixar (links válidos até ${until}):`;
+  const linked = files.filter((f) => link.has(f.file)).map((f) => ({ ...f, url: ctx.storage.getUrl(f.file, { download: f.filename, expiresIn: LINK_TTL_S }) as string }));
+  const html = linked.map((f) => `<a href="${escapeHtml(f.url)}">${escapeHtml(f.filename)}</a> (${mib(f.size)})`).join("<br>");
   return {
-    text: `${text}\n\n—\nArquivos para baixar (links válidos até ${until}):\n${lines.join("\n")}`,
+    text: `${text}\n\n—\n${head}\n${linked.map((f) => `${f.filename} (${mib(f.size)}): ${f.url}`).join("\n")}`,
+    bodyHtml: bodyHtml === undefined ? undefined : `${bodyHtml}<p>—<br>${escapeHtml(head)}<br>${html}</p>`,
     attachments: files.map(({ size: _, ...a }) => (link.has(a.file) ? { ...a, link: true } : a)),
   };
 }
@@ -337,47 +354,88 @@ function ccOf(cc: string[] | undefined) {
   return cc?.length ? { cc } : {};
 }
 
+// What the composer adds to a send (reply, compose, forward), all optional, so text-only callers keep working:
+//
+//   bodyHtml     the rich body, an HTML fragment (`text` stays required: the text/plain part); Ember sanitizes it
+//   signature    false: none; default (true): the member's signature for the mailbox (`inbox:signature`), if any
+//   quoteHeader  reply only: the localized attribution line above the quote ("Em 5 de nov. de 2026, Ana escreveu:")
+//   draftId      a draft of the member's (`inbox:saveDraft`), deleted in the same transaction once the send succeeds
+const composerArgs = { bodyHtml: v.optional(v.string()), signature: v.optional(v.boolean()), draftId: v.optional(v.string()) };
+
+/** The member's draft a send consumes: null when it is gone already (sent or deleted on another device). */
+function draftOf(ctx: Ctx, m: Member, draftId: string | undefined): string | null {
+  if (draftId === undefined) return null;
+  const id = ctx.db.normalizeId("drafts", draftId);
+  const d = id ? (ctx.db.get(id) as DraftDoc | null) : null;
+  if (!d) return null;
+  if (d.userId !== m.userId) throw new Error("draft not found");
+  return d._id;
+}
+
 /** Answers the thread's contact; `cc` copies others too (reply all: the client lists who else was on the message). */
 export const reply = mutation({
-  args: { threadId: v.string(), text: v.string(), cc: ccArg, attachments: attachmentsArg },
+  args: { threadId: v.string(), text: v.string(), cc: ccArg, attachments: attachmentsArg, quoteHeader: v.optional(v.string()), ...composerArgs },
   handler: (ctx, a) => {
-    const { m } = threadOf(ctx, a.threadId);
-    const w = withAttachments(ctx, m, a.text, a.attachments);
-    return ctx.runMutation(email.reply, { threadId: a.threadId, text: w.text, author: displayName(m), ...ccOf(a.cc), ...(w.attachments ? { attachments: w.attachments } : {}) });
+    const { t, m } = threadOf(ctx, a.threadId);
+    const draft = draftOf(ctx, m, a.draftId);
+    const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
+    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml);
+    const sent = ctx.runMutation(email.reply, {
+      threadId: a.threadId,
+      text: w.text,
+      author: displayName(m),
+      ...ccOf(a.cc),
+      ...extras,
+      ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
+      ...(w.attachments ? { attachments: w.attachments } : {}),
+    });
+    if (draft) ctx.db.delete(draft as any);
+    return sent;
   },
 });
 
 /**
  * Forwards a message of a thread the member can see, as a new conversation from the same mailbox. The client writes
- * `subject` and `text` (what the member wrote above the quoted original, in their language); the original's files go
- * along (attached up to ATTACH_LIMIT, the rest as links), with any the member uploaded. Not a note.
+ * `subject` and `text` (what the member wrote above the quoted original, in their language; `bodyHtml` the same in
+ * HTML); the original's files go along (attached up to ATTACH_LIMIT, the rest as links), with any the member
+ * uploaded. Not a note.
  */
 export const forward = mutation({
-  args: { threadId: v.string(), messageId: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg },
+  args: { threadId: v.string(), messageId: v.string(), to: v.array(v.string()), cc: ccArg, subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     const msg = (t.messages as Array<{ _id: string; direction: string; attachments: Array<{ file: string; filename: string; contentType: string; inline?: boolean; contentId?: string }> }>).find((x) => x._id === a.messageId);
     if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
-    // Not the inline images of its HTML (signature logos): the forward is text, and nothing shows them.
+    const draft = draftOf(ctx, m, a.draftId);
+    // Not the inline images of its HTML (signature logos): nothing in the forward shows them.
     const original = msg.attachments.filter((f) => !(f.inline && f.contentId)).map((f) => ({ file: f.file, filename: f.filename, contentType: f.contentType }));
-    const w = withAttachments(ctx, m, a.text, a.attachments, original);
-    return ctx.runMutation(email.compose, {
+    const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
+    const w = withAttachments(ctx, m, a.text, a.attachments, original, extras.bodyHtml);
+    const sent = ctx.runMutation(email.compose, {
       mailbox: t.thread.mailbox,
       to: a.to,
       ...ccOf(a.cc),
       subject: a.subject,
       text: w.text,
       author: displayName(m),
+      ...extras,
+      ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
       ...(w.attachments ? { attachments: w.attachments } : {}),
     });
+    if (draft) ctx.db.delete(draft as any);
+    return sent;
   },
 });
 
+/** An internal note on the thread (never sent); `draftId`: the note's draft, deleted with it. */
 export const note = mutation({
-  args: { threadId: v.string(), text: v.string() },
+  args: { threadId: v.string(), text: v.string(), draftId: v.optional(v.string()) },
   handler: (ctx, a) => {
     const { m } = threadOf(ctx, a.threadId);
-    return ctx.runMutation(email.note, { threadId: a.threadId, text: a.text, author: displayName(m) });
+    const draft = draftOf(ctx, m, a.draftId);
+    const r = ctx.runMutation(email.note, { threadId: a.threadId, text: a.text, author: displayName(m) });
+    if (draft) ctx.db.delete(draft as any);
+    return r;
   },
 });
 
@@ -407,6 +465,8 @@ export const deleteThread = mutation({
     const { t, m } = threadOf(ctx, a.threadId);
     const owner = ownerOf(ctx.db, t.thread.mailbox);
     if (owner !== null ? owner !== m.userId : !m.admin) throw new Error("only an admin (or a personal mailbox's owner) deletes a conversation");
+    // Everyone's drafts on it go with it (they hold their uploads).
+    for (const d of ctx.db.query("drafts").withIndex("by_thread", (q) => q.eq("threadId", a.threadId)).collect()) ctx.db.delete(d._id);
     return ctx.runMutation(email.deleteThread, a) as { deleted: boolean; canceled?: number };
   },
 });
@@ -434,12 +494,25 @@ export const assign = mutation({
 
 /** A new conversation from a mailbox (answers join it through the thread token). */
 export const compose = mutation({
-  args: { mailbox: v.string(), to: v.array(v.string()), cc: v.optional(v.array(v.string())), subject: v.string(), text: v.string(), attachments: attachmentsArg },
+  args: { mailbox: v.string(), to: v.array(v.string()), cc: v.optional(v.array(v.string())), subject: v.string(), text: v.string(), attachments: attachmentsArg, ...composerArgs },
   handler: (ctx, a) => {
     const m = allowed(ctx, a.mailbox);
-    const { attachments: list, ...rest } = a;
-    const w = withAttachments(ctx, m, a.text, list);
-    return ctx.runMutation(email.compose, { ...rest, text: w.text, author: displayName(m), ...(w.attachments ? { attachments: w.attachments } : {}) });
+    const draft = draftOf(ctx, m, a.draftId);
+    const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
+    const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml);
+    const sent = ctx.runMutation(email.compose, {
+      mailbox: a.mailbox,
+      to: a.to,
+      ...(a.cc ? { cc: a.cc } : {}),
+      subject: a.subject,
+      text: w.text,
+      author: displayName(m),
+      ...extras,
+      ...(w.bodyHtml !== undefined ? { bodyHtml: w.bodyHtml } : {}),
+      ...(w.attachments ? { attachments: w.attachments } : {}),
+    });
+    if (draft) ctx.db.delete(draft as any);
+    return sent;
   },
 });
 
@@ -552,3 +625,258 @@ export const registerDevice = mutation({
 });
 
 export const unregisterDevice = mutation({ args: { token: v.string() }, handler: (ctx, a) => (member(ctx), push.unregister(ctx, a.token)) });
+
+// ---------------------------------------------------------------------------------------------- composer
+// Signatures, drafts and saved replies (rules and limits: ember/composer.ts, shared with the clients as
+// `@freecorps/mail-email-html/compose`). Signatures and drafts are the member's own, never anyone else's; saved
+// replies belong to a mailbox.
+
+const optionalMailbox = v.optional(v.union(v.string(), v.null()));
+
+/** The member's signatures: their default (`mailbox` absent) and per mailbox, for the mailboxes they still see. */
+export const signatures = query({
+  args: {},
+  handler: (ctx) => {
+    const m = member(ctx);
+    const personal = owners(ctx.db);
+    return signaturesOf(ctx.db, m.userId).filter((s) => s.mailbox === undefined || canSeeWith(personal, m, s.mailbox));
+  },
+});
+
+/**
+ * The signature the member's mail from `mailbox` carries (the composer's preview): the one saved for that mailbox,
+ * else their default, else null (no signature). `from`: that mailbox, or null for the default.
+ */
+export const signature = query({
+  args: { mailbox: v.string() },
+  handler: (ctx, a) => {
+    const m = allowed(ctx, a.mailbox);
+    const s = effectiveSignature(ctx.db, m.userId, a.mailbox);
+    return s ? { text: s.text, html: s.html ?? null, from: s.from } : null;
+  },
+});
+
+/**
+ * Saves the member's signature for `mailbox` (one they see, shared or personal), or their default for every mailbox
+ * with `mailbox` absent or null. `text` is the text part (at most 5k), `html` the rich one (at most 20k, sanitized by
+ * Ember when sent). Returns the signature's id.
+ */
+export const setSignature = mutation({
+  args: { mailbox: optionalMailbox, text: v.string(), html: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    const m = a.mailbox ? allowed(ctx, a.mailbox) : member(ctx);
+    checkSignature(a.text, a.html);
+    const mailbox = a.mailbox ?? undefined;
+    const doc = { userId: m.userId, ...(mailbox ? { mailbox } : {}), text: a.text, ...(a.html !== undefined && a.html.trim() ? { html: a.html } : {}), updatedAt: ctx.now };
+    const prev = signaturesOf(ctx.db, m.userId).find((s) => s.mailbox === mailbox);
+    if (!prev) return ctx.db.insert("signatures", doc);
+    ctx.db.replace(prev._id as any, doc);
+    return prev._id;
+  },
+});
+
+/** Deletes the member's signature for `mailbox` (or their default): true when there was one. */
+export const deleteSignature = mutation({
+  args: { mailbox: optionalMailbox },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    const prev = signaturesOf(ctx.db, m.userId).find((s) => s.mailbox === (a.mailbox ?? undefined));
+    if (prev) ctx.db.delete(prev._id as any);
+    return !!prev;
+  },
+});
+
+/**
+ * The member's drafts, newest first (complete documents, for offline replicas), only for mailboxes they still see.
+ * `threadId`: that thread's drafts (reply, note, forward), which needs access to it.
+ */
+export const drafts = query({
+  args: { threadId: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    if (a.threadId !== undefined) {
+      threadOf(ctx, a.threadId);
+      return (ctx.db.query("drafts").withIndex("by_thread", (q) => q.eq("threadId", a.threadId)).collect() as DraftDoc[])
+        .filter((d) => d.userId === m.userId)
+        .sort((x, y) => y.updatedAt - x.updatedAt);
+    }
+    const personal = owners(ctx.db);
+    const mine = ctx.db.query("drafts").withIndex("by_user", (q) => q.eq("userId", m.userId)).order("desc").take(L.draftsPerMember) as DraftDoc[];
+    return mine.filter((d) => canSeeWith(personal, m, d.mailbox));
+  },
+});
+
+const kindArg = v.union(...DRAFT_KINDS.map((k) => v.literal(k)));
+
+/**
+ * Saves a draft (clients debounce). `id`: the draft to replace (the member's own); without it, a reply, note or
+ * forward replaces the member's draft of the same kind on that thread (one per thread and kind, so two devices
+ * write the same one), and a new conversation is a new draft. Every call writes the whole draft.
+ *
+ *   reply | note  threadId (the mailbox is the thread's)
+ *   forward       threadId and messageId (the message forwarded; its files go along when sent)
+ *   compose       mailbox (one the member sees)
+ *
+ * `attachments`: the member's own uploads (`generateUploadUrl`), kept while the draft waits. Returns `{ id, updatedAt }`.
+ */
+export const saveDraft = mutation({
+  args: {
+    id: v.optional(v.string()),
+    kind: kindArg,
+    threadId: v.optional(v.string()),
+    messageId: v.optional(v.string()),
+    mailbox: v.optional(v.string()),
+    to: v.optional(v.array(v.string())),
+    cc: v.optional(v.array(v.string())),
+    bcc: v.optional(v.array(v.string())),
+    subject: v.optional(v.string()),
+    text: v.string(),
+    bodyHtml: v.optional(v.string()),
+    attachments: attachmentsArg,
+  },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    let mailbox: string;
+    if (a.kind === "compose") {
+      if (!a.mailbox) throw new Error("mailbox: required for a new conversation");
+      if (a.threadId !== undefined || a.messageId !== undefined) throw new Error("a new conversation's draft has no thread");
+      allowed(ctx, a.mailbox);
+      mailbox = a.mailbox;
+    } else {
+      if (!a.threadId) throw new Error(`threadId: required for a ${a.kind} draft`);
+      const { t } = threadOf(ctx, a.threadId);
+      mailbox = t.thread.mailbox;
+      if (a.kind === "forward") {
+        const msg = a.messageId && (t.messages as Array<{ _id: string; direction: string }>).find((x) => x._id === a.messageId);
+        if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
+      } else if (a.messageId !== undefined) throw new Error(`a ${a.kind} draft has no messageId`);
+    }
+    const attachments = (a.attachments ?? []) as DraftAttachment[];
+    const doc = {
+      userId: m.userId,
+      kind: a.kind,
+      ...(a.kind !== "compose" ? { threadId: a.threadId! } : {}),
+      ...(a.kind === "forward" ? { messageId: a.messageId! } : {}),
+      mailbox,
+      to: a.to ?? [],
+      cc: a.cc ?? [],
+      bcc: a.bcc ?? [],
+      subject: a.subject ?? "",
+      text: a.text,
+      ...(a.bodyHtml !== undefined && a.bodyHtml.trim() ? { bodyHtml: a.bodyHtml } : {}),
+      attachments,
+      updatedAt: ctx.now,
+    };
+    checkDraft(doc);
+    for (const f of attachments) {
+      // Only the member's own uploads, as when sending (a draft never holds another mailbox's file).
+      const up = ctx.db.query("uploads").withIndex("by_file", (q) => q.eq("file", f.file)).first() as { userId: string } | null;
+      if (!up || up.userId !== m.userId) throw new Error(`attachment ${f.filename}: not an upload of yours`);
+      if (!ctx.storage.getMetadata(f.file)) throw new Error(`attachment ${f.filename}: file not found`);
+    }
+    let prev: DraftDoc | null = null;
+    if (a.id !== undefined) {
+      const id = ctx.db.normalizeId("drafts", a.id);
+      prev = id ? (ctx.db.get(id) as DraftDoc | null) : null;
+      if (!prev || prev.userId !== m.userId) throw new Error("draft not found");
+    } else if (a.kind !== "compose") {
+      prev = (ctx.db.query("drafts").withIndex("by_thread", (q) => q.eq("threadId", a.threadId!)).collect() as DraftDoc[]).find((d) => d.userId === m.userId && d.kind === a.kind) ?? null;
+    }
+    if (prev) {
+      ctx.db.replace(prev._id as any, doc);
+      return { id: prev._id, updatedAt: ctx.now };
+    }
+    const mine = ctx.db.query("drafts").withIndex("by_user", (q) => q.eq("userId", m.userId)).take(L.draftsPerMember) as DraftDoc[];
+    if (mine.length >= L.draftsPerMember) {
+      // Drafts in mailboxes the member no longer sees are unreachable (`inbox:drafts` hides them): they give their
+      // place back instead of counting against the cap.
+      const personal = owners(ctx.db);
+      const hidden = mine.filter((d) => !canSeeWith(personal, m, d.mailbox));
+      for (const d of hidden) ctx.db.delete(d._id as any);
+      if (mine.length - hidden.length >= L.draftsPerMember) throw new Error(`at most ${L.draftsPerMember} drafts: send or delete some`);
+    }
+    return { id: ctx.db.insert("drafts", doc) as string, updatedAt: ctx.now };
+  },
+});
+
+/** Deletes one of the member's drafts: true when it was there (false when already gone). */
+export const deleteDraft = mutation({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    const id = ctx.db.normalizeId("drafts", a.id);
+    const d = id ? (ctx.db.get(id) as DraftDoc | null) : null;
+    if (!d) return false;
+    if (d.userId !== m.userId) throw new Error("draft not found");
+    ctx.db.delete(d._id as any);
+    return true;
+  },
+});
+
+/** Daily (ember/crons.ts): removes drafts untouched for 30 days, 500 per run, then runs again if there were more. */
+export const pruneDrafts = internalMutation({
+  args: {},
+  handler: (ctx) => {
+    const old = ctx.db.query("drafts").withIndex("by_updated", (q) => q.lt("updatedAt", ctx.now - DRAFT_TTL_MS)).take(500) as DraftDoc[];
+    for (const d of old) ctx.db.delete(d._id as any);
+    if (old.length === 500) ctx.scheduler.runAfter(0, "inbox:pruneDrafts" as any, {});
+    return old.length;
+  },
+});
+
+/**
+ * A mailbox's saved replies, by title (complete documents, for offline replicas). Templates as written: the clients
+ * fill their variables when inserting one (`fillSavedReply` and the variable set in
+ * `@freecorps/mail-email-html/compose`: {nome}, {primeiro_nome}, {email}, {caixa}, {agente}, {numero}).
+ * A member may change one when `createdBy` is them or they are an admin.
+ */
+export const savedReplies = query({
+  args: { mailbox: v.string() },
+  handler: (ctx, a) => {
+    allowed(ctx, a.mailbox);
+    return (ctx.db.query("savedReplies").withIndex("by_mailbox", (q) => q.eq("mailbox", a.mailbox)).collect() as SavedReplyDoc[]).sort(
+      (x, y) => x.title.localeCompare(y.title, "pt-BR", { sensitivity: "base" }) || x._creationTime - y._creationTime,
+    );
+  },
+});
+
+function savedReplyOf(ctx: Ctx, id: string) {
+  const nid = ctx.db.normalizeId("savedReplies", id);
+  const r = nid ? (ctx.db.get(nid) as SavedReplyDoc | null) : null;
+  if (!r) throw new Error("saved reply not found");
+  const m = allowed(ctx, r.mailbox);
+  if (r.createdBy !== m.userId && !m.admin) throw new Error("only its author or an admin changes a saved reply");
+  return r;
+}
+
+/**
+ * Creates a saved reply in `mailbox` (any member who sees it), or with `id` replaces one of that mailbox (its author
+ * or an admin). `title` at most 200, `text` and `bodyHtml` at most 200k. Returns `{ id, updatedAt }`.
+ */
+export const saveSavedReply = mutation({
+  args: { id: v.optional(v.string()), mailbox: v.string(), title: v.string(), text: v.string(), bodyHtml: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    const m = allowed(ctx, a.mailbox);
+    checkSavedReply(a);
+    const body = { mailbox: a.mailbox, title: a.title.trim(), text: a.text, ...(a.bodyHtml !== undefined && a.bodyHtml.trim() ? { bodyHtml: a.bodyHtml } : {}), updatedAt: ctx.now };
+    if (a.id !== undefined) {
+      const prev = savedReplyOf(ctx, a.id);
+      if (prev.mailbox !== a.mailbox) throw new Error("saved reply not found");
+      ctx.db.replace(prev._id as any, { ...body, createdBy: prev.createdBy });
+      return { id: prev._id, updatedAt: ctx.now };
+    }
+    if (ctx.db.query("savedReplies").withIndex("by_mailbox", (q) => q.eq("mailbox", a.mailbox)).take(L.savedRepliesPerMailbox).length >= L.savedRepliesPerMailbox) {
+      throw new Error(`at most ${L.savedRepliesPerMailbox} saved replies per mailbox`);
+    }
+    return { id: ctx.db.insert("savedReplies", { ...body, createdBy: m.userId }) as string, updatedAt: ctx.now };
+  },
+});
+
+/** Deletes a saved reply (its author or an admin). */
+export const deleteSavedReply = mutation({
+  args: { id: v.string() },
+  handler: (ctx, a) => {
+    ctx.db.delete(savedReplyOf(ctx, a.id)._id as any);
+    return true;
+  },
+});
