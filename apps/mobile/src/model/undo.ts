@@ -104,6 +104,22 @@ export function useUndo(store: UndoStore = undoStore): UndoEntry | null {
 }
 
 /**
+ * For a presenter that can't take back what it shows (Android's snackbars queue and keep their own clock): true the
+ * first time it is asked about an entry, false after, so a re-render, a language change or a new object for the same
+ * entry never queues it twice. A notice that waited out a send can show after a newer entry (ids are not in order),
+ * so it remembers each id, the last few only.
+ */
+export function createShowOnce(keep = 16) {
+  const shown: number[] = [];
+  return (id: number): boolean => {
+    if (shown.includes(id)) return false;
+    shown.push(id);
+    if (shown.length > keep) shown.shift();
+    return true;
+  };
+}
+
+/**
  * Offers "Desfazer" for an archive: undo puts each thread back to the status it had (optimistic, like the archive).
  * `restore` is the setStatus mutation of the caller.
  */
