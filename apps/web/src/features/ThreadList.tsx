@@ -10,11 +10,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/i18n/context";
 import { formatWhen } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { rowDomId, THREAD_FILTERS, type ThreadFilter, type ThreadRow } from "@/model/threads";
+import { rowDomId, STATUS_TABS, type ThreadFilter, type ThreadRow } from "@/model/threads";
 
 export interface ThreadListProps {
   title: string;
+  /** Under the title (the mailbox of a Sent or Spam list). */
+  subtitle?: string;
   mailboxPicker?: React.ReactNode;
+  /** The status tabs apply to this list (a mailbox, or all mailboxes). */
+  tabs: boolean;
+  /** What an empty list says (a search says "nothing found" itself). */
+  empty: { title: string; hint: string };
+  /** Rows come from several mailboxes: each says which (mailbox name → display name). */
+  mailboxNames?: Record<string, string>;
   /** The list fills a wide area (focus mode): keep its rows to a readable measure, centered. */
   wide?: boolean;
   /** Buttons at the right of the title (the layout menu). */
@@ -48,7 +56,8 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   }, [p.cursorId]);
 
   // The filters are tabs over the list: the list is the active tab's panel (Radix links them with aria-controls).
-  // While searching there are no filters, and the list is a plain region.
+  // While searching, and in lists without statuses (Sent, Spam, most views), the list is a plain region.
+  const tabbed = p.tabs && !p.searching;
   const measure = p.wide ? "mx-auto w-full max-w-3xl" : undefined;
   const body = (
     <>
@@ -73,12 +82,10 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
           ) : (
             <InboxIcon className="size-6 text-muted-foreground" aria-hidden="true" />
           )}
-          <p className="text-sm font-medium">{p.searching ? t("threads.emptySearch", { query: p.query.trim() }) : t("threads.empty")}</p>
-          {!p.searching && (
-            <p className="max-w-56 text-xs text-muted-foreground">
-              {t(p.filter === "sent" ? "threads.emptyHintSent" : "threads.emptyHint")}
-            </p>
-          )}
+          <p className="max-w-full text-sm font-medium break-words">
+            {p.searching ? t("threads.emptySearch", { query: p.query.trim() }) : p.empty.title}
+          </p>
+          {!p.searching && <p className="max-w-56 text-xs text-muted-foreground">{p.empty.hint}</p>}
         </div>
       ) : (
         <ul ref={listRef} className={cn("p-1.5", measure)}>
@@ -119,9 +126,14 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
                       {r.subject}
                     </span>
                     <span className="mt-0.5 line-clamp-1 text-ui text-muted-foreground compact:hidden">{r.snippet}</span>
-                    {(r.status || r.assigneeName) && (
-                      <span className="mt-1.5 flex items-center gap-1.5">
+                    {((r.status && r.status !== "open") || r.assigneeName || p.mailboxNames) && (
+                      <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
                         {r.status && r.status !== "open" && <StatusBadge status={r.status} />}
+                        {p.mailboxNames && (
+                          <span className="max-w-32 shrink-0 truncate text-xs text-muted-foreground">
+                            {p.mailboxNames[r.mailbox] ?? r.mailbox}
+                          </span>
+                        )}
                         {r.assigneeName && (
                           <span className="truncate text-xs text-muted-foreground">{t("thread.assignedTo", { name: r.assigneeName })}</span>
                         )}
@@ -147,9 +159,12 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
   return (
     <Tabs asChild value={p.filter} onValueChange={(v) => p.onFilter(v as ThreadFilter)} activationMode="manual">
       <section aria-label={t("threads.list")} className={cn("flex min-w-0 flex-col bg-background", p.className)}>
-        <header className={cn("space-y-3 border-b px-4 pt-3.5", p.searching ? "pb-3" : "pb-0")}>
+        <header className={cn("space-y-3 border-b px-4 pt-3.5", tabbed ? "pb-0" : "pb-3")}>
           <div className={cn("flex h-7 items-center justify-between gap-2", measure)}>
-            {p.mailboxPicker ?? <h1 className="truncate text-base font-semibold">{p.title}</h1>}
+            <span className="flex min-w-0 items-baseline gap-2">
+              {p.mailboxPicker ?? <h1 className="truncate text-base font-semibold">{p.title}</h1>}
+              {p.subtitle && <span className="hidden truncate text-ui text-muted-foreground md:inline">{p.subtitle}</span>}
+            </span>
             <span className="flex shrink-0 items-center gap-2">
               {p.searching && !p.loading && (
                 <span className="text-xs text-muted-foreground tabular-nums">{t("threads.results", { count: p.rows.length })}</span>
@@ -173,9 +188,9 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
             />
             {!p.query && <Kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">/</Kbd>}
           </div>
-          {!p.searching && (
-            <TabsList aria-label={t("threads.filters")} className={cn("-mb-px gap-3.5", measure)}>
-              {THREAD_FILTERS.map((f) => (
+          {tabbed && (
+            <TabsList aria-label={t("threads.filters")} className={cn("-mb-px gap-4", measure)}>
+              {STATUS_TABS.map((f) => (
                 <TabsTrigger key={f} value={f}>
                   {t(`threads.filter.${f}`)}
                 </TabsTrigger>
@@ -184,7 +199,7 @@ export function ThreadList({ searchRef, ...p }: ThreadListProps) {
           )}
         </header>
 
-        {p.searching ? (
+        {!tabbed ? (
           <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
         ) : (
           <TabsContent value={p.filter} className="min-h-0 flex-1 overflow-y-auto">

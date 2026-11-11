@@ -24,14 +24,22 @@ export function formatWhen(at: number, now: number, locale: Locale): string {
     .replace(/\.$/, "");
 }
 
-/** How long ago, in the largest whole unit ("há 26 h", "há 3 dias"): how long a conversation has been waiting. */
+/**
+ * How long ago, in the largest whole unit ("agora", "há 26 h", "há 3 dias", "há 4 meses", "há 2 anos"): how long a
+ * conversation has been waiting.
+ */
 export function formatAge(at: number, now: number, locale: Locale): string {
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "always", style: "short" });
   const min = Math.max(0, Math.floor((now - at) / 60_000));
+  // "agora" / "now" ("auto" only here: it would also say "ano passado" for a year).
+  if (min < 1) return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(0, "second");
   if (min < 60) return rtf.format(-min, "minute");
   const h = Math.floor(min / 60);
   if (h < 48) return rtf.format(-h, "hour");
-  return rtf.format(-Math.floor(h / 24), "day");
+  const d = Math.floor(h / 24);
+  if (d < 60) return rtf.format(-d, "day");
+  if (d < 365) return rtf.format(-Math.floor(d / 30), "month");
+  return rtf.format(-Math.floor(d / 365), "year");
 }
 
 /** Message header timestamps: full date and time. */

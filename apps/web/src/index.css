@@ -200,6 +200,19 @@
   #root {
     height: 100%;
   }
+  /* Phones: no gray tap flash (controls have their own :active), no page bounce or pull-to-refresh behind the app's
+     own scroll areas, no text inflation in landscape. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+  }
+  button,
+  a,
+  [role="button"],
+  [role="tab"] {
+    touch-action: manipulation;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "ss01", "cv11";
@@ -248,5 +261,17 @@
   .pressable:active,
   [data-slot="button"]:active {
     transform: none !important;
+  }
+}
+
+/*
+ * iOS zooms into fields under 16px and stays zoomed: 16px wherever the pointer is a finger. Unlayered on purpose: it
+ * must beat Tailwind's size utilities (`text-sm` on the search boxes), which live in a cascade layer.
+ */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
   }
 }

@@ -6,7 +6,7 @@ import { forwardedFiles, forwardSubject, forwardText, MAX_CC, replyAllCc } from 
 import { describe, expect, it, vi } from "vite-plus/test";
 import type { OptimisticLocalStore, PendingMutationRecord } from "@freecorps/ember-client";
 import { pickLocale, translate } from "@/i18n/strings";
-import type { Mailbox, Message, Page, Thread, ThreadDetail } from "@/lib/api";
+import { VIEWS, type Mailbox, type Message, type Page, type Thread, type ThreadDetail } from "@/lib/api";
 import { jwtExpMs, jwtSource } from "@/lib/auth";
 import {
   buildEmailDocument,
@@ -22,11 +22,13 @@ import {
 import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
 import { formatAge, formatWhen, initials, parseRecipients } from "@/lib/format";
 import { overdueBeyondScan, staleWaiting } from "@/model/today";
-import { inboxOptimisticUpdates, isOptimisticId } from "@/lib/optimistic";
+import { monogram } from "@/lib/nav";
+import { badge, viewBadge } from "@/model/threads";
+import { inboxOptimisticUpdates, isOptimisticId, setOptimisticViewer } from "@/lib/optimistic";
 import { parsePrefs, resolveTheme } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { checkCompose, composeErrorField } from "@/model/compose";
-import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
+import { isTextField, modKey, moveSelection, shortcutFor } from "@/model/keys";
 import { formatRoute, parseRoute } from "@/model/route";
 import { searchRows, threadRow } from "@/model/threads";
 
@@ -114,11 +116,34 @@ describe("format and i18n", () => {
     expect(initials("Élise Østergaard")).toBe("ÉØ");
   });
 
+  it("makes mailbox monograms and count badges", () => {
+    expect(monogram("Atendimento")).toBe("A");
+    expect(monogram("Vendas Brasil Sul")).toBe("VS");
+    expect(monogram("Vendas Região Sul 3")).toBe("V3");
+    expect(monogram("🌻 Jardim")).toBe("J");
+    expect(monogram("")).toBe("?");
+    expect(badge(7)).toBe("7");
+    expect(badge(12_000)).toBe("99+");
+    expect(badge(40, true)).toBe("40+");
+    const counts = {
+      all: { threads: 9, unread: 14, capped: false },
+      assigned: { threads: 3, unread: 1, capped: false },
+      unread: { threads: 0, unread: 0, capped: false },
+      waiting: { threads: 2, unread: 0, capped: true },
+    };
+    // Unread messages for all/unread, threads for assigned/waiting (as on mobile); nothing at zero.
+    expect(VIEWS.map((v) => viewBadge(v, counts))).toEqual(["14", "3", null, "2+"]);
+    expect(viewBadge("all", null)).toBeNull();
+  });
+
   it("says how long ago, in the largest whole unit", () => {
     const now = new Date(2026, 10, 10, 12, 0).getTime();
     expect(formatAge(now - 5 * 60_000, now, "en")).toBe("5 min. ago");
     expect(formatAge(now - 26 * 3_600_000, now, "en")).toBe("26 hr. ago");
     expect(formatAge(now - 3 * 86_400_000, now, "pt-BR")).toBe("há 3 dias");
+    expect(formatAge(now - 4_000, now, "pt-BR")).toBe("agora");
+    expect(formatAge(now - 400 * 86_400_000, now, "pt-BR")).toBe("há 1 ano");
+    expect(formatAge(now - 100 * 86_400_000, now, "en")).toBe("3 mo. ago");
   });
 
   it("finds conversations waiting for more than a day, the longest first", () => {
@@ -157,7 +182,12 @@ describe("keyboard", () => {
     expect(shortcutFor({ key: "e" }, false)).toBe("archive");
     expect(shortcutFor({ key: "/" }, false)).toBe("search");
     expect(shortcutFor({ key: "[" }, false)).toBe("sidebar");
+    expect(shortcutFor({ key: "k", metaKey: true }, true)).toBe("palette");
+    expect(shortcutFor({ key: "K", ctrlKey: true }, false)).toBe("palette");
+    expect(shortcutFor({ key: "k", ctrlKey: true, altKey: true }, false)).toBeNull();
     expect(shortcutFor({ key: "c", metaKey: true }, false)).toBeNull();
+    expect(modKey("MacIntel")).toBe("⌘");
+    expect(modKey("Win32")).toBe("Ctrl");
     expect(shortcutFor({ key: "r" }, true)).toBeNull();
     expect(shortcutFor({ key: "Escape" }, true)).toBe("escape");
   });
@@ -203,9 +233,15 @@ describe("compose", () => {
 describe("route", () => {
   it("round-trips through the URL and drops defaults", () => {
     const r = parseRoute("?m=support&f=waiting&t=email%24threads_1&q=fatura");
-    expect(r).toEqual({ admin: null, mailbox: "support", filter: "waiting", thread: "email$threads_1", query: "fatura" });
+    expect(r).toEqual({ admin: null, view: null, mailbox: "support", filter: "waiting", thread: "email$threads_1", query: "fatura" });
     expect(parseRoute(formatRoute(r))).toEqual(r);
-    expect(formatRoute({ admin: null, mailbox: null, filter: "all", thread: null, query: "" })).toBe("");
+    expect(formatRoute({ admin: null, view: null, mailbox: null, filter: "all", thread: null, query: "" })).toBe("");
+    // Views across mailboxes; Sent and Spam as a mailbox's lists; unknown values fall back.
+    expect(parseRoute("?v=assigned&t=x")).toMatchObject({ view: "assigned", mailbox: null, thread: "x" });
+    expect(formatRoute({ ...parseRoute(""), view: "unread", query: "boleto" })).toBe("?v=unread&q=boleto");
+    expect(parseRoute("?v=bogus").view).toBeNull();
+    expect(parseRoute("?m=support&f=spam").filter).toBe("spam");
+    expect(parseRoute("?m=support&f=sent").filter).toBe("sent");
     expect(parseRoute("?f=bogus").filter).toBe("all");
     // The admin screen's section; an unknown one is the inbox.
     expect(parseRoute("?a=keys")).toMatchObject({ admin: "keys" });
@@ -347,6 +383,55 @@ describe("optimistic updates", () => {
     expect(s.dump("inbox:mailboxes")[0][0].unread).toBe(1);
     u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
     expect(s.dump("inbox:threads").map((p: Page<Thread>) => p.page.length)).toEqual([1, 0]);
+  });
+
+  it("a new conversation shows on top of the views it belongs to, and their counts grow", () => {
+    const zero = { threads: 0, unread: 0, capped: false };
+    const s = store({
+      "inbox:view": [
+        {
+          args: { view: "waiting", limit: 30 },
+          value: { page: [thread({ _id: "old", status: "waiting" })], isDone: true, partial: false },
+        },
+        { args: { view: "unread", limit: 30 }, value: { page: [], isDone: true, partial: false } },
+      ],
+      "inbox:views": [
+        { args: {}, value: { all: { ...zero, threads: 1 }, assigned: zero, unread: zero, waiting: { ...zero, threads: 1 } } },
+      ],
+    });
+    u["inbox:compose"]!(s, { mailbox: "support", to: ["ana@user.test"], subject: "Oi", text: "Olá" }, rec);
+    const [waiting, unread] = s.dump("inbox:view") as Array<{ page: Thread[] }>;
+    expect(waiting!.page).toHaveLength(2);
+    expect(isOptimisticId(waiting!.page[0]!._id)).toBe(true);
+    expect(unread!.page).toEqual([]);
+    expect(s.dump("inbox:views")[0]).toMatchObject({ all: { threads: 2 }, waiting: { threads: 2 }, unread: { threads: 0 } });
+  });
+
+  it("the cross-mailbox views and their counts follow read, assign and archive", () => {
+    setOptimisticViewer("u2");
+    const zero = { threads: 0, unread: 0, capped: false };
+    const t = thread({ unreadCount: 2 });
+    const s = store({
+      "inbox:view": [
+        { args: { view: "unread", limit: 30 }, value: { page: [t], isDone: true, partial: false } },
+        { args: { view: "all", limit: 30 }, value: { page: [t], isDone: true, partial: false } },
+      ],
+      "inbox:views": [
+        {
+          args: {},
+          value: { all: { ...zero, threads: 1, unread: 2 }, assigned: zero, unread: { ...zero, threads: 1, unread: 2 }, waiting: zero },
+        },
+      ],
+      "inbox:members": [{ args: { mailbox: "support" }, value: [{ userId: "u2", name: "Caio" }] }],
+    });
+    u["inbox:assign"]!(s, { threadId: "t1", userId: "u2" }, rec);
+    expect(s.dump("inbox:views")[0].assigned).toMatchObject({ threads: 1, unread: 2 });
+    u["inbox:markRead"]!(s, { threadId: "t1" }, rec);
+    expect(s.dump("inbox:view").map((v: { page: Thread[] }) => v.page.length)).toEqual([0, 1]);
+    expect(s.dump("inbox:views")[0]).toMatchObject({ all: { threads: 1, unread: 0 }, unread: { threads: 0, unread: 0 } });
+    u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
+    expect(s.dump("inbox:views")[0]).toMatchObject({ all: { threads: 1 }, assigned: { threads: 0 } });
+    setOptimisticViewer(null);
   });
 
   it("reply appends a pending message and moves the thread to waiting", () => {

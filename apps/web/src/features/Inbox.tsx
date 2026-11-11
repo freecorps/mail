@@ -20,17 +20,21 @@ import {
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, type PanelImperativeHandle } from "@/components/ui/resizable";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/context";
-import { api, type Me } from "@/lib/api";
+import { api, VIEWS, type Me, type View } from "@/lib/api";
+import { setOptimisticViewer } from "@/lib/optimistic";
 import { PANES, useMediaQuery, WIDE } from "@/lib/media";
+import { badge, useHasSpam, useViewCounts, viewTakesTabs } from "@/model/threads";
 import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { isTextField, moveSelection, shortcutFor } from "@/model/keys";
 import { useRoute, useSearchBox } from "@/model/route";
 import { useMailboxes, useThreadList } from "@/model/threads";
+import { DataToggle } from "@/dev/DataToggle";
+import { CommandPalette } from "./CommandPalette";
 import { ComposeDialog } from "./ComposeDialog";
 import type { ComposerHandle } from "./Composer";
 import { ShortcutsDialog } from "./ShortcutsDialog";
-import { Sidebar } from "./Sidebar";
+import { Sidebar, type Folder } from "./Sidebar";
 import { ThreadList } from "./ThreadList";
 import { ThreadView } from "./ThreadView";
 import { Today } from "./Today";
@@ -40,6 +44,11 @@ const MODE_ICON: Record<ReadingMode, typeof Columns3> = { split: Columns3, full:
 
 export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const { t } = useI18n();
+  // Optimistic updates follow the "assigned to me" rule with the signed-in member.
+  useLayoutEffect(() => {
+    setOptimisticViewer(me.userId);
+    return () => setOptimisticViewer(null);
+  }, [me.userId]);
   const { route, navigate } = useRoute();
   const boxes = useMailboxes();
   const mailbox = route.mailbox ?? boxes.mailboxes[0]?.name ?? me.mailboxes[0] ?? null;
@@ -49,8 +58,14 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   // The admin screen, for admins only (a non-admin following an `?a=` link stays in the inbox).
   const adminSection = me.admin ? route.admin : null;
 
-  const list_ = useThreadList({ mailbox: mailbox ?? "", filter: route.filter, query: route.query });
-  const rows = mailbox ? list_.rows : [];
+  // The list: a view across mailboxes (`?v=`), or the mailbox's (a status tab, Sent or Spam).
+  const view = route.view;
+  const folder: Folder | null = !view && (route.filter === "sent" || route.filter === "spam") ? route.filter : null;
+  const list_ = useThreadList({ mailbox: mailbox ?? "", view, filter: route.filter, query: route.query });
+  const rows = mailbox || view ? list_.rows : [];
+  const counts = useViewCounts();
+  const hasSpam = useHasSpam(view ? null : mailbox);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [cursor, setCursor] = useState<string | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -121,17 +136,18 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     document.title = boxes.totalUnread > 0 ? `(${boxes.totalUnread}) ${t("app.name")}` : t("app.name");
   }, [boxes.totalUnread, t, adminSection]);
 
-  const state = useRef({ rows, cursor, thread: route.thread, dialogs: composeOpen || helpOpen || !!adminSection });
+  const modal = composeOpen || helpOpen || paletteOpen;
+  const state = useRef({ rows, cursor, thread: route.thread, modal, admin: !!adminSection });
   useLayoutEffect(() => {
-    state.current = { rows, cursor, thread: route.thread, dialogs: composeOpen || helpOpen || !!adminSection };
+    state.current = { rows, cursor, thread: route.thread, modal, admin: !!adminSection };
   });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const s = state.current;
-      // Any open dialog (compose, the delete confirmation, forwarding…) owns the keyboard.
+      // Any open dialog (compose, the delete confirmation, forwarding, the palette…) owns the keyboard.
       if (
-        s.dialogs ||
+        s.modal ||
         e.defaultPrevented ||
         document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')
       )
@@ -139,6 +155,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       const inField = isTextField(document.activeElement);
       const action = shortcutFor(e, inField);
       if (!action) return;
+      // ⌘K works everywhere, the admin screen included; the other keys belong to the inbox.
+      if (action === "palette") {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (s.admin) return;
       // Enter on a focused button/link keeps its native meaning.
       if (action === "open" && document.activeElement && document.activeElement !== document.body && e.key === "Enter") return;
       const ids = s.rows.map((r) => r.threadId);
@@ -200,23 +223,84 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [navigate, open, setStatus, markUnread, t, toggleSidebar]);
 
-  // Mobile only: on md+ the sidebar lists the mailboxes, so the title is plain text (nothing dead in the tab order).
-  const title = current?.displayName ?? mailbox ?? t("mailboxes.title");
+  // Where the list goes. A view or a mailbox starts on "all" (a status tab from elsewhere may not apply); search stays.
+  const goView = useCallback(
+    (v: View) => {
+      setCursor(null);
+      navigate({ admin: null, view: v, filter: "all", thread: null }, { push: true });
+    },
+    [navigate],
+  );
+  const goMailbox = useCallback(
+    (name: string) => {
+      setCursor(null);
+      const filter = route.filter === "sent" || route.filter === "spam" ? "all" : route.filter;
+      navigate({ admin: null, view: null, mailbox: name, filter, thread: null }, { push: true });
+    },
+    [navigate, route.filter],
+  );
+  const goFolder = useCallback(
+    (name: string, f: Folder) => {
+      setCursor(null);
+      navigate({ admin: null, view: null, mailbox: name, filter: f, thread: null }, { push: true });
+    },
+    [navigate],
+  );
+
+  const mailboxLabel = current?.displayName ?? mailbox ?? t("mailboxes.title");
+  const title = view ? t(`views.${view}`) : folder ? t(`threads.filter.${folder}`) : mailboxLabel;
+  const empty = view
+    ? { title: view === "all" ? t("threads.empty") : t(`views.empty.${view}`), hint: t("threads.emptyHintView") }
+    : folder === "sent"
+      ? { title: t("threads.empty"), hint: t("threads.emptyHintSent") }
+      : folder === "spam"
+        ? { title: t("threads.empty"), hint: t("threads.emptyHintSpam") }
+        : { title: t("threads.empty"), hint: t("threads.emptyHint") };
+  // Phones only: on md+ the sidebar has the destinations, so the title is plain text (nothing dead in the tab order).
+  const place = view ? `v:${view}` : folder ? `f:${folder}` : `m:${mailbox ?? ""}`;
   const picker = (
     <DropdownMenu>
       <h1 className="hidden truncate text-base font-semibold md:block">{title}</h1>
-      <DropdownMenuTrigger className="flex items-center gap-1 text-base font-semibold md:hidden">
-        {title}
-        <ChevronDown className="size-4 text-muted-foreground" aria-hidden="true" />
+      <DropdownMenuTrigger className="flex min-w-0 items-center gap-1 text-base font-semibold md:hidden">
+        <span className="truncate">{title}</span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="md:hidden">
-        <DropdownMenuRadioGroup value={mailbox ?? ""} onValueChange={(v) => navigate({ mailbox: v, thread: null })}>
-          {boxes.mailboxes.map((b) => (
-            <DropdownMenuRadioItem key={b.name} value={b.name}>
-              {b.displayName ?? b.name}
-              {b.unread > 0 && <span className="ml-auto pl-3 text-xs text-primary tabular-nums">{b.unread}</span>}
+      <DropdownMenuContent align="start" className="w-64 md:hidden">
+        <DropdownMenuRadioGroup
+          value={place}
+          onValueChange={(v) => {
+            const [kind, value] = [v.slice(0, 1), v.slice(2)];
+            if (kind === "v") goView(value as View);
+            else if (kind === "m") goMailbox(value);
+            else if (mailbox) goFolder(mailbox, value as Folder);
+          }}
+        >
+          <DropdownMenuLabel className="text-xs text-muted-foreground">{t("sidebar.views")}</DropdownMenuLabel>
+          {VIEWS.map((v) => (
+            <DropdownMenuRadioItem key={v} value={`v:${v}`}>
+              {t(`views.${v}`)}
             </DropdownMenuRadioItem>
           ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel className="text-xs text-muted-foreground">{t("mailboxes.title")}</DropdownMenuLabel>
+          {boxes.mailboxes.map((b) => (
+            <DropdownMenuRadioItem key={b.name} value={`m:${b.name}`}>
+              <span className="min-w-0 flex-1 truncate">{b.displayName ?? b.name}</span>
+              {b.unread > 0 && <span className="pl-3 text-xs font-semibold text-primary tabular-nums">{badge(b.unread)}</span>}
+            </DropdownMenuRadioItem>
+          ))}
+          {mailbox && !view && (
+            <>
+              <DropdownMenuRadioItem value="f:sent">
+                {mailboxLabel}: {t("threads.filter.sent")}
+              </DropdownMenuRadioItem>
+              {(hasSpam || folder === "spam") && (
+                <DropdownMenuRadioItem value="f:spam">
+                  {mailboxLabel}: {t("threads.filter.spam")}
+                </DropdownMenuRadioItem>
+              )}
+            </>
+          )}
         </DropdownMenuRadioGroup>
         {/* Phones have no sidebar: the admin screen opens from here. */}
         {me.admin && (
@@ -238,14 +322,18 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       mailboxes={boxes.mailboxes}
       loading={boxes.status === "loading"}
       current={mailbox}
+      view={view}
+      filter={route.filter}
+      counts={counts}
+      hasSpam={hasSpam}
       inAdmin={!!adminSection}
       onAdmin={me.admin ? () => navigate({ admin: "overview", thread: null }, { push: true }) : undefined}
-      onSelect={(name) => {
-        setCursor(null);
-        navigate({ admin: null, mailbox: name, thread: null }, { push: !!adminSection });
-      }}
+      onView={goView}
+      onSelect={goMailbox}
+      onFolder={goFolder}
       onCompose={() => setComposeOpen(true)}
       onShortcuts={() => setHelpOpen(true)}
+      onPalette={() => setPaletteOpen(true)}
       collapsed={rail}
       onToggleCollapsed={toggleSidebar}
     />
@@ -285,8 +373,12 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const list = (
     <ThreadList
       className="h-full w-full"
-      title={current?.displayName ?? mailbox ?? ""}
+      title={title}
+      subtitle={folder ? mailboxLabel : undefined}
       mailboxPicker={picker}
+      tabs={viewTakesTabs(view) && !folder}
+      empty={empty}
+      mailboxNames={view ? mailboxNames : undefined}
       actions={layoutMenu}
       wide={roomy && mode === "focus"}
       rows={rows}
@@ -321,7 +413,7 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     />
   ) : null;
 
-  const today = <Today mailboxNames={mailboxNames} onOpen={open} />;
+  const today = <Today mailboxNames={mailboxNames} onOpen={open} onView={goView} />;
 
   // The list area of a wide window. In full and focus, an open conversation covers it; the list stays mounted
   // underneath (hidden and inert), so going back keeps its scroll and cursor.
@@ -427,6 +519,33 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
         onSent={(id) => open(id)}
       />
       <ShortcutsDialog open={helpOpen} onOpenChange={setHelpOpen} />
+      {import.meta.env.DEV && <DataToggle />}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        admin={me.admin}
+        mailboxes={boxes.mailboxes}
+        mailbox={view ? null : mailbox}
+        hasSpam={hasSpam}
+        threadId={adminSection ? null : route.thread}
+        layouts={roomy}
+        onView={goView}
+        onMailbox={goMailbox}
+        onFolder={goFolder}
+        onOpenThread={(id) => navigate({ admin: null, thread: id }, { push: true })}
+        onSearch={(q) => {
+          navigate({ admin: null, thread: null });
+          setQuery(q);
+        }}
+        onCompose={() => {
+          // From Administração, compose belongs to the inbox (the sent conversation opens there).
+          if (adminSection) navigate({ admin: null, thread: null }, { push: true });
+          setComposeOpen(true);
+        }}
+        onShortcuts={() => setHelpOpen(true)}
+        onToggleSidebar={toggleSidebar}
+        onAdmin={(section) => navigate({ admin: section, thread: null }, { push: true })}
+      />
     </div>
   );
 }
