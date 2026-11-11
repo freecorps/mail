@@ -45,11 +45,11 @@ const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
 
 /** Route: `/thread/[threadId]`. The previous / next arrows swap `threadId` in place, and each one starts fresh. */
 export function ThreadScreen() {
-  const { threadId } = useLocalSearchParams<{ threadId: string; mailbox?: string }>();
-  return <ThreadView key={threadId} threadId={threadId} />;
+  const { threadId, from } = useLocalSearchParams<{ threadId: string; mailbox?: string; from?: string }>();
+  return <ThreadView key={threadId} threadId={threadId} fromList={from === "list"} />;
 }
 
-function ThreadView({ threadId }: { threadId: string }) {
+function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolean }) {
   const c = useColors();
   const { t } = useI18n();
   const ios = process.env.EXPO_OS === "ios";
@@ -66,7 +66,9 @@ function ThreadView({ threadId }: { threadId: string }) {
   const box = boxes.find((b) => b.name === thread?.mailbox);
   const own = box?.address ?? "";
   const { members } = useMembers(thread && !personal && !preview ? thread.mailbox : null);
-  const around = useThreadNeighbors(threadId);
+  // Previous / next only for a conversation opened from a list (not from a push or a link).
+  const neighbors_ = useThreadNeighbors(threadId);
+  const around = fromList ? neighbors_ : { prev: null, next: null };
   const others = useMemo(() => (thread ? replyAllCc(vm.items.map((i) => i.message), own, thread.contact) : []), [vm.items, thread, own]);
   const canDelete = !!thread && (personal || (me?.member === true && me.admin));
 
@@ -387,6 +389,27 @@ function Composer({
     const id = setTimeout(() => input.current?.focus(), 50);
     return () => clearTimeout(id);
   }, []);
+  // Left empty, the bar closes, but not when the field lost focus to one of the bar's own controls (the file picker,
+  // the mode control): the close waits a moment, focus coming back cancels it, and picking a file holds it.
+  const closing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holding = useRef(false);
+  const latest = useRef({ text, files: uploads.items.length });
+  latest.current = { text, files: uploads.items.length };
+  const cancelClose = () => {
+    if (closing.current) clearTimeout(closing.current);
+    closing.current = null;
+  };
+  useEffect(() => cancelClose, []);
+  const attach = () => {
+    holding.current = true;
+    void uploads
+      .add()
+      .catch(() => {})
+      .finally(() => {
+        holding.current = false;
+        input.current?.focus();
+      });
+  };
   const send = () => {
     const body = text.trim();
     if (!body || (mode === "reply" && (uploads.busy || uploads.failed))) return;
@@ -408,6 +431,7 @@ function Composer({
           onChange={(v) => {
             setAll(v === "all");
             setMode(v === "note" ? "note" : "reply");
+            input.current?.focus();
           }}
           options={[
             { value: "reply", label: t("thread.replyMode") },
@@ -418,7 +442,7 @@ function Composer({
       ) : null}
       {mode === "reply" ? <UploadStrip items={uploads.items} onRemove={uploads.remove} /> : null}
       <View style={styles.inputRow}>
-        {mode === "reply" ? <IconButton icon={Icons.attach} label={t("attach.add")} onPress={() => void uploads.add().catch(() => {})} /> : null}
+        {mode === "reply" ? <IconButton icon={Icons.attach} label={t("attach.add")} onPress={attach} /> : null}
         <Host matchContents={{ vertical: true }} style={[styles.input, { backgroundColor: mode === "note" ? c.noteBackground : c.groupedBackground, borderColor: c.separator }]}>
           <TextInput
             ref={input}
@@ -426,8 +450,12 @@ function Composer({
             placeholder={placeholder}
             accessibilityLabel={placeholder}
             onChangeText={setText}
+            onFocus={cancelClose}
             onBlur={() => {
-              if (!text.trim() && !uploads.items.length) onClose();
+              cancelClose();
+              closing.current = setTimeout(() => {
+                if (!holding.current && !input.current?.isFocused() && !latest.current.text.trim() && !latest.current.files) onClose();
+              }, 600);
             }}
             textStyle={{ fontSize: type.callout.fontSize, color: c.labelText }}
             style={styles.field}

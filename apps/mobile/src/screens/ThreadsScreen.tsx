@@ -445,7 +445,8 @@ const ThreadItem = memo(function ThreadItem({
     t("threads.a11y", { from: row.title, subject: row.subject.trim() || t("threads.noSubject"), when, unread: row.unread ? t("threads.a11yUnread") : "" }) +
     (row.status && row.status !== "open" ? t("threads.a11yStatus", { status: t(`status.${row.status}`) }) : "") +
     (showAssignee && row.assigneeName ? t("threads.a11yAssignee", { name: row.assigneeName }) : "");
-  const href = `/thread/${encodeURIComponent(row.threadId)}?mailbox=${encodeURIComponent(row.mailbox)}`;
+  // `from=list`: opened from a list, so the conversation offers its previous / next (a push or a link does not).
+  const href = `/thread/${encodeURIComponent(row.threadId)}?mailbox=${encodeURIComponent(row.mailbox)}&from=list`;
   // A flat style object, not a ({ pressed }) => style function: on iOS the row is a `Link asChild`, whose Slot drops a
   // function style and rejects arrays. The pressed highlight comes from state.
   const [pressed, setPressed] = useState(false);

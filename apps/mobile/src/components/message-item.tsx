@@ -103,8 +103,8 @@ export const ExpandedMessage = memo(function ExpandedMessage({
         ? null
         : t("thread.to", { to: recipients || "—" });
   const html = !!m.html && m.direction === "inbound";
-  const head = (
-    <View style={styles.head}>
+  const who_ = (
+    <>
       {note ? <NoteGlyph size={LARGE} /> : <Avatar name={who} size={LARGE} />}
       <View style={styles.grow}>
         <View style={styles.line}>
@@ -128,18 +128,24 @@ export const ExpandedMessage = memo(function ExpandedMessage({
           ) : null}
         </ThemedText>
       </View>
+    </>
+  );
+  // The ⋯ menu sits beside the header, not inside its fold tap (a menu tap must never fold the message).
+  const head = (
+    <View style={styles.head}>
+      {onCollapse ? (
+        <Pressable onPress={() => onCollapse(m._id)} accessibilityRole="button" accessibilityState={{ expanded: true }} accessibilityHint={t("thread.collapseHint")} style={styles.headTap}>
+          {who_}
+        </Pressable>
+      ) : (
+        <View style={styles.headTap}>{who_}</View>
+      )}
       {menu?.length ? <MenuButton variant="icon" icon={Icons.moreBare} label={t("thread.messageActions")} items={menu} /> : null}
     </View>
   );
   return (
     <View style={note ? { backgroundColor: c.noteBackground } : null} accessibilityLabel={`${note ? `${t("thread.note")}, ` : outbound ? `${t("thread.sentA11y")}, ` : ""}${who}, ${when}`}>
-      {onCollapse ? (
-        <Pressable onPress={() => onCollapse(m._id)} accessibilityRole="button" accessibilityState={{ expanded: true }} accessibilityHint={t("thread.collapseHint")}>
-          {head}
-        </Pressable>
-      ) : (
-        head
-      )}
+      {head}
       {html && !preview ? (
         <EmailHtmlView html={m.html!} loadImages={loadImages} cid={item.cid} label={m.text.slice(0, 500)} />
       ) : (
@@ -168,7 +174,8 @@ const styles = StyleSheet.create({
   grow: { flex: 1, minWidth: 0 },
   line: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   collapsed: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingHorizontal: screenEdge, paddingVertical: spacing.md },
-  head: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md, paddingHorizontal: screenEdge, paddingTop: spacing.lg, paddingBottom: spacing.md },
+  head: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, paddingHorizontal: screenEdge, paddingTop: spacing.lg, paddingBottom: spacing.md },
+  headTap: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   // Reading text: the callout step with a looser leading than UI text.
   text: { lineHeight: 23, paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   files: { paddingHorizontal: screenEdge, paddingBottom: spacing.lg },

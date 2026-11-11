@@ -97,7 +97,11 @@ const subscribeImages = (l: () => void) => {
     imagesLoaded = true;
     AsyncStorage.getItem(IMAGES_KEY)
       .then((raw) => {
-        imageSenders = new Set([...parseSenders(raw), ...imageSenders]);
+        const stored = parseSenders(raw);
+        const merged = new Set([...stored, ...imageSenders]);
+        // A sender remembered before this read finished was written over the stored list: write the union back.
+        if (merged.size !== stored.size) AsyncStorage.setItem(IMAGES_KEY, JSON.stringify([...merged])).catch(() => {});
+        imageSenders = merged;
         emitImages();
       })
       .catch(() => {});
