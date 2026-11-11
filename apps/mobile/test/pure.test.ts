@@ -288,6 +288,8 @@ describe("rows", () => {
     expect(threadRow(thread({ assigneeName: "Bia" }))).toMatchObject({ title: "Ana", unread: true, assigneeName: "Bia", pending: false, number: 7 });
     const hit = { messageId: "m1", threadId: "t1", mailbox: "support", direction: "inbound" as const, subject: "s", from: { email: "a@b.test" }, snippet: "x", at: 1 };
     expect(searchRows([hit, { ...hit, messageId: "m2" }, { ...hit, messageId: "m3", threadId: "t2" }]).map((r) => r.key)).toEqual(["m1", "m3"]);
+    expect(searchRows([{ ...hit, status: "closed", unreadCount: 1, assignee: "u1", assigneeName: "Bia" }])[0]).toMatchObject({ status: "closed", unread: true, assignee: "u1" });
+    expect(searchRows([hit])[0]).toMatchObject({ status: null, unread: false });
   });
   it("inline images map Content-ID to the attachment URL", () => {
     const m = { attachments: [{ filename: "l.png", contentType: "image/png", file: "f1", contentId: "<logo@x>", inline: true }, { filename: "a.pdf", contentType: "application/pdf", file: "f2" }] } as any;

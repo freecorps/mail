@@ -103,6 +103,12 @@ export interface SearchHit {
   from: Address;
   snippet: string;
   at: number;
+  /** The thread's state (Ember 0.7.1), absent in on-device search results: a hit acts like a list row. */
+  status?: ThreadStatus;
+  unreadCount?: number;
+  assignee?: string;
+  assigneeName?: string;
+  snoozedUntil?: number;
 }
 
 export interface ThreadDetail {
