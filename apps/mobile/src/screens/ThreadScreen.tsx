@@ -236,7 +236,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   );
 
   if (vm.status === "loading") return <>{preview ? null : chrome}<Loading /></>;
-  if (!thread) return <>{preview ? null : chrome}<EmptyState icon={Icons.error} title={vm.error ? t("thread.notFound") : t("common.error")} body={vm.error?.message} /></>;
+  if (!thread) return <>{preview ? null : chrome}<EmptyState icon={Icons.error} title={vm.error || vm.gone ? t("thread.notFound") : t("common.error")} body={vm.error?.message} /></>;
 
   const statusItems: MenuItem[] = STATUS_CHOICES.map((s) => ({
     key: s,

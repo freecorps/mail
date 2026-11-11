@@ -116,6 +116,8 @@ export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?
   return {
     status: (s.status === "success" ? "ready" : s.status) as LoadStatus,
     error: s.error ?? null,
+    /** The server (or the optimistic delete) said there is no such conversation: gone, not failed. */
+    gone: s.status === "success" && s.value === null,
     source: (s.source ?? "server") as Source,
     thread,
     items,
