@@ -1,7 +1,7 @@
 // The open conversation: a header with status and assignee as menus and previous/next, the messages as one column
 // of email "paper" separated by hairlines (older ones collapsed to a line, the latest open, quoted text behind
 // "•••"), internal notes as tinted blocks, the composer under them, and the context panel (`i`) at the side.
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -112,9 +112,11 @@ export function ThreadView({
   const pane = useRef<HTMLDivElement>(null);
   const [roomy, setRoomy] = useState(true);
   const [overlay, setOverlay] = useState(false);
-  useEffect(() => {
+  // Measured before the first paint (a layout effect), so a narrow pane never shows the side panel for a frame.
+  useLayoutEffect(() => {
     const el = pane.current;
     if (!el) return;
+    setRoomy(el.clientWidth >= SIDE_PANEL_MIN);
     const ro = new ResizeObserver(() => setRoomy(el.clientWidth >= SIDE_PANEL_MIN));
     ro.observe(el);
     return () => ro.disconnect();
@@ -306,6 +308,15 @@ export function ThreadView({
             onScroll={(e) => {
               const el = e.currentTarget;
               stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+              // Dragging the scrollbar fires none of the input events above: a scroll away from where the anchoring
+              // put it is the reader's.
+              // (Compared with where the anchor is now, not where it was: the browser's own scroll anchoring may have
+              // moved it while frames above grew.)
+              if (anchored.current) {
+                const last = el.lastElementChild as HTMLElement | null;
+                const target = last ? Math.min(Math.max(0, last.offsetTop - 8), el.scrollHeight - el.clientHeight) : 0;
+                if (Math.abs(el.scrollTop - target) > 2) anchored.current = false;
+              }
             }}
             className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4"
             aria-label={th.subject}
@@ -566,14 +577,29 @@ function MessageBlock({
   const files = m.attachments.filter((a) => !(a.inline && a.contentId && item.cid[a.contentId.replace(/^<|>$/g, "")]));
 
   if (m.direction === "note") {
+    const noteHead = (
+      <>
+        <StickyNote className="size-3.5" aria-hidden="true" />
+        <span className="font-medium">{t("thread.note")}</span>
+        {m.author && <span className="min-w-0 truncate">{m.author}</span>}
+        <span className="ml-auto shrink-0 opacity-80">{item.pending ? t("thread.sending") : formatFull(m.at, locale)}</span>
+      </>
+    );
     return (
       <article className="mx-4 my-3 rounded-lg bg-note px-4 py-3 text-note-foreground sm:mx-6" aria-label={t("thread.note")}>
-        <header className="mb-1.5 flex items-center gap-2 text-xs">
-          <StickyNote className="size-3.5" aria-hidden="true" />
-          <span className="font-medium">{t("thread.note")}</span>
-          {m.author && <span className="min-w-0 truncate">{m.author}</span>}
-          <span className="ml-auto shrink-0 opacity-80">{item.pending ? t("thread.sending") : formatFull(m.at, locale)}</span>
-        </header>
+        {onCollapse ? (
+          <button
+            type="button"
+            aria-expanded={true}
+            aria-label={`${t("thread.collapse")}: ${t("thread.note")}`}
+            onClick={onCollapse}
+            className="-m-1 mb-0.5 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-md p-1 text-left text-xs"
+          >
+            {noteHead}
+          </button>
+        ) : (
+          <header className="mb-1.5 flex items-center gap-2 text-xs">{noteHead}</header>
+        )}
         <MessageText text={m.text} />
       </article>
     );
