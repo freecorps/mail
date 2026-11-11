@@ -16,6 +16,15 @@ export function staleWaiting(rows: readonly Thread[], now: number, ms = STALE_MS
   return rows.filter((t) => now - t.lastMessageAt > ms).sort((a, b) => a.lastMessageAt - b.lastMessageAt);
 }
 
+/**
+ * Whether stale threads exist past the rows scanned: the list is newest first, so when it is not done and its oldest
+ * scanned row is already stale, every unseen (older) row is stale too.
+ */
+export function overdueBeyondScan(page: readonly Thread[], isDone: boolean, now: number, ms = STALE_MS): boolean {
+  const oldest = page.at(-1);
+  return !isDone && !!oldest && now - oldest.lastMessageAt > ms;
+}
+
 export interface TodaySection {
   status: LoadStatus;
   rows: Thread[];
@@ -41,8 +50,7 @@ export function useToday(now: number) {
     status: statusOf(waiting),
     rows: stale.slice(0, TODAY_ROWS),
     total: stale.length,
-    // Every scanned row was stale and there are more: older ones are stale too.
-    more: !!waiting.value && !waiting.value.isDone && stale.length === waiting.value.page.length,
+    more: overdueBeyondScan(waiting.value?.page ?? [], waiting.value?.isDone ?? true, now),
   };
   return {
     counts: { status: statusOf(counts), value: (counts.value ?? null) as Record<View, ViewCount> | null },

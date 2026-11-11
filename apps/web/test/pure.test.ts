@@ -21,7 +21,7 @@ import {
 } from "@/lib/emailHtml";
 import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
 import { formatAge, formatWhen, initials, parseRecipients } from "@/lib/format";
-import { staleWaiting } from "@/model/today";
+import { overdueBeyondScan, staleWaiting } from "@/model/today";
 import { inboxOptimisticUpdates, isOptimisticId } from "@/lib/optimistic";
 import { parsePrefs, resolveTheme } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -125,6 +125,11 @@ describe("format and i18n", () => {
     const now = 10 * 86_400_000;
     const at = (h: number) => ({ ...thread(), _id: `w${h}`, status: "waiting" as const, lastMessageAt: now - h * 3_600_000 });
     expect(staleWaiting([at(2), at(30), at(80), at(23)], now).map((t) => t._id)).toEqual(["w80", "w30"]);
+    // More stale ones past the scan: only when the scan stopped early and its oldest row is already stale.
+    expect(overdueBeyondScan([at(2), at(30)], false, now)).toBe(true);
+    expect(overdueBeyondScan([at(2), at(10)], false, now)).toBe(false);
+    expect(overdueBeyondScan([at(2), at(30)], true, now)).toBe(false);
+    expect(overdueBeyondScan([], false, now)).toBe(false);
   });
 
   it("formats list times relative to now", () => {
