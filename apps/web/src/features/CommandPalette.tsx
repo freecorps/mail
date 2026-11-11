@@ -124,8 +124,14 @@ function Body(p: PaletteProps & { close: () => void }) {
   // Hits arrive after cmdk picked its first item: move the selection to the best hit when they land (derived state,
   // updated during render).
   const [selected, setSelected] = useState({ hit: "", value: "" });
-  const firstHit = threads[0] ? `${q} ${threads[0].threadId}` : null;
-  if (firstHit && selected.hit !== firstHit) setSelected({ hit: firstHit, value: firstHit });
+  const firstHit = threads[0] ? `${q} ${threads[0].threadId}` : "";
+  if (selected.hit !== firstHit) {
+    // New hits: select the best one. Hits gone (a new search with none yet): a selection still on an old hit points
+    // at nothing, so it moves to "search in the list" (always there while there is a query).
+    const stale = !firstHit && selected.value === selected.hit;
+    setSelected({ hit: firstHit, value: firstHit || (stale ? (query.trim() ? "search-in-list" : "") : selected.value) });
+  }
+  const searchingHits = q.length >= MIN_QUERY && threads.length === 0;
 
   return (
     <Command
@@ -144,7 +150,7 @@ function Body(p: PaletteProps & { close: () => void }) {
         <Kbd className="shrink-0">Esc</Kbd>
       </CommandInput>
       <CommandList>
-        <CommandEmpty>{hits.status === "loading" && q.length >= MIN_QUERY ? t("palette.searching") : t("palette.empty")}</CommandEmpty>
+        <CommandEmpty>{t("palette.empty")}</CommandEmpty>
 
         {th && (
           <CommandGroup heading={`${t("palette.thread")}: ${th.subject || contactOf(th)}`}>
@@ -191,6 +197,15 @@ function Body(p: PaletteProps & { close: () => void }) {
           </CommandGroup>
         )}
 
+        {/* "search in the list" is always an item while there is a query, so cmdk's empty state never shows for a
+            search: the conversations group says itself whether it is still searching or found none. */}
+        {searchingHits && (
+          <CommandGroup heading={t("palette.conversations")} forceMount>
+            <output className="block px-2 py-1.5 text-sm text-muted-foreground">
+              {hits.status === "loading" ? t("palette.searching") : t("palette.empty")}
+            </output>
+          </CommandGroup>
+        )}
         {threads.length > 0 && (
           <CommandGroup heading={t("palette.conversations")} forceMount>
             {threads.map((h) => (

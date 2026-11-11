@@ -24,7 +24,7 @@ import { formatAge, formatWhen, initials, parseRecipients } from "@/lib/format";
 import { overdueBeyondScan, staleWaiting } from "@/model/today";
 import { monogram } from "@/lib/nav";
 import { badge, viewBadge } from "@/model/threads";
-import { inboxOptimisticUpdates, isOptimisticId } from "@/lib/optimistic";
+import { inboxOptimisticUpdates, isOptimisticId, setOptimisticViewer } from "@/lib/optimistic";
 import { parsePrefs, resolveTheme } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
 import { checkCompose, composeErrorField } from "@/model/compose";
@@ -383,6 +383,33 @@ describe("optimistic updates", () => {
     expect(s.dump("inbox:mailboxes")[0][0].unread).toBe(1);
     u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
     expect(s.dump("inbox:threads").map((p: Page<Thread>) => p.page.length)).toEqual([1, 0]);
+  });
+
+  it("the cross-mailbox views and their counts follow read, assign and archive", () => {
+    setOptimisticViewer("u2");
+    const zero = { threads: 0, unread: 0, capped: false };
+    const t = thread({ unreadCount: 2 });
+    const s = store({
+      "inbox:view": [
+        { args: { view: "unread", limit: 30 }, value: { page: [t], isDone: true, partial: false } },
+        { args: { view: "all", limit: 30 }, value: { page: [t], isDone: true, partial: false } },
+      ],
+      "inbox:views": [
+        {
+          args: {},
+          value: { all: { ...zero, threads: 1, unread: 2 }, assigned: zero, unread: { ...zero, threads: 1, unread: 2 }, waiting: zero },
+        },
+      ],
+      "inbox:members": [{ args: { mailbox: "support" }, value: [{ userId: "u2", name: "Caio" }] }],
+    });
+    u["inbox:assign"]!(s, { threadId: "t1", userId: "u2" }, rec);
+    expect(s.dump("inbox:views")[0].assigned).toMatchObject({ threads: 1, unread: 2 });
+    u["inbox:markRead"]!(s, { threadId: "t1" }, rec);
+    expect(s.dump("inbox:view").map((v: { page: Thread[] }) => v.page.length)).toEqual([0, 1]);
+    expect(s.dump("inbox:views")[0]).toMatchObject({ all: { threads: 1, unread: 0 }, unread: { threads: 0, unread: 0 } });
+    u["inbox:setStatus"]!(s, { threadId: "t1", status: "closed" }, rec);
+    expect(s.dump("inbox:views")[0]).toMatchObject({ all: { threads: 1 }, assigned: { threads: 0 } });
+    setOptimisticViewer(null);
   });
 
   it("reply appends a pending message and moves the thread to waiting", () => {

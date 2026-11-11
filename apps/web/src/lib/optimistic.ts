@@ -2,7 +2,22 @@
 // client, so a reply shows in the thread with a "sending" mark, the thread moves to "waiting", unread counters drop,
 // and the server's answer replaces all of it.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-client";
-import type { Mailbox, Message, Page, SentArgs, SentThread, Thread, ThreadDetail, ThreadStatus, ThreadsArgs } from "./api";
+import {
+  VIEWS,
+  type Mailbox,
+  type Message,
+  type Page,
+  type SentArgs,
+  type SentThread,
+  type Thread,
+  type ThreadDetail,
+  type ThreadStatus,
+  type ThreadsArgs,
+  type View,
+  type ViewArgs,
+  type ViewCount,
+  type ViewPage,
+} from "./api";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
 export const OPTIMISTIC_PREFIX = "optimistic:";
@@ -13,8 +28,62 @@ const tempId = (now: number) => `${OPTIMISTIC_PREFIX}${now.toString(36)}-${(seq+
 
 type Store = OptimisticLocalStore;
 
-/** Applies `patch` to the thread wherever it is loaded: its detail and every thread-list page. */
+/** Who is signed in, for the `assigned` view's rule (an optimistic update has no identity; the inbox sets it). */
+let viewer: string | null = null;
+export function setOptimisticViewer(userId: string | null) {
+  viewer = userId;
+}
+
+const ACTIVE = new Set(["open", "waiting"]);
+
+/** The server's view rules (apps/api `inbox:view`): which threads a view (and status) lists. */
+export function viewKeeps(view: View, status: string | undefined): (t: Thread) => boolean {
+  const inStatus = (t: Thread, fallback: (t: Thread) => boolean) => (status ? t.status === status : fallback(t));
+  switch (view) {
+    case "all":
+      return (t) => inStatus(t, () => true);
+    case "waiting":
+      return (t) => t.status === "waiting";
+    case "assigned":
+      return (t) => viewer !== null && t.assignee === viewer && inStatus(t, (x) => ACTIVE.has(x.status));
+    case "unread":
+      return (t) => t.unreadCount > 0 && inStatus(t, (x) => ACTIVE.has(x.status));
+  }
+}
+
+/** Moves the view counts (`inbox:views`: sidebar, Hoje) for one thread going from `before` to `after`. */
+function adjustViewCounts(store: Store, before: Thread, after: Thread) {
+  const counts = store.getQuery<any>("inbox:views", {}) as Record<View, ViewCount> | undefined;
+  if (!counts) return;
+  const next = { ...counts };
+  for (const view of VIEWS) {
+    const keeps = viewKeeps(view, undefined);
+    const was = keeps(before);
+    const is = keeps(after);
+    if (!was && !is) continue;
+    const c = counts[view];
+    next[view] = {
+      ...c,
+      threads: Math.max(0, c.threads + (is ? 1 : 0) - (was ? 1 : 0)),
+      unread: Math.max(0, c.unread + (is ? after.unreadCount : 0) - (was ? before.unreadCount : 0)),
+    };
+  }
+  store.setQuery<any>("inbox:views", {}, next);
+}
+
+/**
+ * Applies `patch` to the thread wherever it is loaded (its detail, every thread-list page, the cross-mailbox views)
+ * and moves the view counts with it.
+ */
 function patchThread(store: Store, threadId: string, patch: (t: Thread) => Thread): Thread | null {
+  const r = patchLoaded(store, threadId, patch);
+  if (r) adjustViewCounts(store, r.before, r.after);
+  return r?.after ?? null;
+}
+
+function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Thread): { before: Thread; after: Thread } | null {
+  let original: Thread | null = null;
+  const patch = (t: Thread) => ((original ??= t), rawPatch(t));
   let found: Thread | null = null;
   const detail = store.getQuery<any>("inbox:thread", { threadId }) as ThreadDetail | undefined;
   if (detail) {
@@ -45,7 +114,19 @@ function patchThread(store: Store, threadId: string, patch: (t: Thread) => Threa
     found ??= next;
     store.setQuery<any>("inbox:sent", args, { ...value, page: value.page.map((t, j) => (j === i ? next : t)) });
   }
-  return found;
+  // The cross-mailbox views: patched in place, or dropped when the thread no longer belongs (read in "unread",
+  // archived in "waiting"); one it now joins comes with the server's answer.
+  for (const { args, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
+    const i = value ? value.page.findIndex((t) => t._id === threadId) : -1;
+    if (!value || i < 0) continue;
+    const next = patch(value.page[i]!);
+    found ??= next;
+    const page = viewKeeps(args.view, args.status)(next)
+      ? value.page.map((t, j) => (j === i ? next : t))
+      : value.page.filter((_, j) => j !== i);
+    store.setQuery<any>("inbox:view", args, { ...value, page });
+  }
+  return found && original ? { before: original, after: found } : null;
 }
 
 type SentPage = { page: SentThread[]; isDone: boolean };
@@ -110,9 +191,11 @@ function append(store: Store, args: { threadId: string; text: string }, directio
 function mailboxOf(store: OptimisticLocalStore, threadId: string): string | null {
   const open = store.getQuery<any>("inbox:thread", { threadId }) as ThreadDetail | undefined;
   if (open?.thread) return open.thread.mailbox;
-  for (const { value } of store.getAllQueries<any>("inbox:threads") as Array<{ value: Page<Thread> | undefined }>) {
-    const t = value?.page.find((x) => x._id === threadId);
-    if (t) return t.mailbox;
+  for (const fn of ["inbox:threads", "inbox:view"]) {
+    for (const { value } of store.getAllQueries<any>(fn) as Array<{ value: { page: Thread[] } | undefined }>) {
+      const t = value?.page.find((x) => x._id === threadId);
+      if (t) return t.mailbox;
+    }
   }
   return null;
 }

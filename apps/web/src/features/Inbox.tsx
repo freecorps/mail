@@ -21,6 +21,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup, type PanelImperat
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n/context";
 import { api, VIEWS, type Me, type View } from "@/lib/api";
+import { setOptimisticViewer } from "@/lib/optimistic";
 import { PANES, useMediaQuery, WIDE } from "@/lib/media";
 import { badge, useHasSpam, useViewCounts, viewTakesTabs } from "@/model/threads";
 import { PANE_LIMITS, READING_MODES, usePrefs, type ReadingMode } from "@/lib/prefs";
@@ -43,6 +44,11 @@ const MODE_ICON: Record<ReadingMode, typeof Columns3> = { split: Columns3, full:
 
 export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
   const { t } = useI18n();
+  // Optimistic updates follow the "assigned to me" rule with the signed-in member.
+  useLayoutEffect(() => {
+    setOptimisticViewer(me.userId);
+    return () => setOptimisticViewer(null);
+  }, [me.userId]);
   const { route, navigate } = useRoute();
   const boxes = useMailboxes();
   const mailbox = route.mailbox ?? boxes.mailboxes[0]?.name ?? me.mailboxes[0] ?? null;
