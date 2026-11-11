@@ -167,8 +167,13 @@ jobs:
       - name: Build
         if: steps.fingerprint.outputs.built != 'true'
         # The SDK this build compiles against, in the run's summary.
+        # The build's copy of the project lives at a path with no symlink in it. By default it goes under $TMPDIR
+        # (/var/folders/…, and /var links to /private/var): Xcode hands expo-widgets the /var path, Metro resolves
+        # the widget layouts it imports to /private/var, and the widgets' layout registry fails to bundle.
         run: |
           xcodebuild -version | head -1 >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$RUNNER_TEMP/eas-build"
+          export EAS_LOCAL_BUILD_WORKINGDIR="$(cd "$RUNNER_TEMP/eas-build" && pwd -P)/$GITHUB_RUN_ID"
           bunx "$EAS_CLI" build --local --platform ios --profile production --non-interactive --output "$RUNNER_TEMP/mail-ios-production.ipa"
       - name: Keep the build
         if: steps.fingerprint.outputs.built != 'true'
