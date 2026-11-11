@@ -12,7 +12,7 @@
 import { emailSchema } from "@freecorps/ember-email/schema";
 import { composeApp, defineApp, defineComponent, defineSchema, query, v, type LocalSchema } from "@freecorps/ember-server";
 import type { SyncSpec } from "@freecorps/ember-react-native";
-import { api, type InboxView, type Message, type SearchHit, type Thread, type ViewCount } from "../api";
+import { api, INBOX_VIEWS, type InboxView, type Message, type SearchHit, type Thread, type ViewCount } from "../api";
 
 /** The email component's tables under their installed names (`email$<table>`, ids `email$<prefix>_…`). */
 export const replicaSchema: LocalSchema = composeApp({
@@ -35,40 +35,79 @@ export function setReplicaUser(userId: string | null) {
 
 const ACTIVE = new Set(["open", "waiting"]);
 
-/** The server's view rules (apps/api `inbox:view`) over the replicated threads (every one the member was sent). */
-export function viewKeeps(view: InboxView, status: string | undefined): (t: Thread) => boolean {
+/**
+ * The server's view rules (apps/api `inbox:view`) over the replicated threads (every one the member was sent). A
+ * snoozed thread is only in `snoozed` ("Adiadas"); `tag` narrows any view to that tag's threads.
+ */
+export function viewKeeps(view: InboxView, status: string | undefined, tag?: string): (t: Thread) => boolean {
   const inStatus = (t: Thread, fallback: (t: Thread) => boolean) => (status ? t.status === status : fallback(t));
-  switch (view) {
-    case "all":
-      return (t) => inStatus(t, () => true);
-    case "waiting":
-      return (t) => t.status === "waiting";
-    case "assigned":
-      return (t) => replicaUser !== null && t.assignee === replicaUser && inStatus(t, (x) => ACTIVE.has(x.status));
-    case "unread":
-      return (t) => t.unreadCount > 0 && inStatus(t, (x) => ACTIVE.has(x.status));
-  }
+  const rule = ((): ((t: Thread) => boolean) => {
+    switch (view) {
+      case "all":
+        return (t) => inStatus(t, () => true);
+      case "waiting":
+        return (t) => t.status === "waiting";
+      case "assigned":
+        return (t) => replicaUser !== null && t.assignee === replicaUser && inStatus(t, (x) => ACTIVE.has(x.status));
+      case "unread":
+        return (t) => t.unreadCount > 0 && inStatus(t, (x) => ACTIVE.has(x.status));
+      case "snoozed":
+        return (t) => inStatus(t, () => true);
+    }
+  })();
+  const snoozed = view === "snoozed";
+  return (t) => !!t.snoozed === snoozed && (tag === undefined || !!t.tags?.includes(tag)) && rule(t);
 }
+
+/** `inbox:threads` filters (one mailbox): status, assignee (`null` = nobody), unread, tag, and snoozed (default: not). */
+export function threadsKeeps(a: { mailbox: string; status?: string; assignee?: string | null; unread?: boolean; tag?: string; snoozed?: boolean }): (t: Thread) => boolean {
+  return (t) =>
+    t.mailbox === a.mailbox &&
+    (a.status === undefined || t.status === a.status) &&
+    (a.assignee === undefined || (a.assignee === null ? !t.assignee : t.assignee === a.assignee)) &&
+    (a.unread === undefined || t.unreadCount > 0 === a.unread) &&
+    (a.tag === undefined || !!t.tags?.includes(a.tag)) &&
+    !!t.snoozed === !!a.snoozed;
+}
+
+/** "Adiadas" is soonest to wake first (one tag's: newest first, as the server lists it); every other list newest first. */
+export const viewOrder = (view: InboxView, tag?: string) => (view === "snoozed" && tag === undefined ? soonestFirst : newestFirst);
+const soonestFirst = (a: Thread, b: Thread) => (a.snoozedUntil ?? 0) - (b.snoozedUntil ?? 0) || (a._id < b._id ? 1 : a._id > b._id ? -1 : 0);
 
 const newestFirst = (a: Thread, b: Thread) => b.lastMessageAt - a.lastMessageAt || (a._id < b._id ? 1 : a._id > b._id ? -1 : 0);
 
 /** Same names and arguments as apps/api/ember/inbox.ts; same results, computed from the replica. */
 export const localQueries = {
   "inbox:threads": query({
-    args: { mailbox: v.string(), status: v.optional(v.string()), paginationOpts: pageV },
-    handler: (ctx: any, a: { mailbox: string; status?: string; paginationOpts?: { numItems: number; cursor: string | null } }) => {
+    args: {
+      mailbox: v.string(),
+      status: v.optional(v.string()),
+      assignee: v.optional(v.union(v.string(), v.null())),
+      unread: v.optional(v.boolean()),
+      tag: v.optional(v.string()),
+      snoozed: v.optional(v.boolean()),
+      paginationOpts: pageV,
+    },
+    handler: (ctx: any, a: { mailbox: string; status?: string; assignee?: string | null; unread?: boolean; tag?: string; snoozed?: boolean; paginationOpts?: { numItems: number; cursor: string | null } }) => {
       const q =
         a.status === undefined
           ? ctx.db.query(THREADS).withIndex("by_mailbox_last", (r: any) => r.eq("mailbox", a.mailbox))
           : ctx.db.query(THREADS).withIndex("by_mailbox_status", (r: any) => r.eq("mailbox", a.mailbox).eq("status", a.status));
-      return q.order("desc").paginate(a.paginationOpts ?? { numItems: 30, cursor: null });
+      // The replica is small (the latest threads and the ones opened): filter, then page by offset.
+      const rows = (q.order("desc").collect() as Thread[]).filter(threadsKeeps(a));
+      if (a.snoozed) rows.sort(soonestFirst);
+      const p = a.paginationOpts ?? { numItems: 30, cursor: null };
+      const start = Number(p.cursor ?? 0) || 0;
+      const end = start + Math.max(1, p.numItems);
+      return { page: rows.slice(start, end), isDone: end >= rows.length, continueCursor: String(end) };
     },
   }),
   "inbox:view": query({
-    args: { view: v.string(), status: v.optional(v.string()), limit: v.optional(v.number()) },
-    handler: (ctx: any, a: { view: string; status?: string; limit?: number }) => {
+    args: { view: v.string(), status: v.optional(v.string()), tag: v.optional(v.string()), limit: v.optional(v.number()) },
+    handler: (ctx: any, a: { view: string; status?: string; tag?: string; limit?: number }) => {
       const want = Math.min(Math.max(Math.trunc(a.limit ?? 30), 1), 300);
-      const rows = (ctx.db.query(THREADS).collect() as Thread[]).filter(viewKeeps(a.view as InboxView, a.status)).sort(newestFirst);
+      const view = a.view as InboxView;
+      const rows = (ctx.db.query(THREADS).collect() as Thread[]).filter(viewKeeps(view, a.status, a.tag)).sort(viewOrder(view, a.tag));
       return { page: rows.slice(0, want), isDone: rows.length <= want, partial: false };
     },
   }),
@@ -76,11 +115,14 @@ export const localQueries = {
     args: {},
     handler: (ctx: any) => {
       const all = ctx.db.query(THREADS).collect() as Thread[];
-      const count = (view: InboxView): ViewCount => {
-        const rows = all.filter(viewKeeps(view, undefined));
+      const count = (keep: (t: Thread) => boolean): ViewCount => {
+        const rows = all.filter(keep);
         return { threads: rows.length, unread: rows.reduce((n, t) => n + t.unreadCount, 0), capped: false };
       };
-      return { all: count("all"), assigned: count("assigned"), unread: count("unread"), waiting: count("waiting") };
+      const tags: Record<string, ViewCount> = {};
+      for (const id of new Set(all.flatMap((t) => t.tags ?? []))) tags[id] = count(viewKeeps("all", undefined, id));
+      const out = Object.fromEntries(INBOX_VIEWS.map((view) => [view, count(viewKeeps(view, undefined))]));
+      return { ...out, tags };
     },
   }),
   // No `delivery` marker here: the component's `emails` table is not replicated. Online the server's answer has it.

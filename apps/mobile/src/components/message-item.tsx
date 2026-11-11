@@ -9,13 +9,13 @@ import { useI18n } from "../i18n";
 import { displayAddress, formatFull, formatWhen } from "../lib/format";
 import { deliveryState, type MessageItem } from "../model/thread";
 import { previewLine } from "../model/thread-view";
-import { screenEdge, spacing, tabular, useColors } from "../theme";
+import { corner, radius, screenEdge, spacing, tabular, useColors } from "../theme";
 import { AttachmentList } from "./Attachments";
 import { EmailHtmlView } from "./EmailHtmlView";
 import { Icons, Symbol } from "./icons";
 import { MenuButton, type MenuItem } from "./native";
 import { ThemedText } from "./themed-text";
-import { Avatar } from "./ui";
+import { Avatar, NativeButton } from "./ui";
 
 const SMALL = 28;
 const LARGE = 36;
@@ -71,6 +71,7 @@ export const ExpandedMessage = memo(function ExpandedMessage({
   preview,
   onCollapse,
   menu,
+  scheduled,
 }: {
   item: MessageItem;
   loadImages: boolean;
@@ -82,6 +83,8 @@ export const ExpandedMessage = memo(function ExpandedMessage({
   onCollapse?: ((id: string) => void) | undefined;
   /** Its actions (forward, copy text), in a ⋯ menu beside the date. */
   menu?: MenuItem[] | undefined;
+  /** A send waiting for its time: "Agendada para …", with "Cancelar envio" and "Editar" (absent until the server has it). */
+  scheduled?: { when: string; pending?: boolean; onCancel?: (() => void) | undefined; onEdit?: (() => void) | undefined } | undefined;
 }) {
   const c = useColors();
   const { t, locale, clock24 } = useI18n();
@@ -90,7 +93,7 @@ export const ExpandedMessage = memo(function ExpandedMessage({
   const outbound = m.direction === "outbound";
   const who = authorOf(m);
   const when = formatFull(m.at, locale, clock24);
-  const delivery = item.pending ? null : deliveryState(m);
+  const delivery = item.pending || scheduled || m.scheduledFor !== undefined ? null : deliveryState(m);
   const bad = delivery === "failed" || delivery === "spam";
   const recipients = [...m.to.map(displayAddress), ...m.cc.map(displayAddress)].join(", ");
   const sub = item.pending
@@ -117,6 +120,11 @@ export const ExpandedMessage = memo(function ExpandedMessage({
         {sub ? (
           <ThemedText variant="footnote" tone="secondary" numberOfLines={1}>
             {sub}
+          </ThemedText>
+        ) : null}
+        {outbound && m.bcc?.length ? (
+          <ThemedText variant="footnote" tone="secondary" numberOfLines={1}>
+            {t("thread.bcc", { list: m.bcc.map(displayAddress).join(", ") })}
           </ThemedText>
         ) : null}
         <ThemedText variant="footnote" tone="secondary" numberOfLines={1}>
@@ -156,6 +164,22 @@ export const ExpandedMessage = memo(function ExpandedMessage({
       <View style={styles.files}>
         <AttachmentList attachments={visibleFiles(m)} urls={urls} />
       </View>
+      {scheduled ? (
+        <View style={[styles.scheduled, { backgroundColor: c.fill }]}>
+          <View style={styles.line}>
+            <Symbol icon={Icons.scheduled} size={17} color={c.tint} />
+            <ThemedText variant="footnote" style={styles.grow}>
+              {scheduled.pending ? t("thread.scheduledPending", { when: scheduled.when }) : t("thread.scheduledFor", { when: scheduled.when })}
+            </ThemedText>
+          </View>
+          {scheduled.onEdit || scheduled.onCancel ? (
+            <View style={styles.scheduledActions}>
+              {scheduled.onEdit ? <NativeButton variant="outlined" label={t("thread.editScheduled")} onPress={scheduled.onEdit} /> : null}
+              {scheduled.onCancel ? <NativeButton variant="outlined" label={t("thread.cancelSend")} onPress={scheduled.onCancel} /> : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -180,4 +204,7 @@ const styles = StyleSheet.create({
   text: { lineHeight: 23, paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   files: { paddingHorizontal: screenEdge, paddingBottom: spacing.lg },
   glyph: { alignItems: "center", justifyContent: "center" },
+  // The time on its own line (it never gives way to the buttons), then the actions, wrapping at large text sizes.
+  scheduled: { gap: spacing.sm, marginHorizontal: screenEdge, marginBottom: spacing.lg, padding: spacing.md, ...corner(radius.sm) },
+  scheduledActions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, justifyContent: "flex-end" },
 });

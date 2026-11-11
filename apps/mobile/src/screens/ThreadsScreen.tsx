@@ -10,7 +10,7 @@ import { router, Stack, useIsFocused, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { BackHandler, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import Animated, { LinearTransition } from "react-native-reanimated";
-import { api, INBOX_VIEWS, type InboxView } from "../api";
+import { api, INBOX_VIEWS, type InboxView, type Tag } from "../api";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
 import { SwipeGroupProvider, SwipeRow, useSwipeGroup, type SwipeAction } from "../components/swipe-row";
 import { SkeletonRows, textInset, ThreadRowContent } from "../components/thread-row";
@@ -21,11 +21,14 @@ import { useI18n, type I18n } from "../i18n";
 import { formatWhen } from "../lib/format";
 import { haptics } from "../lib/haptics";
 import { hideTabBar } from "../model/chrome";
-import { actionable, archivable, bulkReadTarget, keepsArchived, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
-import { filterLabelKey, filtersFor, useDebounced, useMailboxes, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
+import { actionable, archivable, bulkReadTarget, keepsArchived, keepsSnoozed, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
+import { filterLabelKey, filtersFor, useDebounced, useMailboxes, useTagIndex, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
+import { useSnooze } from "../model/snooze";
+import { threadTags } from "../model/tags";
+import { formatLater, type LaterChoice } from "../lib/when";
 import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
-import { useListPrefs } from "../prefs";
+import { deviceTimeZone, useListPrefs } from "../prefs";
 import { screenEdge, spacing, useColors, type Palette } from "../theme";
 
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
@@ -36,10 +39,11 @@ export function MailboxThreadsScreen() {
 
 /** Route: `/view/[view]` (a view across the member's mailboxes). */
 export function ViewThreadsScreen() {
-  const { view } = useLocalSearchParams<{ view: string }>();
+  const { view, tag, title } = useLocalSearchParams<{ view: string; tag?: string; title?: string }>();
   const { t } = useI18n();
   const v: InboxView = (INBOX_VIEWS as string[]).includes(view) ? (view as InboxView) : "all";
-  return <ThreadsScreen source={{ view: v }} title={t(`views.${v}`)} />;
+  // `tag`: one tag's conversations (from the home's Etiquetas), titled with the tag's name.
+  return <ThreadsScreen source={{ view: v, ...(tag ? { tag } : {}) }} title={tag && title ? title : t(`views.${v}`)} />;
 }
 
 /** The "Minhas" tab: assigned to me. */
@@ -62,6 +66,14 @@ interface RowOps {
   /** The list still shows a thread after it is archived (the swipe springs back instead of sliding out). */
   keepsArchived: boolean;
   canAssign(row: ThreadRow): boolean;
+  /** The list still shows a thread after it is snoozed ("Adiadas"). */
+  keepsSnoozed: boolean;
+  tagIndex: ReadonlyMap<string, Tag>;
+  snoozeAt(row: ThreadRow, until: number): void;
+  /** The snooze sheet (presets and the date picker; `custom`: straight to the picker). */
+  askSnooze(row: ThreadRow, custom?: boolean): void;
+  snoozeChoices(): LaterChoice[];
+  tags(row: ThreadRow): void;
   toggleRead(row: ThreadRow): void;
   archive(rows: ThreadRow[]): void;
   unarchive(row: ThreadRow): void;
@@ -84,6 +96,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const markUnread = useMutation(api.inbox.markUnread);
   const setStatus = useMutation(api.inbox.setStatus);
   const { mailboxes } = useMailboxes();
+  const { index: tagIndex } = useTagIndex();
+  const snoozer = useSnooze();
   const group = useSwipeGroup();
   const showRows = !searchOnly || vm.searching;
   const android = process.env.EXPO_OS === "android";
@@ -99,7 +113,13 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
       c,
       prefs,
       keepsArchived: keeps,
+      keepsSnoozed: keepsSnoozed(source),
+      tagIndex,
       canAssign: (row) => !personal.has(row.mailbox),
+      snoozeAt: (row, until) => snoozer.run([{ threadId: row.threadId, until: row.snoozedUntil }], until),
+      askSnooze: (row, custom) => snoozer.ask([{ threadId: row.threadId, until: row.snoozedUntil }], custom ? { custom } : {}),
+      snoozeChoices: snoozer.choices,
+      tags: (row) => router.push({ pathname: "/tags", params: { threadId: row.threadId, mailbox: row.mailbox } }),
       toggleRead: (row) => quiet(row.unread ? markRead({ threadId: row.threadId }) : markUnread({ threadId: row.threadId })),
       archive: (rows) => {
         const records = archivable(rows);
@@ -114,7 +134,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         router.push({ pathname: "/assign", params: { threadId: first.threadId, threadIds: rows.map((r) => r.threadId).join(","), mailbox: first.mailbox, current } });
       },
     };
-  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus]);
+  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus, source, tagIndex, snoozer]);
 
   // ---- Edit mode -------------------------------------------------------------------------------------------------
   const [editing, setEditing] = useState(false);
@@ -172,6 +192,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const compose = () => router.push({ pathname: "/compose", params: source.mailbox ? { mailbox: source.mailbox } : {} });
 
   const now = Date.now();
+  const zone = deviceTimeZone();
   const header = (
     <View>
       <ConnectionBanner />
@@ -205,7 +226,11 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     ) : vm.searching ? (
       <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
     ) : (
-      <EmptyState icon={Icons.empty} title={source.view === "assigned" ? t("mine.empty") : t("threads.empty")} />
+      <EmptyState
+        icon={source.view === "snoozed" ? Icons.snooze : Icons.empty}
+        title={source.view === "assigned" ? t("mine.empty") : source.view === "snoozed" ? t("snooze.empty") : t("threads.empty")}
+        body={source.view === "snoozed" ? t("snooze.emptyBody") : undefined}
+      />
     );
 
   const inset = textInset(prefs.avatars, editing);
@@ -240,7 +265,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         renderItem={({ item }) => (
           <ThreadItem
             row={item}
-            when={formatWhen(item.at, now, locale, clock24)}
+            // "Adiadas": when it comes back, not when it last moved.
+            when={item.snoozedUntil && source.view === "snoozed" ? formatLater(item.snoozedUntil, now, locale, clock24, zone) : formatWhen(item.at, now, locale, clock24)}
             ops={ops}
             showAssignee={source.view !== "assigned"}
             editing={editing}
@@ -393,6 +419,16 @@ function swipeAction(kind: SwipeKind, row: ThreadRow, ops: RowOps): SwipeAction 
       return row.status === "closed"
         ? { key: "archive", label: t("swipe.unarchive"), icon: Icons.unarchive, color: c.swipeArchive, onColor: c.onSwipeArchive, onPress: () => ops.unarchive(row) }
         : { key: "archive", label: t("swipe.archive"), icon: Icons.archive, color: c.swipeArchive, onColor: c.onSwipeArchive, removes: !ops.keepsArchived, onPress: () => ops.archive([row]) };
+    case "snooze":
+      return {
+        key: "snooze",
+        label: t("swipe.snooze"),
+        icon: Icons.snooze,
+        color: c.swipeSnooze,
+        onColor: c.onSwipeSnooze,
+        // The sheet picks the time; the row stays until then (it leaves once snoozed, like an archive).
+        onPress: () => ops.askSnooze(row),
+      };
     case "assign":
       return { key: "assign", label: t("swipe.assign"), icon: Icons.assign, color: c.swipeAssign, onColor: c.onSwipeAssign, onPress: () => ops.assign([row]) };
     case "none":
@@ -419,6 +455,7 @@ const ThreadItem = memo(function ThreadItem({
 }) {
   const { t, c, prefs } = ops;
   const canAssign = ops.canAssign(row);
+  const rowTags = useMemo(() => threadTags(row.tags, ops.tagIndex), [row.tags, ops.tagIndex]);
   // The context menu (and the accessibility actions, which mirror the swipes) has every row action.
   const actions = useMemo<RowMenuAction[]>(() => {
     if (!actionable(row)) return [];
@@ -431,6 +468,17 @@ const ThreadItem = memo(function ThreadItem({
         : { label: t("thread.archive"), icon: Icons.archive, onPress: () => ops.archive([row]) },
     ];
     if (canAssign) list.push({ label: t("thread.assign"), icon: Icons.assign, onPress: () => ops.assign([row]) });
+    // "Adiar ›" with its presets (iOS submenu); on Android the item opens the sheet with the same choices.
+    list.push({
+      label: t("thread.snooze"),
+      icon: Icons.snooze,
+      onPress: () => ops.askSnooze(row),
+      submenu: [
+        ...ops.snoozeChoices().map((x) => ({ label: x.label, subtitle: x.detail, icon: Icons.snooze, onPress: () => ops.snoozeAt(row, x.at) })),
+        { label: t("when.pick"), icon: Icons.calendar, onPress: () => ops.askSnooze(row, true) },
+      ],
+    });
+    list.push({ label: t("thread.tags"), icon: Icons.tag, onPress: () => ops.tags(row) });
     return list;
   }, [row, t, ops, canAssign]);
   const swipes = useMemo(() => {
@@ -460,6 +508,7 @@ const ThreadItem = memo(function ThreadItem({
       showAssignee={showAssignee}
       editing={editing}
       selected={selected}
+      tags={rowTags}
     />
   );
 

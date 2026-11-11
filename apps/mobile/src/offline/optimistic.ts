@@ -2,8 +2,8 @@
 // restored after a restart is still shown: the reply appears in the thread with a "sending" mark, the thread moves to
 // "waiting", unread counters drop, and the server's answer replaces all of it when the queue drains.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-react-native";
-import { INBOX_VIEWS, type Draft, type SaveDraftArgs, type Mailbox, type Message, type Page, type SentArgs, type SentThread, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCounts, type ViewPage } from "../api";
-import { viewKeeps } from "./replica";
+import { INBOX_VIEWS, type Address, type Draft, type SaveDraftArgs, type Mailbox, type Message, type Page, type ScheduledSend, type SearchHit, type SentArgs, type SentThread, type Tag, type Thread, type ThreadDetail, type ThreadStatus, type ThreadsArgs, type ViewArgs, type ViewCount, type ViewCounts, type ViewPage } from "../api";
+import { threadsKeeps, viewKeeps, viewOrder } from "./replica";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
 export const OPTIMISTIC_PREFIX = "optimistic:";
@@ -14,28 +14,72 @@ const tempId = (now: number) => `${OPTIMISTIC_PREFIX}${now.toString(36)}-${(seq+
 
 type Store = OptimisticLocalStore;
 
+/** A count after a thread left (`was`) and/or joined (`is`) what it counts. */
+function moved(c: ViewCount, before: Thread, after: Thread | null, was: boolean, is: boolean): ViewCount {
+  return {
+    ...c,
+    threads: Math.max(0, c.threads + (is ? 1 : 0) - (was ? 1 : 0)),
+    unread: Math.max(0, c.unread + (is && after ? after.unreadCount : 0) - (was ? before.unreadCount : 0)),
+  };
+}
+
 /**
- * Moves the home screen's counts (`inbox:views`) for one thread going from `before` to `after`, by the views' own rules
- * (`viewKeeps`): it leaves or joins a view, and its unread messages go with it. The badges (Minhas, the home rows) then
- * follow a read, archive or assignment at once, offline too.
+ * Moves the home screen's counts (`inbox:views`) for one thread going from `before` to `after` (null: deleted), by the
+ * views' own rules (`viewKeeps`): it leaves or joins a view, and its unread messages go with it. A snoozed thread
+ * counts only in "Adiadas"; each tag counts its threads that are not snoozed. The badges (Minhas, the home rows) then
+ * follow a read, archive, snooze or assignment at once, offline too.
  */
-function adjustViewCounts(store: Store, before: Thread, after: Thread) {
+function adjustViewCounts(store: Store, before: Thread, after: Thread | null) {
   const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
   if (!counts) return;
-  const next = { ...counts };
+  const next: ViewCounts = { ...counts };
   for (const view of INBOX_VIEWS) {
+    const c = counts[view];
+    if (!c) continue;
     const keeps = viewKeeps(view, undefined);
     const was = keeps(before);
-    const is = keeps(after);
-    if (!was && !is) continue;
-    const c = counts[view];
-    next[view] = {
-      ...c,
-      threads: Math.max(0, c.threads + (is ? 1 : 0) - (was ? 1 : 0)),
-      unread: Math.max(0, c.unread + (is ? after.unreadCount : 0) - (was ? before.unreadCount : 0)),
-    };
+    const is = !!after && keeps(after);
+    if (was || is) next[view] = moved(c, before, after, was, is);
+  }
+  if (counts.tags) {
+    const tags = { ...counts.tags };
+    for (const id of new Set([...(before.tags ?? []), ...(after?.tags ?? [])])) {
+      const keeps = viewKeeps("all", undefined, id);
+      const was = keeps(before);
+      const is = !!after && keeps(after);
+      if (!was && !is) continue;
+      tags[id] = moved(tags[id] ?? { threads: 0, unread: 0, capped: false }, before, after, was, is);
+    }
+    next.tags = tags;
   }
   store.setQuery<any>("inbox:views", {}, next);
+}
+
+/**
+ * The mailbox badges (`inbox:mailboxes`): `threads` and `unread` leave snoozed threads out, `snoozed` counts them (the
+ * server's rule), so a snooze moves the thread from the first two to the third, and its wake-up back.
+ */
+function adjustMailboxCounts(store: Store, before: Thread, after: Thread | null) {
+  const boxes = store.getQuery<any>("inbox:mailboxes", {}) as Mailbox[] | undefined;
+  if (!boxes) return;
+  const part = (t: Thread | null) => (t ? { threads: t.snoozed ? 0 : 1, unread: t.snoozed ? 0 : t.unreadCount, snoozed: t.snoozed ? 1 : 0 } : { threads: 0, unread: 0, snoozed: 0 });
+  const a = part(before);
+  const b = part(after);
+  if (a.threads === b.threads && a.unread === b.unread && a.snoozed === b.snoozed) return;
+  store.setQuery<any>(
+    "inbox:mailboxes",
+    {},
+    boxes.map((m) =>
+      m.name === before.mailbox
+        ? {
+            ...m,
+            threads: Math.max(0, m.threads + b.threads - a.threads),
+            unread: Math.max(0, m.unread + b.unread - a.unread),
+            ...(m.snoozed !== undefined || b.snoozed || a.snoozed ? { snoozed: Math.max(0, (m.snoozed ?? 0) + b.snoozed - a.snoozed) } : {}),
+          }
+        : m,
+    ),
+  );
 }
 
 /**
@@ -43,6 +87,7 @@ function adjustViewCounts(store: Store, before: Thread, after: Thread) {
  * with it.
  */
 function patchThread(store: Store, threadId: string, patch: (t: Thread) => Thread): Thread | null {
+  patchSearch(store, threadId, patch);
   let found = patchLoaded(store, threadId, patch);
   // Loaded nowhere any more (an archive dropped it from the only list showing it): the copy kept when it was dropped
   // lets a later patch, such as "Desfazer", put it back.
@@ -52,7 +97,43 @@ function patchThread(store: Store, threadId: string, patch: (t: Thread) => Threa
   if (dropped.has(threadId)) remember(found.after);
   rejoin(store, found.after);
   adjustViewCounts(store, found.before, found.after);
+  adjustMailboxCounts(store, found.before, found.after);
   return found.after;
+}
+
+/**
+ * Search hits carry their thread's state (status, unread, assignee, tags, wake time) and act like list rows: the same
+ * patch applies to them, so the swipe, menu and tag sheet of a search result follow at once and toggle the right way
+ * the next time too. Counts are not moved here: `patchLoaded` does that for the thread where it is listed.
+ */
+function patchSearch(store: Store, threadId: string, patch: (t: Thread) => Thread) {
+  for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: unknown; value: SearchHit[] | undefined }>) {
+    if (!value?.some((h) => h.threadId === threadId)) continue;
+    const next = value.map((h): SearchHit => {
+      if (h.threadId !== threadId) return h;
+      const t = patch({
+        _id: h.threadId,
+        mailbox: h.mailbox,
+        subject: h.subject,
+        status: h.status,
+        unreadCount: h.unreadCount ?? 0,
+        assignee: h.assignee,
+        assigneeName: h.assigneeName,
+        ...(h.tags?.length ? { tags: h.tags } : {}),
+        ...(h.snoozedUntil ? { snoozed: true, snoozedUntil: h.snoozedUntil } : {}),
+      } as unknown as Thread);
+      return {
+        ...h,
+        status: t.status,
+        unreadCount: t.unreadCount,
+        assignee: t.assignee ?? undefined,
+        assigneeName: t.assigneeName ?? undefined,
+        tags: t.tags ?? [],
+        snoozedUntil: t.snoozed && t.snoozedUntil ? t.snoozedUntil : undefined,
+      };
+    });
+    store.setQuery<any>("inbox:search", args as never, next);
+  }
 }
 
 /** Threads an optimistic patch dropped from a list (newest last), so a later patch can bring them back. */
@@ -64,24 +145,47 @@ function remember(t: Thread) {
 }
 
 const newerFirst = (a: Thread, b: Thread) => b.lastMessageAt - a.lastMessageAt;
-/** Whether `t` falls inside what a page has loaded (a complete list, or not older than its last row). */
-const inLoadedRange = (v: { page: Thread[]; isDone: boolean }, t: Thread) => v.isDone || !v.page.length || t.lastMessageAt >= v.page[v.page.length - 1]!.lastMessageAt;
+/** Whether `t` falls inside what a page has loaded (a complete list, or not past its last row in the list's order). */
+const inLoadedRange = (v: { page: Thread[]; isDone: boolean }, t: Thread, order: (a: Thread, b: Thread) => number = newerFirst) =>
+  v.isDone || !v.page.length || order(t, v.page[v.page.length - 1]!) <= 0;
 
 /**
- * Puts `t` into every loaded list it now belongs to and is missing from (an unarchived thread back in "Abertas" and the
- * views), in date order, as the server's answer will.
+ * Puts `t` into every loaded list it now belongs to and is missing from (an unarchived thread back in "Abertas", a
+ * woken one back in the views, a snoozed one into "Adiadas"), in the list's order, as the server's answer will.
  */
 function rejoin(store: Store, t: Thread) {
   for (const { args, value } of store.getAllQueries<any>("inbox:threads") as Array<{ args: ThreadsArgs; value: Page<Thread> | undefined }>) {
-    if (!value || args.mailbox !== t.mailbox || (args.status !== undefined && args.status !== t.status)) continue;
-    if (value.page.some((x) => x._id === t._id) || !inLoadedRange(value, t)) continue;
-    store.setQuery<any>("inbox:threads", args, { ...value, page: [...value.page, t].sort(newerFirst) });
+    if (!value || !threadsKeeps(args)(t)) continue;
+    const order = args.snoozed ? viewOrder("snoozed") : newerFirst;
+    if (value.page.some((x) => x._id === t._id) || !inLoadedRange(value, t, order)) continue;
+    store.setQuery<any>("inbox:threads", args, { ...value, page: [...value.page, t].sort(order) });
   }
   for (const { args, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
-    if (!value || !viewKeeps(args.view, args.status)(t)) continue;
-    if (value.page.some((x) => x._id === t._id) || !inLoadedRange(value, t)) continue;
-    store.setQuery<any>("inbox:view", args, { ...value, page: [...value.page, t].sort(newerFirst) });
+    if (!value || !viewKeeps(args.view, args.status, args.tag)(t)) continue;
+    const order = viewOrder(args.view, args.tag);
+    if (value.page.some((x) => x._id === t._id) || !inLoadedRange(value, t, order)) continue;
+    store.setQuery<any>("inbox:view", args, { ...value, page: [...value.page, t].sort(order) });
   }
+}
+
+/**
+ * The page with row `i` replaced by `next` at its place in the list's `order`: where it now sorts among the loaded rows,
+ * or out of the page when that place is past the last loaded row of an unfinished list (the server's next page has it).
+ */
+function place(v: { page: Thread[]; isDone: boolean }, i: number, next: Thread, order: (a: Thread, b: Thread) => number): Thread[] {
+  const was = v.page[i]!;
+  const last = i === v.page.length - 1;
+  // Where it is still sorts (stable: rows that sort the same keep their order). The last row of an unfinished list
+  // stays only if it did not move later than it was: past its old place is past what is loaded.
+  const fits = (i === 0 || order(v.page[i - 1]!, next) <= 0) && (last || order(next, v.page[i + 1]!) <= 0) && (!last || v.isDone || order(next, was) <= 0);
+  if (fits) return v.page.map((t, j) => (j === i ? next : t));
+  const rest = v.page.filter((_, j) => j !== i);
+  if (!inLoadedRange({ isDone: v.isDone, page: rest }, next, order)) {
+    remember(next);
+    return rest;
+  }
+  const at = rest.findIndex((t) => order(next, t) < 0);
+  return at < 0 ? [...rest, next] : [...rest.slice(0, at), next, ...rest.slice(at)];
 }
 
 function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Thread): { before: Thread; after: Thread } | null {
@@ -99,10 +203,9 @@ function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Th
     if (i < 0) continue;
     const next = patch(value.page[i]!);
     found ??= next;
-    // A status filter the thread no longer matches drops it from that list.
-    const drop = args.status !== undefined && args.status !== next.status;
-    if (drop) remember(next);
-    const page = drop ? value.page.filter((_, j) => j !== i) : value.page.map((t, j) => (j === i ? next : t));
+    // A filter the thread no longer matches (status, unread, tag, snoozed) drops it from that list; otherwise it takes
+    // its place by the list's order ("Adiadas": a re-snooze moves it), or leaves when that is past what is loaded.
+    const page = threadsKeeps(args)(next) ? place(value, i, next, args.snoozed ? viewOrder("snoozed") : newerFirst) : (remember(next), value.page.filter((_, j) => j !== i));
     store.setQuery<any>("inbox:threads", args, { ...value, page });
   }
   // The cross-mailbox views: patched in place, or dropped when it no longer belongs (read in "unread", archived in
@@ -112,9 +215,8 @@ function patchLoaded(store: Store, threadId: string, rawPatch: (t: Thread) => Th
     if (!value || i < 0) continue;
     const next = patch(value.page[i]!);
     found ??= next;
-    const keep = viewKeeps(args.view, args.status)(next);
-    if (!keep) remember(next);
-    const page = keep ? value.page.map((t, j) => (j === i ? next : t)) : value.page.filter((_, j) => j !== i);
+    const keep = viewKeeps(args.view, args.status, args.tag)(next);
+    const page = keep ? place(value, i, next, viewOrder(args.view, args.tag)) : (remember(next), value.page.filter((_, j) => j !== i));
     store.setQuery<any>("inbox:view", args, { ...value, page });
   }
   // The Sent view lists it too, whatever its status: patched in place (its place is when the mailbox last wrote).
@@ -140,13 +242,14 @@ function sentNow(store: Store, thread: Thread, at: number) {
   }
 }
 
-function adjustUnread(store: Store, mailbox: string, delta: number) {
-  const boxes = store.getQuery<any>("inbox:mailboxes", {}) as Mailbox[] | undefined;
-  if (!boxes) return;
-  store.setQuery<any>("inbox:mailboxes", {}, boxes.map((b) => (b.name === mailbox ? { ...b, unread: Math.max(0, b.unread + delta) } : b)));
-}
+const asAddress = (s: string): Address => {
+  const m = /^\s*(.*?)\s*<([^>]+)>\s*$/.exec(s);
+  return m ? { email: m[2]!.trim(), ...(m[1] ? { name: m[1] } : {}) } : { email: s.trim() };
+};
 
-function append(store: Store, args: { threadId: string; text: string }, direction: "outbound" | "note", now: number) {
+type AppendArgs = { threadId: string; text: string; cc?: string[]; bcc?: string[]; sendAt?: number };
+
+function append(store: Store, args: AppendArgs, direction: "outbound" | "note", now: number) {
   const detail = store.getQuery<any>("inbox:thread", { threadId: args.threadId }) as ThreadDetail | undefined;
   const snippet = args.text.replace(/\s+/g, " ").trim().slice(0, 140);
   if (detail) {
@@ -161,7 +264,10 @@ function append(store: Store, args: { threadId: string; text: string }, directio
       from: { email: t.mailbox },
       fromEmail: t.mailbox,
       to: direction === "note" ? [] : [{ email: t.contact, ...(t.contactName ? { name: t.contactName } : {}) }],
-      cc: [],
+      cc: (args.cc ?? []).map(asAddress),
+      ...(args.bcc?.length ? { bcc: args.bcc.map(asAddress) } : {}),
+      // Scheduled: shown at once as "Agendada para …" (the server keeps its message in the thread from now on).
+      ...(isScheduled(args, direction, now) ? { scheduledFor: args.sendAt } : {}),
       subject: t.subject,
       text: args.text,
       snippet,
@@ -172,16 +278,80 @@ function append(store: Store, args: { threadId: string; text: string }, directio
     };
     store.setQuery<any>("inbox:thread", { threadId: args.threadId }, { ...detail, messages: [...detail.messages, msg] });
   }
-  const thread = patchThread(store, args.threadId, (t) => ({
-    ...t,
-    messageCount: t.messageCount + 1,
-    lastMessageAt: now,
-    ...(direction === "note" ? {} : { status: t.status === "spam" ? "spam" : ("waiting" as ThreadStatus), snippet }),
-  }));
-  if (thread && direction === "outbound") sentNow(store, thread, now);
+  // A scheduled reply has not gone: the conversation only gains its message ("Agendada para …"). It does not move to
+  // "waiting", to the top of the lists or of Sent until the server says what it did, so canceling it has nothing else
+  // to undo.
+  const scheduled = isScheduled(args, direction, now);
+  const thread = patchThread(store, args.threadId, (t) =>
+    scheduled
+      ? { ...t, messageCount: t.messageCount + 1 }
+      : {
+          ...t,
+          messageCount: t.messageCount + 1,
+          lastMessageAt: now,
+          ...(direction === "note" ? {} : { status: t.status === "spam" ? "spam" : ("waiting" as ThreadStatus), snippet }),
+        },
+  );
+  if (thread && direction === "outbound" && !scheduled) sentNow(store, thread, now);
 }
 
-/** `now` is injectable for tests. */
+/** A send that waits for its time (`sendAt` ahead of now): not sent, so never in Sent. */
+const isScheduled = (a: { sendAt?: number }, direction: string, now: number) => direction === "outbound" && a.sendAt !== undefined && a.sendAt > now;
+
+/** A thread gone for good (deleted, or a scheduled new conversation canceled): out of every list and count. */
+function dropThread(store: Store, threadId: string) {
+  const found = patchLoaded(store, threadId, (t) => t);
+  for (const name of ["inbox:threads", "inbox:view", "inbox:sent"] as const) {
+    for (const { args, value } of store.getAllQueries<any>(name) as Array<{ args: unknown; value: { page: Thread[] } | undefined }>) {
+      if (!value || !value.page.some((t) => t._id === threadId)) continue;
+      store.setQuery<any>(name, args as never, { ...value, page: value.page.filter((t) => t._id !== threadId) });
+    }
+  }
+  // Gone everywhere at once: search hits of it, and the conversation itself (its screen shows "not found").
+  for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: unknown; value: Array<{ threadId: string }> | undefined }>) {
+    if (value?.some((h) => h.threadId === threadId)) store.setQuery<any>("inbox:search", args as never, value.filter((h) => h.threadId !== threadId));
+  }
+  if (store.getQuery<any>("inbox:thread", { threadId } as never) !== undefined) store.setQuery<any>("inbox:thread", { threadId } as never, null);
+  dropped.delete(threadId);
+  if (found) {
+    adjustViewCounts(store, found.before, null);
+    adjustMailboxCounts(store, found.before, null);
+  }
+}
+
+/** A woken thread: not snoozed any more (a manual wake only clears the snooze; the server does the same). */
+const awake = (t: Thread): Thread => {
+  const { snoozed: _s, snoozedUntil: _u, ...rest } = t;
+  return rest;
+};
+
+const sortTags = (tags: Tag[]) => [...tags].sort((a, b) => (a.mailbox < b.mailbox ? -1 : a.mailbox > b.mailbox ? 1 : a.order - b.order || a._creationTime - b._creationTime));
+
+function tagCaches(store: Store): Array<{ args: { mailbox?: string }; value: Tag[] }> {
+  return (store.getAllQueries<any>("inbox:tags") as Array<{ args: { mailbox?: string }; value: Tag[] | undefined }>).filter((q): q is { args: { mailbox?: string }; value: Tag[] } => !!q.value);
+}
+
+/** Every thread id the client has loaded (an open thread, any list). */
+function loadedThreadIds(store: Store): Set<string> {
+  const ids = new Set<string>();
+  for (const { value } of store.getAllQueries<any>("inbox:thread") as Array<{ value: ThreadDetail | undefined }>) if (value) ids.add(value.thread._id);
+  for (const name of ["inbox:threads", "inbox:view", "inbox:sent"] as const)
+    for (const { value } of store.getAllQueries<any>(name) as Array<{ value: { page: Thread[] } | undefined }>) for (const t of value?.page ?? []) ids.add(t._id);
+  return ids;
+}
+
+/** A thread as loaded anywhere (its detail first). */
+function loadedThread(store: Store, threadId: string): Thread | null {
+  const open = store.getQuery<any>("inbox:thread", { threadId }) as ThreadDetail | undefined;
+  if (open?.thread) return open.thread;
+  for (const name of ["inbox:threads", "inbox:view", "inbox:sent"] as const)
+    for (const { value } of store.getAllQueries<any>(name) as Array<{ value: { page: Thread[] } | undefined }>) {
+      const t = value?.page.find((x) => x._id === threadId);
+      if (t) return t;
+    }
+  return null;
+}
+
 /** The mailbox of a thread as the client has it loaded (its open thread, or any list it is in). */
 function mailboxOf(store: OptimisticLocalStore, threadId: string): string | null {
   const open = store.getQuery<any>("inbox:thread", { threadId }) as ThreadDetail | undefined;
@@ -260,17 +430,13 @@ export function nextNotificationPrefs(p: { muted: string[]; preview: boolean }, 
 
 export function inboxOptimisticUpdates(now: () => number = Date.now): Record<string, OptimisticUpdate> {
   const updates: Record<string, OptimisticUpdate> = {
-    "inbox:reply": (store, args: { threadId: string; text: string }) => append(store, args, "outbound", now()),
+    "inbox:reply": (store, args: AppendArgs) => append(store, args, "outbound", now()),
     "inbox:note": (store, args: { threadId: string; text: string }) => append(store, args, "note", now()),
     "inbox:markRead": (store, { threadId }: { threadId: string }) => {
-      let before = 0;
-      const t = patchThread(store, threadId, (x) => ((before = x.unreadCount), { ...x, unreadCount: 0 }));
-      if (t && before) adjustUnread(store, t.mailbox, -before);
+      patchThread(store, threadId, (x) => ({ ...x, unreadCount: 0, hasUnread: false }));
     },
     "inbox:markUnread": (store, { threadId }: { threadId: string }) => {
-      let before = 0;
-      const t = patchThread(store, threadId, (x) => ((before = x.unreadCount), { ...x, unreadCount: Math.max(1, x.unreadCount) }));
-      if (t && !before) adjustUnread(store, t.mailbox, +1);
+      patchThread(store, threadId, (x) => ({ ...x, unreadCount: Math.max(1, x.unreadCount), hasUnread: true }));
     },
     "inbox:setStatus": (store, { threadId, status }: { threadId: string; status: ThreadStatus }) => {
       patchThread(store, threadId, (t) => ({ ...t, status }));
@@ -285,7 +451,7 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         return { ...t, assignee: userId, assigneeName: members?.find((m) => m.userId === userId)?.name ?? userId };
       });
     },
-    "inbox:compose": (store, args: { mailbox: string; to: string[]; subject: string; text: string }) => {
+    "inbox:compose": (store, args: { mailbox: string; to: string[]; subject: string; text: string; sendAt?: number }) => {
       const at = now();
       const contact = (args.to[0] ?? "").replace(/^.*<([^>]+)>.*$/, "$1").trim().toLowerCase();
       const thread: Thread = {
@@ -304,22 +470,95 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
         snippet: args.text.replace(/\s+/g, " ").trim().slice(0, 140),
       };
       for (const { args: qa, value } of store.getAllQueries<any>("inbox:threads") as Array<{ args: ThreadsArgs; value: Page<Thread> | undefined }>) {
-        if (!value || qa.mailbox !== args.mailbox || (qa.status !== undefined && qa.status !== "waiting")) continue;
+        // The list's own filters (status, unread, assignee, tag, snoozed), as the server's answer will apply them.
+        if (!value || !threadsKeeps(qa)(thread)) continue;
         store.setQuery<any>("inbox:threads", qa, { ...value, page: [thread, ...value.page] });
       }
       // The cross-mailbox views it belongs to (all, waiting) show it on top too, and their counts grow with it.
       for (const { args: va, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
-        if (!value || !viewKeeps(va.view, va.status)(thread)) continue;
+        // A tag's list too: a new conversation has no tags, so it never shows in one.
+        if (!value || !viewKeeps(va.view, va.status, va.tag)(thread)) continue;
         store.setQuery<any>("inbox:view", va, { ...value, page: [thread, ...value.page] });
       }
       const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
       if (counts) {
         const next = { ...counts };
-        for (const view of INBOX_VIEWS) if (viewKeeps(view, undefined)(thread)) next[view] = { ...counts[view], threads: counts[view].threads + 1 };
+        for (const view of INBOX_VIEWS) if (counts[view] && viewKeeps(view, undefined)(thread)) next[view] = { ...counts[view], threads: counts[view].threads + 1 };
         store.setQuery<any>("inbox:views", {}, next);
       }
-      sentNow(store, thread, at);
+      // Scheduled: the new conversation is there (the server makes it at once), but nothing went out, so not in Sent.
+      if (!isScheduled(args, "outbound", at)) sentNow(store, thread, at);
     },
+  };
+  // Snooze: the thread leaves every list and count but "Adiadas" (and joins that one); waking it (`until: null`,
+  // `unsnooze`, or "Desfazer") brings it back where it was, like an archive's undo.
+  updates["inbox:snooze"] = (store, { threadId, until }: { threadId: string; until: number | null }) => {
+    patchThread(store, threadId, (t) => (until === null ? awake(t) : { ...t, snoozed: true, snoozedUntil: until }));
+  };
+  updates["inbox:unsnooze"] = (store, { threadId }: { threadId: string }) => {
+    patchThread(store, threadId, awake);
+  };
+  // Tags on a thread: its chips change at once, it joins or leaves the tag's lists, the tag's count follows.
+  updates["inbox:setTags"] = (store, { threadId, tags }: { threadId: string; tags: string[] }) => {
+    patchThread(store, threadId, (t) => ({ ...t, tags: [...new Set(tags)] }));
+  };
+  updates["inbox:addTag"] = (store, { threadId, tag }: { threadId: string; tag: string }) => {
+    patchThread(store, threadId, (t) => (t.tags?.includes(tag) ? t : { ...t, tags: [...(t.tags ?? []), tag] }));
+  };
+  updates["inbox:removeTag"] = (store, { threadId, tag }: { threadId: string; tag: string }) => {
+    patchThread(store, threadId, (t) => ({ ...t, tags: (t.tags ?? []).filter((x) => x !== tag) }));
+  };
+  // The tag lists (`inbox:tags`, all of them and one mailbox's) follow create, rename/recolor/move and delete.
+  updates["inbox:createTag"] = (store, a: { mailbox: string; name: string; color?: string; order?: number }) => {
+    const at = now();
+    const all = tagCaches(store);
+    const last = Math.max(-1, ...all.flatMap((q) => q.value).filter((t) => t.mailbox === a.mailbox).map((t) => t.order));
+    const tag: Tag = { _id: tempId(at), _creationTime: at, mailbox: a.mailbox, name: a.name.trim(), nameKey: a.name.trim().toLowerCase(), color: a.color ?? "gray", order: a.order ?? last + 1, createdAt: at };
+    for (const q of all) if (q.args.mailbox === undefined || q.args.mailbox === a.mailbox) store.setQuery<any>("inbox:tags", q.args, sortTags([...q.value, tag]));
+  };
+  updates["inbox:updateTag"] = (store, a: { tagId: string; name?: string; color?: string; order?: number }) => {
+    for (const q of tagCaches(store)) {
+      if (!q.value.some((t) => t._id === a.tagId)) continue;
+      const page = q.value.map((t) =>
+        t._id === a.tagId
+          ? { ...t, ...(a.name !== undefined ? { name: a.name.trim(), nameKey: a.name.trim().toLowerCase() } : {}), ...(a.color !== undefined ? { color: a.color } : {}), ...(a.order !== undefined ? { order: a.order } : {}) }
+          : t,
+      );
+      store.setQuery<any>("inbox:tags", q.args, sortTags(page));
+    }
+  };
+  updates["inbox:deleteTag"] = (store, { tagId }: { tagId: string }) => {
+    for (const q of tagCaches(store)) if (q.value.some((t) => t._id === tagId)) store.setQuery<any>("inbox:tags", q.args, q.value.filter((t) => t._id !== tagId));
+    // It comes off every thread (and its lists empty out).
+    for (const id of loadedThreadIds(store)) {
+      if (loadedThread(store, id)?.tags?.includes(tagId)) patchThread(store, id, (t) => ({ ...t, tags: (t.tags ?? []).filter((x) => x !== tagId) }));
+    }
+    const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
+    if (counts?.tags?.[tagId]) {
+      const { [tagId]: _gone, ...tags } = counts.tags;
+      store.setQuery<any>("inbox:views", {}, { ...counts, tags });
+    }
+  };
+  // "Cancelar envio": the scheduled message leaves the conversation and its list of scheduled sends; a new conversation
+  // left with no message goes altogether (the server deletes it).
+  updates["inbox:cancelScheduled"] = (store, { emailId }: { emailId: string }) => {
+    let messageId: string | undefined;
+    for (const { args, value } of store.getAllQueries<any>("inbox:scheduled") as Array<{ args: { threadId: string }; value: ScheduledSend[] | undefined }>) {
+      const hit = value?.find((x) => x.emailId === emailId);
+      if (!hit) continue;
+      messageId ??= hit.messageId;
+      store.setQuery<any>("inbox:scheduled", args, value!.filter((x) => x.emailId !== emailId));
+    }
+    for (const { args, value } of store.getAllQueries<any>("inbox:thread") as Array<{ args: { threadId: string }; value: ThreadDetail | undefined }>) {
+      if (!value) continue;
+      const gone = value.messages.find((m) => m.emailId === emailId || (messageId !== undefined && m._id === messageId));
+      if (!gone) continue;
+      const messages = value.messages.filter((m) => m !== gone);
+      store.setQuery<any>("inbox:thread", args, { ...value, messages });
+      // What the schedule did is undone: one message fewer, wherever the thread is listed (it never moved for it).
+      if (!messages.length) dropThread(store, args.threadId);
+      else patchThread(store, args.threadId, (t) => ({ ...t, messageCount: Math.max(0, t.messageCount - 1) }));
+    }
   };
   // Drafts: the cached `inbox:drafts` answers follow saves, deletes and sends, so a draft written offline is there when
   // the conversation or the composer opens again (the queued mutations reach the server later, in order).
@@ -331,38 +570,11 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
     }
   };
   // A deleted conversation leaves every loaded list at once (the conversation screen has already closed).
-  updates["inbox:deleteThread"] = (store, { threadId }: { threadId: string }) => {
-    const found = patchLoaded(store, threadId, (t) => t);
-    for (const name of ["inbox:threads", "inbox:view", "inbox:sent"] as const) {
-      for (const { args, value } of store.getAllQueries<any>(name) as Array<{ args: unknown; value: { page: Thread[] } | undefined }>) {
-        if (!value || !value.page.some((t) => t._id === threadId)) continue;
-        store.setQuery<any>(name, args as never, { ...value, page: value.page.filter((t) => t._id !== threadId) });
-      }
-    }
-    // Gone everywhere at once: search hits of it, and the conversation itself (its screen shows "not found").
-    for (const { args, value } of store.getAllQueries<any>("inbox:search") as Array<{ args: unknown; value: Array<{ threadId: string }> | undefined }>) {
-      if (value?.some((h) => h.threadId === threadId)) store.setQuery<any>("inbox:search", args as never, value.filter((h) => h.threadId !== threadId));
-    }
-    if (store.getQuery<any>("inbox:thread", { threadId } as never) !== undefined) store.setQuery<any>("inbox:thread", { threadId } as never, null);
-    dropped.delete(threadId);
-    if (found) {
-      const counts = store.getQuery<any>("inbox:views", {}) as ViewCounts | undefined;
-      if (counts) {
-        const next = { ...counts };
-        for (const view of INBOX_VIEWS) {
-          if (!viewKeeps(view, undefined)(found.before)) continue;
-          const c = counts[view];
-          next[view] = { ...c, threads: Math.max(0, c.threads - 1), unread: Math.max(0, c.unread - found.before.unreadCount) };
-        }
-        store.setQuery<any>("inbox:views", {}, next);
-      }
-      if (found.before.unreadCount) adjustUnread(store, found.before.mailbox, -found.before.unreadCount);
-    }
-  };
+  updates["inbox:deleteThread"] = (store, { threadId }: { threadId: string }) => dropThread(store, threadId);
   // A forward is a new conversation from the forwarded thread's mailbox: it shows at the top as a compose does.
-  updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string }, rec) => {
+  updates["inbox:forward"] = (store, args: { threadId: string; to: string[]; subject: string; text: string; sendAt?: number }, rec) => {
     const mailbox = mailboxOf(store, args.threadId);
-    if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text }, rec);
+    if (mailbox) updates["inbox:compose"]!(store, { mailbox, to: args.to, subject: args.subject, text: args.text, ...(args.sendAt !== undefined ? { sendAt: args.sendAt } : {}) }, rec);
   };
   // Ajustes › Notificações: the switches move at once (offline too; the server filters pushes once it lands).
   updates["inbox:setNotifications"] = (store, a: { mailbox?: string; enabled?: boolean; preview?: boolean }) => {

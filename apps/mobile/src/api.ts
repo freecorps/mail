@@ -40,6 +40,15 @@ export interface Thread {
   snippet: string;
   assignee?: string;
   assigneeName?: string;
+  /** Has unread messages (indexed; `unreadCount > 0`). */
+  hasUnread?: boolean;
+  /** Tag ids of the thread's mailbox (`inbox:tags`). */
+  tags?: string[];
+  /** Snoozed: out of every list but "Adiadas" until `snoozedUntil` (ms). */
+  snoozed?: boolean;
+  snoozedUntil?: number;
+  /** Addresses only ever blind-copied on this thread. */
+  blind?: string[];
 }
 
 /** `email$messages` document. */
@@ -56,6 +65,8 @@ export interface Message {
   fromEmail: string;
   to: Address[];
   cc: Address[];
+  /** Outbound: who it blind-copied (kept for the mailbox, never in a header). */
+  bcc?: Address[];
   subject: string;
   text: string;
   html?: string;
@@ -72,6 +83,10 @@ export interface Message {
   at: number;
   /** Outbound only: the status of the email it sent (`inbox:thread`), and why it was not delivered. */
   delivery?: { status: string; reason: string | null };
+  /** A send waiting for its time (`sendAt`, ms): `inbox:scheduled`, `inbox:cancelScheduled`. */
+  scheduledFor?: number;
+  /** Canceled or suppressed before it went out. */
+  unsent?: true;
 }
 
 export interface Mailbox {
@@ -82,6 +97,8 @@ export interface Mailbox {
   personal?: boolean;
   unread: number;
   threads: number;
+  /** Snoozed threads (out of `threads` and `unread` until they wake). */
+  snoozed?: number;
 }
 
 export type Me =
@@ -109,6 +126,8 @@ export interface SearchHit {
   assignee?: string;
   assigneeName?: string;
   snoozedUntil?: number;
+  /** The thread's tags (Ember 0.7.2): the tag sheet and chips of a search row. */
+  tags?: string[];
 }
 
 export interface ThreadDetail {
@@ -125,15 +144,70 @@ export interface Member {
 export type SentThread = Thread & { lastSentAt: number };
 export type SentArgs = { mailbox: string; limit?: number };
 
-/** Lists across the member's mailboxes (apps/api `inbox:view`). */
-export type InboxView = "all" | "assigned" | "unread" | "waiting";
-export const INBOX_VIEWS: InboxView[] = ["all", "assigned", "unread", "waiting"];
-export type ViewArgs = { view: InboxView; status?: ThreadStatus; limit?: number };
+/** Lists across the member's mailboxes (apps/api `inbox:view`). `snoozed`: "Adiadas", soonest to wake first. */
+export type InboxView = "all" | "assigned" | "unread" | "waiting" | "snoozed";
+export const INBOX_VIEWS: InboxView[] = ["all", "assigned", "unread", "waiting", "snoozed"];
+/** `tag`: only that tag's threads (in its mailbox). */
+export type ViewArgs = { view: InboxView; status?: ThreadStatus; tag?: string; limit?: number };
 /** `partial`: some mailbox had more open threads than the server scans for assigned/unread (older ones may be missing). */
 export type ViewPage = { page: Thread[]; isDone: boolean; partial: boolean };
 /** A view's count: threads, their unread messages, `capped` when it is a lower bound. */
 export type ViewCount = { threads: number; unread: number; capped: boolean };
-export type ViewCounts = Record<InboxView, ViewCount>;
+/** `tags`: per tag id, its threads that are not snoozed (every status). */
+export type ViewCounts = Record<InboxView, ViewCount> & { tags?: Record<string, ViewCount> };
+
+/** Tag colors (`TAG_COLORS` of `@freecorps/ember-email/schema`). */
+export const TAG_COLORS = ["gray", "red", "orange", "yellow", "green", "teal", "blue", "indigo", "purple", "pink"] as const;
+export type TagColor = (typeof TAG_COLORS)[number];
+
+/** `email$tags` document: one tag of a mailbox, in the mailbox's `order`. */
+export interface Tag {
+  _id: string;
+  _creationTime: number;
+  mailbox: string;
+  name: string;
+  nameKey: string;
+  color: string;
+  order: number;
+  createdAt: number;
+}
+
+export type ActivityKind = "status" | "assigned" | "tag_added" | "tag_removed" | "delivery" | "snoozed" | "unsnoozed" | "scheduled" | "scheduled_canceled";
+/** Who did it: a member, a name with no member (`userId: null`), or null (the system). */
+export type Actor = { userId: string | null; name: string } | null;
+/** One entry of a thread's timeline (`inbox:activity`, oldest first). Messages and notes are not in it. */
+export interface ActivityEntry {
+  _id: string;
+  _creationTime: number;
+  threadId: string;
+  mailbox: string;
+  kind: ActivityKind;
+  at: number;
+  author?: string;
+  data?: Record<string, any>;
+  actor: Actor;
+}
+
+/** A send waiting for its `sendAt` (`inbox:scheduled`, soonest first). */
+export interface ScheduledSend {
+  emailId: string;
+  sendAt: number;
+  subject: string;
+  to: string[] | string;
+  cc?: string[];
+  messageId?: string;
+  author?: string;
+  snippet?: string;
+}
+
+export type PresenceState = "viewing" | "replying";
+/** Someone else on the thread now (`inbox:presence`; never the member themselves). */
+export interface Presence {
+  userId: string;
+  name: string;
+  state: PresenceState;
+  since: number;
+}
 
 /** What every send takes from the composer (apps/api `composerArgs`). */
 export type ComposerArgs = {
@@ -145,6 +219,10 @@ export type ComposerArgs = {
   draftId?: string;
   /** This send's id (`newRequestId`): every retry of it carries the same one, so the server sends it once. */
   requestId?: string;
+  /** Send at this time (ms, at most 366 days ahead) instead of now. Refused when files would go as links (> 10 MB). */
+  sendAt?: number;
+  /** Blind copies (at most 50): in the envelope only. */
+  bcc?: string[];
 };
 
 export type DraftKind = "reply" | "note" | "compose" | "forward";
@@ -212,7 +290,7 @@ export interface NotificationPrefs {
 export type SetNotificationsArgs = { mailbox?: string; enabled?: boolean; preview?: boolean };
 
 export type PageOpts = { numItems: number; cursor: string | null };
-export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
+export type ThreadsArgs = { mailbox: string; status?: string; assignee?: string | null; unread?: boolean; tag?: string; snoozed?: boolean; paginationOpts?: PageOpts };
 
 const q = makeFunctionReference;
 export const api = {
@@ -267,6 +345,20 @@ export const api = {
     unregisterDevice: q<"mutation", { token: string }, boolean>("inbox:unregisterDevice"),
     notifications: q<"query", Record<string, never>, NotificationPrefs>("inbox:notifications"),
     setNotifications: q<"mutation", SetNotificationsArgs, NotificationPrefs>("inbox:setNotifications"),
+    tags: q<"query", { mailbox?: string }, Tag[]>("inbox:tags"),
+    createTag: q<"mutation", { mailbox: string; name: string; color?: string; order?: number }, string>("inbox:createTag"),
+    updateTag: q<"mutation", { tagId: string; name?: string; color?: string; order?: number }, string>("inbox:updateTag"),
+    deleteTag: q<"mutation", { tagId: string }, { deleted: boolean }>("inbox:deleteTag"),
+    setTags: q<"mutation", { threadId: string; tags: string[] }, string[]>("inbox:setTags"),
+    addTag: q<"mutation", { threadId: string; tag: string }, string[]>("inbox:addTag"),
+    removeTag: q<"mutation", { threadId: string; tag: string }, string[]>("inbox:removeTag"),
+    activity: q<"query", { threadId: string; limit?: number }, ActivityEntry[]>("inbox:activity"),
+    snooze: q<"mutation", { threadId: string; until: number | null }, number | null>("inbox:snooze"),
+    unsnooze: q<"mutation", { threadId: string }, null>("inbox:unsnooze"),
+    scheduled: q<"query", { threadId: string }, ScheduledSend[]>("inbox:scheduled"),
+    cancelScheduled: q<"mutation", { emailId: string }, { ok: boolean; status: string; messageId?: string; threadDeleted?: boolean }>("inbox:cancelScheduled"),
+    setPresence: q<"mutation", { threadId: string; state: PresenceState | null }, null>("inbox:setPresence"),
+    presence: q<"query", { threadId: string }, Presence[]>("inbox:presence"),
     generateUploadUrl: q<"mutation", { contentType?: string; size: number; sha256?: string; multipart?: boolean }, unknown>("inbox:generateUploadUrl"),
   },
 };

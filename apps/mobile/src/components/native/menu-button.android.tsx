@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useColors } from "../../theme";
 import { Icons, useMaterialSource } from "../icons";
 import { BrandHost as Host } from "./brand-host";
+import { menuEntryEnabled, menuEntryKind } from "./menu-items";
 import type { MenuButtonProps, MenuItem } from "./types";
 
 
@@ -13,13 +14,22 @@ import type { MenuButtonProps, MenuItem } from "./types";
 export function MenuButton({ label, icon, variant = "chip", items, accessibilityLabel: a11y }: MenuButtonProps) {
   const c = useColors();
   const [open, setOpen] = useState(false);
+  // A cascading menu: an item with a submenu opens its level in place (with a way back), like Material's cascades.
+  const [level, setLevel] = useState<MenuItem | null>(null);
+  const close = () => {
+    setOpen(false);
+    setLevel(null);
+  };
+  const shown: MenuItem[] = level
+    ? [{ key: "__back", label: level.label, icon: Icons.back, onPress: () => setLevel(null) }, ...(level.submenu ?? [])]
+    : items;
   const glyph = useMaterialSource(icon ?? null, variant === "chip" ? 18 : 24, c.secondaryText);
   const arrow = useMaterialSource(Icons.dropDown, 18, c.secondaryText);
   // The chip reads its icon slots when it mounts: wait for the Material Symbols (they load asynchronously).
   if ((variant === "chip" && !arrow) || (icon && !glyph)) return null;
   return (
     <Host matchContents>
-      <DropdownMenu expanded={open} onDismissRequest={() => setOpen(false)}>
+      <DropdownMenu expanded={open} onDismissRequest={close}>
         <DropdownMenu.Trigger>
           {variant === "chip" ? (
             <AssistChip onClick={() => setOpen(true)} modifiers={[semantics({ contentDescription: a11y ?? label })]}>
@@ -46,12 +56,15 @@ export function MenuButton({ label, icon, variant = "chip", items, accessibility
           )}
         </DropdownMenu.Trigger>
         <DropdownMenu.Items>
-          {items.map((i) => (
+          {shown.map((i) => (
             <Row
               key={i.key}
               item={i}
               onPress={() => {
-                setOpen(false);
+                if (i.key === "__back") return setLevel(null);
+                if (!menuEntryEnabled(i)) return;
+                if (menuEntryKind(i) === "submenu") return setLevel(i);
+                close();
                 i.onPress();
               }}
             />
@@ -68,7 +81,7 @@ function Row({ item, onPress }: { item: MenuItem; onPress(): void }) {
   const lead = useMaterialSource(item.icon ?? null, 24, color);
   const check = useMaterialSource(item.checked ? Icons.check : null, 24, c.tint);
   return (
-    <DropdownMenuItem onClick={onPress} enabled={!item.disabled}>
+    <DropdownMenuItem onClick={onPress} enabled={menuEntryEnabled(item)}>
       {lead ? (
         <DropdownMenuItem.LeadingIcon>
           <Icon source={lead} size={24} tint={color} />

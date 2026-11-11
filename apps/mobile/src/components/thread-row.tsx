@@ -11,6 +11,8 @@ import type { ThreadRow } from "../model/threads";
 import { corner, radius, screenEdge, spacing, tabular, type, useColors } from "../theme";
 import { Icons, Symbol } from "./icons";
 import { Avatar, UnreadDot } from "./ui";
+import { TagChips } from "./tag-chips";
+import type { Tag } from "../api";
 import { ThemedText } from "./themed-text";
 
 export const AVATAR = 40;
@@ -36,9 +38,11 @@ export interface ThreadRowContentProps {
   showAssignee: boolean;
   editing: boolean;
   selected: boolean;
+  /** The row's tags, resolved (`row.tags` → `inbox:tags`): the first two as chips under the preview, then "+N". */
+  tags?: readonly Tag[];
 }
 
-export function ThreadRowContent({ row, when, avatars, previewLines, showAssignee, editing, selected }: ThreadRowContentProps) {
+export function ThreadRowContent({ row, when, avatars, previewLines, showAssignee, editing, selected, tags }: ThreadRowContentProps) {
   const c = useColors();
   const { t } = useI18n();
   const status = row.status === "waiting" ? Icons.waiting : row.status === "closed" ? Icons.statusClosed : row.status === "spam" ? Icons.statusSpam : null;
@@ -61,6 +65,7 @@ export function ThreadRowContent({ row, when, avatars, previewLines, showAssigne
           </ThemedText>
           <View style={styles.meta}>
             {row.pending ? <Symbol icon={Icons.queued} size={13} color={c.secondaryLabel} /> : null}
+            {row.snoozedUntil ? <Symbol icon={Icons.snooze} size={13} color={c.secondaryLabel} /> : null}
             {status ? <Symbol icon={status} size={13} color={c.secondaryLabel} /> : null}
             {showAssignee && row.assigneeName ? <MiniMonogram name={row.assigneeName} /> : null}
             <ThemedText variant="subheadline" tone="secondary" style={tabular} numberOfLines={1}>
@@ -76,6 +81,11 @@ export function ThreadRowContent({ row, when, avatars, previewLines, showAssigne
           <ThemedText variant="subheadline" tone="secondary" numberOfLines={previewLines}>
             {row.snippet}
           </ThemedText>
+        ) : null}
+        {tags?.length ? (
+          <View style={styles.tags}>
+            <TagChips tags={tags} max={2} />
+          </View>
         ) : null}
       </View>
     </View>
@@ -158,5 +168,6 @@ const styles = StyleSheet.create({
   miniText: { fontSize: 7.5, fontWeight: "700" },
   dotSpace: { width: DOT, height: DOT },
   avatarBox: { width: AVATAR, height: AVATAR, borderRadius: radius.full },
+  tags: { paddingTop: spacing.xs },
   skelBody: { gap: spacing.sm, paddingTop: spacing.xxs },
 });

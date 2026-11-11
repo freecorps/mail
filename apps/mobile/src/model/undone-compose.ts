@@ -4,8 +4,11 @@ import type { AttachmentArg } from "../lib/uploads";
 
 export interface UndoneCompose {
   mailbox: string;
+  /** A reply's thread ("Editar" on a scheduled reply reopens the reply); none for a new message. */
+  threadId?: string;
   to: string[];
   cc: string[];
+  bcc?: string[];
   subject: string;
   text: string;
   attachments: AttachmentArg[];

@@ -51,7 +51,7 @@ export function SettingsScreen() {
   );
   const ios = process.env.EXPO_OS === "ios";
   const lineOptions = ([1, 2, 3] as const).map((n) => ({ value: n, label: t("settings.previewLines.n", { count: n }) }));
-  const swipeOptions = (["read", "archive", "assign", "none"] as SwipeKind[]).map((k) => ({ value: k, label: t(`settings.swipe.${k}`) }));
+  const swipeOptions = (["read", "archive", "snooze", "assign", "none"] as SwipeKind[]).map((k) => ({ value: k, label: t(`settings.swipe.${k}`) }));
   const pickers = {
     lines: { label: t("settings.previewLines"), value: list.previewLines, options: lineOptions, onChange: (v: number) => setListPrefs({ previewLines: v as 1 | 2 | 3 }) },
     leading: { label: t("settings.swipeLeading"), value: list.swipeLeading, options: swipeOptions, onChange: (v: SwipeKind) => setListPrefs({ swipeLeading: v }) },
@@ -139,6 +139,18 @@ export function SettingsScreen() {
             </FieldGroup.Section>
           </>
         )}
+
+        {/* Etiquetas: each mailbox's tags (rename, color, order, delete). */}
+        <FieldGroup.Section title={t("settings.tags")}>
+          <ListItem
+            leading={<NativeIcon icon={Icons.tag} color={colors.tint} />}
+            trailing={<NativeIcon icon={Icons.chevron} size={14} color={colors.tertiaryText} />}
+            onPress={() => router.push("/tag-list")}
+            testID="settings-tags"
+          >
+            <Text>{t("tags.title")}</Text>
+          </ListItem>
+        </FieldGroup.Section>
 
         {/* Notificações: per mailbox, preview, and this device's permission (its own screen). */}
         <FieldGroup.Section title={t("settings.notifications")}>

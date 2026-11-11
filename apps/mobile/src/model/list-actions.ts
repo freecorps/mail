@@ -5,8 +5,8 @@ import type { ThreadStatus } from "../api";
 import type { ListSource, ThreadFilter, ThreadRow } from "./threads";
 
 /** What a swipe side does (Settings › Swipe actions, like Mail.app). */
-export type SwipeKind = "read" | "archive" | "assign" | "none";
-export const SWIPE_KINDS: SwipeKind[] = ["read", "archive", "assign", "none"];
+export type SwipeKind = "read" | "archive" | "snooze" | "assign" | "none";
+export const SWIPE_KINDS: SwipeKind[] = ["read", "archive", "snooze", "assign", "none"];
 
 export interface ListPrefs {
   /** Show the monogram avatar (off: a compact list, dot and text only). */
@@ -136,6 +136,10 @@ export function archivable(rows: readonly Pick<ThreadRow, "threadId" | "status" 
  * a mailbox's All / Archived / Sent lists and the All view do; open, waiting, unread and assigned lists drop it.
  */
 export function keepsArchived(source: ListSource, filter: ThreadFilter): boolean {
+  if (source.view === "snoozed") return true;
   if (source.mailbox !== undefined) return filter === "all" || filter === "closed" || filter === "sent";
   return source.view === "all" && (filter === "all" || filter === "closed");
 }
+
+/** Whether the list still shows a thread once snoozed: only "Adiadas" (a re-snooze moves it there). */
+export const keepsSnoozed = (source: ListSource): boolean => source.view === "snoozed";

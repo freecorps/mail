@@ -28,12 +28,14 @@ const sameAddresses = (a: readonly string[], b: readonly string[]) => {
 };
 
 /**
- * A reply or note draft. The Cc that reply all fills in (`autoCc`) is not content of its own, nor a Bcc kept from
- * another device: emptied of what the member wrote, the draft carries neither, so it is deleted.
+ * A reply or note draft. The Cc that reply all fills in (`autoCc`) is not content of its own, nor a Bcc the surface
+ * only keeps (the quick reply carries a draft's Bcc without showing it): emptied of what the member wrote, the draft
+ * carries neither, so it is deleted. `bccShown`: the Bcc is on screen and editable (the full composer), so it is the
+ * member's own and counts.
  */
-export function replyDraftArgs(a: { kind: "reply" | "note"; threadId: string; text: string; cc: readonly string[]; autoCc: readonly string[]; bcc?: readonly string[]; attachments: NonNullable<SaveDraftArgs["attachments"]> }): SaveDraftArgs {
+export function replyDraftArgs(a: { kind: "reply" | "note"; threadId: string; text: string; cc: readonly string[]; autoCc: readonly string[]; bcc?: readonly string[]; bccShown?: boolean; attachments: NonNullable<SaveDraftArgs["attachments"]> }): SaveDraftArgs {
   if (a.kind === "note") return { kind: "note", threadId: a.threadId, text: a.text, cc: [], attachments: [] };
-  const written = !!a.text.trim() || a.attachments.length > 0 || (a.cc.length > 0 && !sameAddresses(a.cc, a.autoCc));
+  const written = !!a.text.trim() || a.attachments.length > 0 || (a.cc.length > 0 && !sameAddresses(a.cc, a.autoCc)) || (!!a.bccShown && (a.bcc?.length ?? 0) > 0);
   return {
     kind: "reply",
     threadId: a.threadId,
@@ -52,6 +54,8 @@ export function createDraftSaver(o: DraftSaverOptions) {
   let timer: Timer | null = null;
   let pending: SaveDraftArgs | null = null;
   let inflight: Promise<void> | null = null;
+  /** The id the save on its way will give its draft (null if it fails), for `detach`. */
+  let inflightId: Promise<string | null> | null = null;
   let closed = false;
   /** Bumped by `sent` and `discard`: a save that answers afterwards belongs to a draft that is gone. */
   let generation = 0;
@@ -76,7 +80,12 @@ export function createDraftSaver(o: DraftSaverOptions) {
       inflight = gone ? removeQuietly(gone) : Promise.resolve();
     } else {
       const withId = id;
-      inflight = o.save({ ...args, ...(withId ? { id: withId } : {}) }).then(
+      const req = o.save({ ...args, ...(withId ? { id: withId } : {}) });
+      inflightId = req.then(
+        (r) => r.id,
+        () => null,
+      );
+      inflight = req.then(
         (r) => {
           if (discarding || gen === orphaned) void removeQuietly(r.id);
           else if (gen === generation) id = r.id;
@@ -89,6 +98,7 @@ export function createDraftSaver(o: DraftSaverOptions) {
     }
     return inflight.finally(() => {
       inflight = null;
+      inflightId = null;
       // What was typed while that save was on its way goes next (also after pause or close).
       if (pending) void write();
     });
@@ -139,6 +149,30 @@ export function createDraftSaver(o: DraftSaverOptions) {
       if (!usedId && inflight) orphaned = generation;
       id = null;
       generation++;
+    },
+    /**
+     * A send takes this draft with it (a scheduled one, which may wait offline): it gets the draft's id now, or the id
+     * the save on its way will give it, and the saver starts a new draft for whatever is typed next. `release()` deletes
+     * the taken draft once the send went through without carrying its id; on a refusal it is simply kept.
+     */
+    detach(): { id: string | null; release(): void } {
+      const mine = id;
+      const saving = mine ? null : inflightId;
+      pending = null;
+      stopTimer();
+      id = null;
+      // The save on its way belongs to the taken draft: its answer no longer sets this saver's id.
+      generation++;
+      let done = false;
+      return {
+        id: mine,
+        release() {
+          if (done) return;
+          done = true;
+          if (mine) void removeQuietly(mine);
+          else if (saving) void saving.then((x) => (x ? removeQuietly(x) : undefined));
+        },
+      };
     },
     /** "Descartar rascunho": deletes it, now and for good (also one whose first save is still on its way). */
     discard(): Promise<void> {

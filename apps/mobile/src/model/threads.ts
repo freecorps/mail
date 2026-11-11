@@ -5,6 +5,7 @@ import { api, type InboxView, type Mailbox, type SearchHit, type SentThread, typ
 import type { StringKey } from "../i18n";
 import { contactOf, displayAddress } from "../lib/format";
 import { isOptimisticId } from "../offline/optimistic";
+import { tagIndex } from "./tags";
 
 /** A status, or `sent`: the conversations the mailbox wrote in, by its latest send (not a status). */
 export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent";
@@ -12,12 +13,12 @@ export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed
 export const PAGE = 30;
 
 /** What a list shows: one mailbox, or a view across the member's mailboxes (apps/api `inbox:view`). */
-export type ListSource = { mailbox: string; view?: undefined } | { view: InboxView; mailbox?: undefined };
+export type ListSource = { mailbox: string; view?: undefined; tag?: undefined } | { view: InboxView; mailbox?: undefined; tag?: string | undefined };
 
 /** The filters a list offers: a mailbox has a Sent view; "waiting" is already a status; views have no Sent. */
 export function filtersFor(source: ListSource): ThreadFilter[] {
   if (source.mailbox !== undefined) return THREAD_FILTERS;
-  return source.view === "waiting" ? [] : ["all", "open", "waiting", "closed"];
+  return source.view === "waiting" || source.view === "snoozed" ? [] : ["all", "open", "waiting", "closed"];
 }
 
 /** A filter's label: in "assigned" and "unread", no status means the open and waiting ones (the server's default). */
@@ -41,6 +42,10 @@ export interface ThreadRow {
   assigneeName: string | null;
   /** Created offline / not confirmed by the server yet. */
   pending: boolean;
+  /** Tag ids (resolved to chips with `inbox:tags`). */
+  tags: string[];
+  /** Snoozed until (ms): "Adiadas" shows this time instead of the latest message's. */
+  snoozedUntil: number | null;
 }
 
 export type Source = "server" | "local" | "cache";
@@ -61,6 +66,8 @@ export function threadRow(t: Thread): ThreadRow {
     assignee: t.assignee ?? null,
     assigneeName: t.assigneeName ?? null,
     pending: isOptimisticId(t._id),
+    tags: t.tags ?? [],
+    snoozedUntil: t.snoozed ? (t.snoozedUntil ?? null) : null,
   };
 }
 
@@ -89,6 +96,10 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       assignee: h.assignee ?? null,
       assigneeName: h.assigneeName ?? null,
       pending: false,
+      // Its tags and wake time too (Ember 0.7.2; none from an older server or the device), so the tag sheet and
+      // "Adiada até …" read a hit like a list row. The server sets `snoozedUntil` only while the thread is snoozed.
+      tags: h.tags ?? [],
+      snoozedUntil: h.snoozedUntil ?? null,
     });
   }
   return out;
@@ -122,7 +133,7 @@ export const MIN_QUERY = 2;
 /** `mailbox`: one mailbox's list (with Sent); `view`: a view across the member's mailboxes (search covers them all). */
 export function useThreadList(o: ListSource & { filter: ThreadFilter; query: string; searchOnly?: boolean }) {
   const [limit, setLimit] = useState({ key: "", n: PAGE });
-  const key = `${o.mailbox ?? `view:${o.view}`}\u0000${o.filter}`;
+  const key = `${o.mailbox ?? `view:${o.view}:${o.tag ?? ""}`}\u0000${o.filter}`;
   const n = limit.key === key ? limit.n : PAGE;
   const q = o.query.trim();
   const searching = q.length >= MIN_QUERY;
@@ -131,7 +142,7 @@ export function useThreadList(o: ListSource & { filter: ThreadFilter; query: str
   const status = o.filter === "all" || o.filter === "sent" ? {} : { status: o.filter };
   const inbox = useQuerySnapshot(api.inbox.threads, searching || sentView || mailbox === undefined ? "skip" : { mailbox, ...status, paginationOpts: { numItems: n, cursor: null } });
   // The search tab lists nothing until there is a query: no view read (or paged) behind it.
-  const view = useQuerySnapshot(api.inbox.view, searching || o.searchOnly || o.view === undefined ? "skip" : { view: o.view, ...(o.view === "waiting" ? {} : status), limit: n });
+  const view = useQuerySnapshot(api.inbox.view, searching || o.searchOnly || o.view === undefined ? "skip" : { view: o.view, ...(o.view === "waiting" ? {} : status), ...(o.tag ? { tag: o.tag } : {}), limit: n });
   const sent = useQuerySnapshot(api.inbox.sent, !searching && sentView ? { mailbox, limit: n } : "skip");
   const list = sentView ? sent : mailbox === undefined ? view : inbox;
   const search = useQuerySnapshot(api.inbox.search, searching ? { query: q, ...(mailbox ? { mailbox } : {}) } : "skip");
@@ -164,6 +175,13 @@ export function useThreadList(o: ListSource & { filter: ThreadFilter; query: str
     partial: !searching && !!view.value?.partial && mailbox === undefined,
     loadMore: () => setLimit({ key, n: n + PAGE }),
   };
+}
+
+/** Every tag the member sees (`inbox:tags`), by id, for the chips of rows and conversations. */
+export function useTagIndex() {
+  const s = useQuerySnapshot(api.inbox.tags, {});
+  const tags = s.value;
+  return useMemo(() => ({ tags: tags ?? [], index: tagIndex(tags) }), [tags]);
 }
 
 /** The home screen's counts per view (`inbox:views`); zeros until they load. */

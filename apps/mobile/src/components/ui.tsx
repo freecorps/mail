@@ -14,7 +14,7 @@ import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
-export { EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner } from "./native";
+export { DateTimePicker, EmptyState, IconButton, LabeledPicker, MenuButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner } from "./native";
 
 /**
  * A neutral monogram, like Contacts: white initials on a grey gradient (iOS), a Material tonal container (Android).
@@ -71,11 +71,13 @@ export function StatusPill({ status }: { status: ThreadStatus }) {
   );
 }
 
-export function Chip({ label, icon }: { label: string; icon?: IconSpec }) {
+/** A small tinted label (status, a tag). `dot`: a tag's color, as a dot before the name. */
+export function Chip({ label, icon, dot, maxWidth }: { label: string; icon?: IconSpec; dot?: string; maxWidth?: number }) {
   const c = useColors();
   return (
-    <View style={[styles.tag, { backgroundColor: c.fill }]}>
+    <View style={[styles.tag, { backgroundColor: c.fill }, maxWidth !== undefined && { maxWidth }]}>
       {icon ? <Symbol icon={icon} size={12} color={c.secondaryLabel} /> : null}
+      {dot ? <View style={[styles.tagDot, { backgroundColor: dot }]} /> : null}
       <ThemedText variant="caption1" tone="secondary" style={styles.tagText} numberOfLines={1}>
         {label}
       </ThemedText>
@@ -131,7 +133,7 @@ export function Separator({ inset = 0 }: { inset?: number }) {
 
 const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: radius.full },
-  tag: { flexDirection: "row", alignItems: "center", gap: spacing.xs, ...corner(radius.xs), paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs, maxWidth: 180 },
+  tag: { flexDirection: "row", alignItems: "center", gap: spacing.xs, ...corner(radius.xs), paddingHorizontal: spacing.sm, paddingVertical: spacing.xxs, maxWidth: 180, flexShrink: 1 },
   tagDot: { width: 6, height: 6, borderRadius: radius.full },
   tagText: { fontWeight: "500" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", padding: spacing.xxl, gap: spacing.md },

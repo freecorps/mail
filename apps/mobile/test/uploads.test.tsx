@@ -7,6 +7,7 @@ vi.mock("expo-document-picker", () => ({ getDocumentAsync: vi.fn() }));
 vi.mock("@freecorps/ember-react-native", () => ({ useEmberClient: () => ({}) }));
 
 const { useUploads } = await import("../src/lib/uploads");
+const { canSchedule } = await import("../src/model/schedule");
 
 function deferred<T>() {
   let resolve!: (v: T) => void, reject!: (e: unknown) => void;
@@ -40,9 +41,21 @@ describe("useUploads", () => {
     await act(async () => runs[1]!.done.resolve("_storage_b"));
     await waitFor(() => expect(result.current.busy).toBe(false));
     expect(result.current.attachments).toEqual([
-      { file: "_storage_a", filename: "a.pdf", contentType: "application/pdf" },
-      { file: "_storage_b", filename: "b.mov", contentType: "application/octet-stream" },
+      { file: "_storage_a", filename: "a.pdf", contentType: "application/pdf", size: 1000 },
+      { file: "_storage_b", filename: "b.mov", contentType: "application/octet-stream", size: 300 * 1024 * 1024 },
     ]);
+  });
+
+  it("a restored draft's files keep their stored size, so a send past 10 MB can't be scheduled", () => {
+    const { result } = renderHook(() => useUploads(vi.fn(), vi.fn()));
+    const big = 11 * 1024 * 1024;
+    act(() => result.current.restore([{ file: "f1", filename: "big.pdf", contentType: "application/pdf", size: big }, { file: "f2", filename: "old.txt", contentType: "text/plain" }]));
+    expect(result.current.items.map((x) => x.size)).toEqual([big, 0]);
+    expect(result.current.attachments).toEqual([
+      { file: "f1", filename: "big.pdf", contentType: "application/pdf", size: big },
+      { file: "f2", filename: "old.txt", contentType: "text/plain" },
+    ]);
+    expect(canSchedule(result.current.items)).toEqual({ ok: false, reason: "links", total: big });
   });
 
   it("a failed upload blocks sending until removed; removing an upload in flight aborts it", async () => {

@@ -12,9 +12,17 @@ export function RowMenu({ children, title, actions, href, disabled, preview = tr
       {preview ? <Link.Preview /> : null}
       {actions.length ? (
         <Link.Menu title={title}>
-          {actions.map((a) => (
-            <Link.MenuAction key={a.label} title={a.label} icon={a.icon.ios} {...(a.destructive ? { destructive: true } : {})} onPress={a.onPress} />
-          ))}
+          {actions.map((a) =>
+            a.submenu ? (
+              <Link.Menu key={a.label} title={a.label} icon={a.icon.ios}>
+                {a.submenu.map((s) => (
+                  <Link.MenuAction key={s.label} title={s.label} icon={s.icon.ios} {...(s.subtitle ? { subtitle: s.subtitle } : {})} onPress={s.onPress} />
+                ))}
+              </Link.Menu>
+            ) : (
+              <Link.MenuAction key={a.label} title={a.label} icon={a.icon.ios} {...(a.destructive ? { destructive: true } : {})} onPress={a.onPress} />
+            ),
+          )}
         </Link.Menu>
       ) : null}
     </Link>
