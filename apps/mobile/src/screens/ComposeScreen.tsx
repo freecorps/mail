@@ -196,9 +196,15 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   useEffect(() => {
     if (leaving) router.back();
   }, [leaving]);
+  // The draft's files come in once, when the form mounts over it: a later copy of the same draft (a save that was on
+  // its way, from here or another device) must not bring back a file removed since.
+  const filesRestored = useRef(false);
   useEffect(() => {
-    if (init.draft?.attachments.length) uploads.restore(init.draft.attachments);
-    else if (init.attachments?.length) uploads.restore(init.attachments);
+    if (filesRestored.current) return;
+    const files = init.draft?.attachments.length ? init.draft.attachments : (init.attachments ?? []);
+    if (!files.length) return;
+    filesRestored.current = true;
+    uploads.restore(files);
   }, [init.draft, init.attachments, uploads.restore]);
 
   const contacts = useMemo(() => contactsFrom([...(recent?.threads ?? []), ...(thread ? [thread] : [])], [...(recent?.messages ?? []), ...messages], own), [recent, thread, messages, own]);
@@ -227,7 +233,10 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
     if (!touched.current || done.current) return;
     saver.update(draftArgs());
   }, [to, cc, bcc, typed, subject, body, readyFiles, from]);
-  const hasContent = draftHasContent(isReply || note ? { text: body, attachments: uploads.attachments } : fields) && (kind !== "forward" || body !== init.text || toNow.length > 0);
+  // A forward starts with the quoted original and its subject: it counts as written once anything the member controls
+  // changed (text, any recipient row, subject, files).
+  const forwardEdited = body !== init.text || toNow.length > 0 || ccNow.length > 0 || bccNow.length > 0 || subject !== init.subject || uploads.items.length > 0;
+  const hasContent = draftHasContent(isReply || note ? { text: body, attachments: uploads.attachments } : fields) && (kind !== "forward" || forwardEdited);
 
   // "Descartar rascunho?" when closing a composer with something in it (a swipe down, Cancelar, Back).
   usePreventRemove(hasContent && !leaving, () => {
