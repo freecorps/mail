@@ -17,6 +17,14 @@ export function paneLayout(width: number): PaneLayout {
   return { split: true, listWidth: Math.round(Math.min(LIST_MAX, Math.max(LIST_MIN, width * LIST_SHARE))) };
 }
 
+/**
+ * What a wide window's detail pane takes from the list's end (its width and the hairline): the list's own floating
+ * controls (Android's compose FAB) stay over the list column instead of the pane's reply bar. 0 with one pane.
+ */
+export function listEndInset(layout: PaneLayout, width: number): number {
+  return layout.split ? Math.max(0, Math.round(width - layout.listWidth)) : 0;
+}
+
 interface Keyed {
   threadId: string;
 }

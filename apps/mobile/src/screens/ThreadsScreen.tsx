@@ -34,7 +34,7 @@ import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
 import { useKeyStill, useShortcuts } from "../keys";
-import { afterListChange, leaveFrom, paneLayout, stepFrom } from "../model/split";
+import { afterListChange, leaveFrom, listEndInset, paneLayout, stepFrom } from "../model/split";
 import { ThreadPane, type ThreadHost } from "./ThreadScreen";
 import { disabledTint, EASE_IN_OUT, EASE_OUT, motion, screenEdge, spacing, type Palette, useColors } from "../theme";
 
@@ -429,6 +429,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         <ListActions<ThreadFilter>
           filter={filters.length ? filterProps : undefined}
           compose={{ label: t("threads.compose"), onPress: compose }}
+          endInset={listEndInset(layout, width)}
           edit={vm.rows.some(actionable) ? { label: process.env.EXPO_OS === "ios" ? t("threads.edit") : t("threads.select"), onPress: startEditing } : undefined}
         />
       )}

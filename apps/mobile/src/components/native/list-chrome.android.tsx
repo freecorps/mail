@@ -36,7 +36,7 @@ export function ListFilters<T extends string>({ filters, value, onChange, label 
 /** A one-line Material snackbar (48 dp) and the 8 dp between it and the FAB. */
 const SNACKBAR_LIFT = 56;
 
-export function ListActions<T extends string>({ compose, edit }: ListActionsProps<T>) {
+export function ListActions<T extends string>({ compose, edit, endInset = 0 }: ListActionsProps<T>) {
   const c = useColors();
   // Compose tints the glyph with the FAB's content color; the raster color is only a placeholder.
   const source = useMaterialSource(Icons.compose, 24, c.labelText);
@@ -58,7 +58,7 @@ export function ListActions<T extends string>({ compose, edit }: ListActionsProp
           </Stack.Toolbar.Button>
         </Stack.Toolbar>
       ) : null}
-      <Animated.View style={[styles.fab, fabStyle]}>
+      <Animated.View style={[styles.fab, endInset ? { right: screenEdge + endInset } : null, fabStyle]}>
         <Host matchContents>
           <FloatingActionButton onClick={compose.onPress} modifiers={[semantics({ contentDescription: compose.label })]}>
             <FloatingActionButton.Icon>{source ? <Icon source={source} size={24} contentDescription={compose.label} /> : null}</FloatingActionButton.Icon>

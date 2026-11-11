@@ -69,6 +69,8 @@ export interface ListActionsProps<T extends string> {
   compose: { label: string; onPress(): void };
   /** Enters Edit mode ("Editar" in the iOS navigation bar, a select action in the Android top app bar). */
   edit?: { label: string; onPress(): void } | undefined;
+  /** Android: room at the end for a wide window's detail pane, so the compose FAB stays over the list column. */
+  endInset?: number;
 }
 
 export interface UndoBannerProps {
