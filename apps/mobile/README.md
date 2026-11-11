@@ -85,8 +85,11 @@ app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outsi
     app's language, then marks the conversation read.
   - **Arquivar**: closes the conversation.
   - **Marcar como lida**.
-  - They run in the background. On iOS they ask to unlock first. Their mutations go through the app's client, so they
-    queue on the device and are retried if the system suspends the app before the server answers.
+  - They run in the background. On iOS they ask to unlock first.
+  - Each mutation goes out in one HTTPS request (`POST /api/mutation`) inside the background time iOS grants on
+    request. expo-notifications reports an action handled at once, so without that time the app is suspended within
+    milliseconds. If the request fails, the mutation goes through the app's client: queued on the device and sent
+    when the app next runs.
   - Responses are handled from `index.ts`, so the one that launched or woke the app is not missed. On Android the
     push task (headless JS) handles them when the app is in the background or killed.
 - **Badge**: the unread total of the member's mailboxes. The server sends it with each push. The app sets it in the
@@ -103,6 +106,10 @@ app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outsi
 - **Quick actions** on the icon (`src/quick-actions.ts`, `expo-quick-actions`): Nova mensagem, Atribuídas a mim,
   Buscar. They are set only for a member and cleared at sign-out. Android icons are vector drawables written by
   `plugins/shortcut-icons.js`.
+- **`modules/mail-system`**: a local Expo module (iOS only), for what Expo has no JS API for.
+  - `beginBackgroundTask` / `endBackgroundTask` (UIApplication) for the notification actions.
+  - The quick action that cold-starts the app. Under the UIScene life cycle Expo forwards it as `performActionFor`
+    before JS listens, and expo-quick-actions only reads the launch options. Worth reporting upstream.
 - **Testing on a simulator**:
   - iOS: `xcrun simctl push <udid> app.freecorps.mail payload.apns` with an `aps.category` of `mail` and the data
     under `body`. That is the shape the Notification Service Extension leaves after decrypting; no APNs needed.
