@@ -178,7 +178,7 @@ async function main() {
   const m = await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: userId, name: "Bia Santos", mailboxes: ["support", "privacy"] } });
   if (m.status >= 300) throw new Error(`member: ${m.status} ${JSON.stringify(m.body)}`);
   await call("/inbox/members", { method: "POST", headers: admin, json: { user_id: "teammate-caio", name: "Caio Rocha", mailboxes: ["support"] } });
-  for (const mail of [...MAILS, ...(process.env.SEED_WORST ? WORST : [])].reverse()) {
+  for (const mail of [...MAILS, ...(process.env.SEED_WORST === "1" ? WORST : [])].reverse()) {
     const raw = mime({ ...mail, date: new Date(Date.now() - mail.agoMin * 60_000) });
     const r = await fetch(`${URL_}/cdn-cgi/local/email?from=${encodeURIComponent(mail.envelope)}&to=${encodeURIComponent(mail.rcpt)}`, { method: "POST", body: raw });
     console.log(`  ${mail.rcpt} ← ${mail.envelope}: ${r.status} ${r.status >= 300 ? await r.text() : ""}`);

@@ -45,6 +45,8 @@ export function useLanguagePref() {
 const LIST_KEY = "ember-mail:list";
 let listPrefs: ListPrefs = DEFAULT_LIST_PREFS;
 let listLoaded = false;
+/** What the member changed before the stored prefs finished loading: it wins over the stored values. */
+let listEdits: Partial<ListPrefs> = {};
 const listListeners = new Set<() => void>();
 const emitList = () => listListeners.forEach((l) => l());
 
@@ -53,7 +55,7 @@ function loadListPrefs() {
   listLoaded = true;
   AsyncStorage.getItem(LIST_KEY)
     .then((raw) => {
-      listPrefs = parseListPrefs(raw);
+      listPrefs = { ...parseListPrefs(raw), ...listEdits };
       emitList();
     })
     .catch(() => {});
@@ -72,6 +74,7 @@ export function useListPrefs(): ListPrefs {
 }
 
 export function setListPrefs(patch: Partial<ListPrefs>) {
+  listEdits = { ...listEdits, ...patch };
   listPrefs = { ...listPrefs, ...patch };
   emitList();
   AsyncStorage.setItem(LIST_KEY, JSON.stringify(listPrefs)).catch(() => {});
