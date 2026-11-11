@@ -24,7 +24,7 @@ import { ConnectionBanner, EmptyState, IconButton, Loading, MenuButton, NativeBu
 import type { MenuItem } from "../components/native";
 import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
-import { contactOf } from "../lib/format";
+import { contactOf, displaySubject } from "../lib/format";
 import { haptics } from "../lib/haptics";
 import { replyAllCc } from "../model/forward";
 import { useMembers, useThread, type MessageItem } from "../model/thread";
@@ -39,7 +39,7 @@ import { notify, offerUndoArchive } from "../model/undo";
 import { allowImagesFrom, deviceTimeZone, useImageSenders } from "../prefs";
 import { ActivityLine } from "../components/activity-line";
 import { TagChips } from "../components/tag-chips";
-import { describe, mergeTimeline, quiet, type TimelineItem } from "../model/activity";
+import { describe, groupTagRuns, mergeTimeline, quiet, type TimelineItem } from "../model/activity";
 import { presenceLine } from "../model/presence";
 import { editPlan, scheduledOf } from "../model/schedule";
 import { takeScheduledForward } from "../model/scheduled-forwards";
@@ -491,9 +491,9 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
     <View style={styles.header}>
       <ConnectionBanner />
       <ThemedText selectable variant="title2" emphasized style={styles.subject} accessibilityRole="header">
-        {thread.subject.trim() || t("threads.noSubject")}
+        {displaySubject(thread.subject, t("threads.noSubject"))}
       </ThemedText>
-      <ThemedText variant="footnote" tone="secondary" numberOfLines={1} style={styles.context}>
+      <ThemedText variant="footnote" tone="secondary" numberOfLines={2} style={styles.context}>
         {own ? t("thread.context", { contact: contactOf(thread), mailbox: own }) : contactOf(thread)}
       </ThemedText>
       {here && !preview ? (
@@ -604,8 +604,7 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
   // The quiet timeline between the messages (assignments, tags, snoozes, status by hand), by time.
   const events = preview
     ? []
-    : (activity ?? [])
-        .filter(quiet)
+    : groupTagRuns((activity ?? []).filter(quiet))
         .map((e) => describe(e, { t, me: me?.userId ?? null, when: (at) => formatLater(at, now, locale, clock24, zone) }))
         .filter((e): e is NonNullable<typeof e> => e !== null);
   const items = mergeTimeline(messages, (i) => i.message.at, events);

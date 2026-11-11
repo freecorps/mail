@@ -2,7 +2,9 @@
 // in copy (break-ui: 10k+ unread), and worst-case inputs through the widgets' snapshot builder.
 import { describe, expect, it } from "vitest";
 import { translate } from "../src/i18n/strings";
-import type { Mailbox, Thread, ViewCounts } from "../src/api";
+import { displaySubject, initials } from "../src/lib/format";
+import type { ActivityEntry, Mailbox, Thread, ViewCounts } from "../src/api";
+import { describe as describeEntry, groupTagRuns, TAG_RUN_MS } from "../src/model/activity";
 import { createKeyMotion, STILL_MS } from "../src/model/key-motion";
 import { buildWidgetSnapshots, widgetLine } from "../src/widgets/snapshot";
 
@@ -97,5 +99,65 @@ describe("widget snapshots, worst case", () => {
   it("names a mailbox by its address when it has neither a display name nor a name", () => {
     expect(widgetLine("", "fallback")).toBe("fallback");
     expect(buildWidgetSnapshots({ locale: "en", mailboxes: [box({ name: "", unread: 1 })], counts: counts(0), assigned: [], preview: true }).unread.rows[0]!.label).toBe("support@acme.test");
+  });
+});
+
+describe("break-ui: names and subjects", () => {
+  it("an address's +tag is not a word of its initials; a display name with + keeps it", () => {
+    expect(initials("bartholomew.fitzgerald+billing-notifications@northwind.worst.test")).toBe("BF");
+    expect(initials("Equipe C+ <c@worst.test>")).toBe("EC");
+    expect(initials("J")).toBe("J");
+    expect(initials("Cliente 10")).toBe("C");
+    expect(initials("Loja Exemplo 2")).toBe("LE");
+    expect(initials("2026")).toBe("2");
+  });
+  it("shows the UI's no-subject for none, blank, or the email component's English placeholder", () => {
+    expect(displaySubject("(no subject)", "(sem assunto)")).toBe("(sem assunto)");
+    expect(displaySubject("   ", "(sem assunto)")).toBe("(sem assunto)");
+    expect(displaySubject("  Re: (no subject) ", "x")).toBe("Re: (no subject)");
+  });
+});
+
+describe("timeline: a run of tags is one line", () => {
+  const bia = { userId: "u-bia", name: "Bia" };
+  const caio = { userId: "u-caio", name: "Caio" };
+  let n = 0;
+  const entry = (kind: ActivityEntry["kind"], at: number, o: Partial<ActivityEntry> = {}): ActivityEntry => ({
+    _id: `a${++n}`,
+    _creationTime: at,
+    threadId: "t1",
+    mailbox: "support",
+    kind,
+    at,
+    actor: bia,
+    data: {},
+    ...o,
+  });
+  const tag = (name: string, at: number, o: Partial<ActivityEntry> = {}) => entry("tag_added", at, { data: { name }, ...o });
+  const t = (k: Parameters<typeof translate>[1], v?: Parameters<typeof translate>[2]) => translate("pt-BR", k, v);
+  const text = (e: ActivityEntry) => describeEntry(e, { t, me: "u-bia", when: () => "" })!.text;
+
+  it("twelve tags at once: one line with two names and the rest counted", () => {
+    const names = ["Urgente", "Cobrança", "q3", "bug", "LGPD", "VIP", "revisar", "reembolso", "pós-venda", "parceria", "x", "y"];
+    const grouped = groupTagRuns(names.map((x, i) => tag(x, 1000 + i)));
+    expect(grouped).toHaveLength(1);
+    expect(text(grouped[0]!)).toBe("Você adicionou Urgente, Cobrança e mais 10");
+    expect(text(groupTagRuns([tag("Urgente", 1), tag("bug", 2)])[0]!)).toBe("Você adicionou Urgente e bug");
+    expect(text(groupTagRuns([tag("Urgente", 1)])[0]!)).toBe("Você adicionou Urgente");
+  });
+
+  it("another person, another kind, a gap or anything between starts a new line", () => {
+    const list = [
+      tag("a", 0),
+      tag("b", 10, { actor: caio }),
+      entry("tag_removed", 20, { data: { name: "b" } }),
+      tag("c", 30),
+      tag("d", 30 + TAG_RUN_MS + 1),
+      entry("assigned", 40 + TAG_RUN_MS, { data: { to: "u-caio", toName: "Caio" } }),
+      tag("e", 50 + TAG_RUN_MS),
+    ];
+    expect(groupTagRuns(list).map((e) => e._id)).toHaveLength(7);
+    const same = groupTagRuns([tag("a", 0), entry("tag_removed", 1, { data: { name: "z" } }), entry("tag_removed", 2, { data: { name: "w" } })]);
+    expect(same.map(text)).toEqual(["Você adicionou a", "Você removeu z e w"]);
   });
 });

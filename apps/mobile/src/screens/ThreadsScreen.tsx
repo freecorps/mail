@@ -22,7 +22,7 @@ import { ConnectionBanner, EmptyState, ListActions, ListFilters, NativeButton, R
 import type { RowMenuAction } from "../components/native";
 import { refreshNow } from "../ember";
 import { useI18n, type I18n } from "../i18n";
-import { formatWhen } from "../lib/format";
+import { displaySubject, formatWhen } from "../lib/format";
 import { haptics } from "../lib/haptics";
 import { hideTabBar } from "../model/chrome";
 import { actionable, archivable, bulkReadTarget, keepsArchived, keepsSnoozed, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
@@ -41,7 +41,10 @@ import { EASE_IN_OUT, EASE_OUT, motion, screenEdge, spacing, useColors, type Pal
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
 export function MailboxThreadsScreen() {
   const { mailbox, title } = useLocalSearchParams<{ mailbox: string; title?: string }>();
-  return <ThreadsScreen source={{ mailbox }} title={title ?? mailbox} />;
+  // A link from a widget or a notification carries only the name: the title is the mailbox's own once it is known.
+  const { mailboxes } = useMailboxes();
+  const box = mailboxes.find((b) => b.name === mailbox);
+  return <ThreadsScreen source={{ mailbox }} title={title ?? (box ? (box.displayName ?? box.address) : mailbox)} />;
 }
 
 /** Route: `/view/[view]` (a view across the member's mailboxes). */
@@ -49,8 +52,11 @@ export function ViewThreadsScreen() {
   const { view, tag, title } = useLocalSearchParams<{ view: string; tag?: string; title?: string }>();
   const { t } = useI18n();
   const v: InboxView = (INBOX_VIEWS as string[]).includes(view) ? (view as InboxView) : "all";
-  // `tag`: one tag's conversations (from the home's Etiquetas), titled with the tag's name.
-  return <ThreadsScreen source={{ view: v, ...(tag ? { tag } : {}) }} title={tag && title ? title : t(`views.${v}`)} />;
+  // `tag`: one tag's conversations (from the home's Etiquetas), titled with the tag's name (a link without one: the
+  // tag's name once the tags are known).
+  const { index } = useTagIndex();
+  const tagName = tag ? (title ?? index.get(tag)?.name) : undefined;
+  return <ThreadsScreen source={{ view: v, ...(tag ? { tag } : {}) }} title={tagName ?? t(`views.${v}`)} />;
 }
 
 /** The "Minhas" tab: assigned to me. */
@@ -607,7 +613,7 @@ const ThreadItem = memo(function ThreadItem({
   }, [row, prefs, canAssign, ops]);
 
   const label =
-    t("threads.a11y", { from: row.title, subject: row.subject.trim() || t("threads.noSubject"), when, unread: row.unread ? t("threads.a11yUnread") : "" }) +
+    t("threads.a11y", { from: row.title, subject: displaySubject(row.subject, t("threads.noSubject")), when, unread: row.unread ? t("threads.a11yUnread") : "" }) +
     (row.status && row.status !== "open" ? t("threads.a11yStatus", { status: t(`status.${row.status}`) }) : "") +
     (showAssignee && row.assigneeName ? t("threads.a11yAssignee", { name: row.assigneeName }) : "");
   // `from=list`: opened from a list, so the conversation offers its previous / next (a push or a link does not).
@@ -650,7 +656,7 @@ const ThreadItem = memo(function ThreadItem({
     <SwipeRow leading={swipes.leading} trailing={swipes.trailing}>
       <RowMenu
         href={href}
-        title={menuTitle(row.subject.trim() || t("threads.noSubject"))}
+        title={menuTitle(displaySubject(row.subject, t("threads.noSubject")))}
         actions={actions}
         disabled={row.pending}
         // Split: no peek (its tap would open the conversation full screen over the pane that already shows it).

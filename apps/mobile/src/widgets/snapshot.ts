@@ -5,7 +5,7 @@
 // them. A tap opens one of the app's deep links (src/navigation.ts).
 import type { Mailbox, Thread, ViewCounts } from "../api";
 import { translate, type Locale } from "../i18n/strings";
-import { contactOf } from "../lib/format";
+import { contactOf, displaySubject } from "../lib/format";
 import { badge, ownFirst } from "../model/threads";
 
 /** The app's URL scheme (app.config.ts `scheme`). */
@@ -144,7 +144,7 @@ export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
   const rows = showRows
     ? (i.assigned ?? [])
         .slice(0, MINE_ROWS)
-        .map((th) => ({ sender: widgetLine(contactOf(th), th.contact), subject: widgetLine(th.subject, t("threads.noSubject")), unread: th.unreadCount > 0, url: widgetUrls.thread(th._id) }))
+        .map((th) => ({ sender: widgetLine(contactOf(th), th.contact), subject: widgetLine(displaySubject(th.subject, ""), t("threads.noSubject")), unread: th.unreadCount > 0, url: widgetUrls.thread(th._id) }))
     : [];
 
   return {

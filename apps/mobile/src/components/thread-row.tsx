@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from "react-native-reanimated";
 import { useI18n } from "../i18n";
-import { initials } from "../lib/format";
+import { displaySubject, initials } from "../lib/format";
 import type { ThreadRow } from "../model/threads";
 import { corner, radius, screenEdge, spacing, tabular, type, useColors } from "../theme";
 import { Icons, Symbol } from "./icons";
@@ -73,9 +73,10 @@ export function ThreadRowContent({ row, when, avatars, previewLines, showAssigne
             </ThemedText>
           </View>
         </View>
-        <ThemedText variant="subheadline" numberOfLines={1}>
+        {/* Left to right as a line, so "#152" stays first before a right-to-left subject (which still reads RTL). */}
+        <ThemedText variant="subheadline" numberOfLines={1} style={row.number ? styles.ltr : undefined}>
           {row.number ? <ThemedText variant="subheadline" tone="secondary">#{row.number} </ThemedText> : null}
-          {row.subject.trim() || t("threads.noSubject")}
+          {displaySubject(row.subject, t("threads.noSubject"))}
         </ThemedText>
         {previewLines > 0 && row.snippet ? (
           <ThemedText variant="subheadline" tone="secondary" numberOfLines={previewLines}>
@@ -169,5 +170,6 @@ const styles = StyleSheet.create({
   dotSpace: { width: DOT, height: DOT },
   avatarBox: { width: AVATAR, height: AVATAR, borderRadius: radius.full },
   tags: { paddingTop: spacing.xs },
+  ltr: { writingDirection: "ltr" },
   skelBody: { gap: spacing.sm, paddingTop: spacing.xxs },
 });

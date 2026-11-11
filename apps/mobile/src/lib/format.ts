@@ -33,6 +33,15 @@ export function formatFull(at: number, locale: Locale, device24h = false): strin
   return new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", ...clockOf(locale, device24h) }).format(at);
 }
 
+/** What Ember's email component stores for mail that came without a subject (in English, whatever the UI's language). */
+const STORED_NO_SUBJECT = "(no subject)";
+
+/** A subject to show: `fallback` (the UI's "(sem assunto)") for none, blank, or the component's English placeholder. */
+export function displaySubject(subject: string, fallback: string): string {
+  const s = subject.trim();
+  return s && s !== STORED_NO_SUBJECT ? s : fallback;
+}
+
 export function displayAddress(a: Address): string {
   return a.name?.trim() || a.email;
 }
@@ -47,11 +56,17 @@ export function contactOf(t: Pick<Thread, "contact" | "contactName">): string {
  * avatar shows a person glyph then). Scripts without case (CJK) keep one character.
  */
 export function initials(name: string): string {
-  const clean = name.replace(/<.*?>/g, "").replace(/@.*$/, "").trim();
-  const words = clean
+  // An address: its local part, without a +tag ("bartholomew.fitzgerald+billing" is B F, not B B).
+  const bare = name.replace(/<.*?>/g, "");
+  const clean = (bare.includes("@") ? bare.replace(/@.*$/, "").replace(/\+.*$/, "") : bare).trim();
+  const all = clean
     .split(/[\s._\-+]+/)
     .map((w) => Array.from(w).find((ch) => /[\p{L}\p{N}]/u.test(ch)) ?? "")
     .filter(Boolean);
+  // Words that start with a letter carry the initials: "Cliente 10" is C, not C1 (every "Cliente 1x" would read the
+  // same). Digits only when there is nothing else ("2026" → 2).
+  const lettered = all.filter((ch) => /\p{L}/u.test(ch));
+  const words = lettered.length ? lettered : all;
   if (!words.length) return "";
   const first = words[0]!;
   // Han, kana and hangul names read as one glyph (Contacts does the same).
