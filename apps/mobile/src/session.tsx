@@ -6,7 +6,9 @@ import { PUSH_TRANSPORT } from "./config";
 import { authClient, clearReplica } from "./ember";
 import { setReplicaUser } from "./offline/replica";
 import type { LanguagePref } from "./prefs";
+import { resetNotificationSurface } from "./push/actions";
 import { pushTransport, type PushRegistration } from "./push/transport";
+import { clearQuickActions } from "./quick-actions";
 import { usePushRegistration } from "./push/usePush";
 
 const transport = pushTransport(PUSH_TRANSPORT);
@@ -57,6 +59,8 @@ function Member({ auth, lang, children }: { auth: UseEmberAuthTokenResult; lang:
   const signOut = useCallback(async () => {
     if (push.token) await unregister({ token: push.token }).catch(() => {});
     await transport.forget();
+    // No badge, notifications, mailbox channels or icon shortcuts of this account left behind.
+    await Promise.all([resetNotificationSurface(), clearQuickActions()]);
     await clearReplica();
     await auth.signOut().catch(() => {});
   }, [push.token, unregister, auth]);

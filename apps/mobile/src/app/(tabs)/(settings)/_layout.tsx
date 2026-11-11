@@ -10,6 +10,7 @@ export default function SettingsStack() {
     <Stack screenOptions={useListStackOptions()}>
       <Stack.Screen name="settings" options={{ title: t("settings.title") }} />
       <Stack.Screen name="signature" options={{ title: t("signature.title"), headerLargeTitleEnabled: false }} />
+      <Stack.Screen name="notifications" options={{ title: t("notifications.title"), headerLargeTitleEnabled: false }} />
     </Stack>
   );
 }

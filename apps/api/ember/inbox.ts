@@ -21,6 +21,7 @@ import {
   type DraftDoc,
   type SavedReplyDoc,
 } from "./composer.ts";
+import { prefsDoc, prefsOf } from "./notifications.ts";
 
 const push = new PushNotifications(components.push);
 const email = components.email.lib;
@@ -718,6 +719,38 @@ export const registerDevice = mutation({
 });
 
 export const unregisterDevice = mutation({ args: { token: v.string() }, handler: (ctx, a) => (member(ctx), push.unregister(ctx, a.token)) });
+
+// ---------------------------------------------------------------------------------------------- notifications
+// Ajustes › Notificações (ember/notifications.ts): which of the member's mailboxes push to them, and whether the
+// notification shows the subject and the snippet. Theirs only, for every device they signed in on.
+
+/** `{ muted, preview }`: `muted` lists only mailboxes the member still sees. */
+export const notifications = query({
+  args: {},
+  handler: (ctx) => {
+    const m = member(ctx);
+    const p = prefsOf(ctx.db, m.userId);
+    const seen = new Set(memberMailboxes(ctx, m));
+    return { muted: p.muted.filter((b) => seen.has(b)), preview: p.preview };
+  },
+});
+
+/** Turns one mailbox's pushes on or off (`mailbox` + `enabled`), and/or the preview. Returns the new preferences. */
+export const setNotifications = mutation({
+  args: { mailbox: v.optional(v.string()), enabled: v.optional(v.boolean()), preview: v.optional(v.boolean()) },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    if ((a.mailbox === undefined) !== (a.enabled === undefined)) throw new Error("mailbox and enabled go together");
+    if (a.mailbox !== undefined && !canSee(ctx.db, m, a.mailbox)) throw new Error(`no access to mailbox ${a.mailbox}`);
+    const doc = prefsDoc(ctx.db, m.userId);
+    const p = prefsOf(ctx.db, m.userId);
+    const muted = a.mailbox === undefined ? p.muted : a.enabled ? p.muted.filter((b) => b !== a.mailbox) : [...new Set([...p.muted, a.mailbox])];
+    const next = { muted, preview: a.preview ?? p.preview, updatedAt: ctx.now };
+    if (doc) ctx.db.patch(doc._id as any, next);
+    else ctx.db.insert("notificationPrefs", { userId: m.userId, ...next });
+    return { muted: next.muted, preview: next.preview };
+  },
+});
 
 // ---------------------------------------------------------------------------------------------- composer
 // Signatures, drafts and saved replies (rules and limits: ember/composer.ts, shared with the clients as

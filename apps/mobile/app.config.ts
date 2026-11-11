@@ -55,6 +55,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     ["expo-sqlite", { enableFTS: true }],
     "expo-localization",
     "expo-sharing",
+    // Android launcher shortcut icons of the quick actions (src/quick-actions.ts, expo-quick-actions).
+    "./plugins/shortcut-icons.js",
     // No Time Sensitive entitlement: mail is sent at normal urgency, and App Store Connect's API cannot enable that
     // capability (EAS capability sync with an API key fails on it).
     ...(PUSH_DIRECT ? [["@freecorps/ember-expo-push", { timeSensitive: false }] as [string, unknown]] : []),

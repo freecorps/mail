@@ -1,0 +1,135 @@
+// What an inbound-mail push carries and what its actions do, without native modules (tested in vitest). The server
+// side is apps/api/ember/notifications.ts: `data` is `{ threadId, mailbox, messageId, number, from, at, badge }`,
+// sealed end to end with the direct transport, under the category "mail".
+import type { Locale } from "../i18n";
+import { quoteHeader } from "../model/compose";
+
+export const MAIL_CATEGORY = "mail";
+/** The channel the server names: Expo pushes, and sealed pushes of a mailbox the device has no channel for yet. */
+export const FALLBACK_CHANNEL = "mail";
+export const MAILBOX_CHANNEL_GROUP = "mailboxes";
+const CHANNEL_PREFIX = "mailbox.";
+
+export type PushAction = "reply" | "archive" | "read";
+export const PUSH_ACTIONS: readonly PushAction[] = ["reply", "archive", "read"];
+/** expo-notifications' identifier of a plain tap (`Notifications.DEFAULT_ACTION_IDENTIFIER`). */
+export const DEFAULT_ACTION = "expo.modules.notifications.actions.DEFAULT";
+
+export interface MailPushData {
+  threadId: string;
+  mailbox?: string;
+  messageId?: string;
+  number?: number;
+  from?: { email: string; name?: string };
+  at?: number;
+  badge?: number;
+}
+
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+
+/** The mail fields of a notification's `data`, or null (a fallback push: nothing to act on). */
+export function mailDataOf(data: unknown): MailPushData | null {
+  if (!isRecord(data) || typeof data.threadId !== "string" || !data.threadId) return null;
+  const out: MailPushData = { threadId: data.threadId };
+  if (typeof data.mailbox === "string" && data.mailbox) out.mailbox = data.mailbox;
+  if (typeof data.messageId === "string") out.messageId = data.messageId;
+  if (typeof data.number === "number") out.number = data.number;
+  if (isRecord(data.from) && typeof data.from.email === "string") {
+    out.from = { email: data.from.email, ...(typeof data.from.name === "string" && data.from.name ? { name: data.from.name } : {}) };
+  }
+  if (typeof data.at === "number" && Number.isFinite(data.at)) out.at = data.at;
+  if (typeof data.badge === "number" && Number.isFinite(data.badge) && data.badge >= 0) out.badge = Math.trunc(data.badge);
+  return out;
+}
+
+/** A response's action: a plain tap opens the conversation; the category's actions run in the background. */
+export function actionOf(actionIdentifier: string): PushAction | "open" | null {
+  if (actionIdentifier === DEFAULT_ACTION) return "open";
+  return (PUSH_ACTIONS as readonly string[]).includes(actionIdentifier) ? (actionIdentifier as PushAction) : null;
+}
+
+/** The mutations an action runs, in order (`inbox:*`, as the app calls them; queued offline like every other). */
+export type ActionCall =
+  | { fn: "reply"; args: { threadId: string; text: string; quoteHeader?: string } }
+  | { fn: "setStatus"; args: { threadId: string; status: "closed" } }
+  | { fn: "markRead"; args: { threadId: string } };
+
+/**
+ * What an action does. Responder: a reply (never a note, so a personal mailbox's rules hold) with the member's
+ * default signature (the server adds it) and the quote line in the app's language, then read: the member read the
+ * notification and answered it. Arquivar: closed. Marcar como lida: read. An empty reply does nothing.
+ */
+export function actionCalls(kind: PushAction, data: MailPushData, o: { text?: string | null; locale: Locale; clock24: boolean }): ActionCall[] {
+  const threadId = data.threadId;
+  if (kind === "archive") return [{ fn: "setStatus", args: { threadId, status: "closed" } }];
+  if (kind === "read") return [{ fn: "markRead", args: { threadId } }];
+  const text = (o.text ?? "").trim();
+  if (!text) return [];
+  const header = data.from && data.at !== undefined ? quoteHeader({ from: data.from, at: data.at }, o.locale, o.clock24) : undefined;
+  return [
+    { fn: "reply", args: { threadId, text, ...(header ? { quoteHeader: header } : {}) } },
+    { fn: "markRead", args: { threadId } },
+  ];
+}
+
+/** One response, once: the same tap can arrive by the listener, `getLastNotificationResponse` and the Android task. */
+export function responseKey(r: { identifier: string; date: number; actionIdentifier: string; userText?: string | null }): string {
+  return `${r.identifier}|${r.date}|${r.actionIdentifier}|${r.userText ?? ""}`;
+}
+
+/** Keeps the newest `max` keys (persisted, so a relaunch does not run an action again). */
+export function remember(keys: readonly string[], key: string, max = 30): string[] {
+  return [...keys.filter((k) => k !== key), key].slice(-max);
+}
+
+// ---------------------------------------------------------------------------------------------- Android channels
+// One channel per mailbox, named after it, in a "Caixas" group: the member sets each one's sound and importance in the
+// system settings. Created on the device from the mailboxes the member sees; the server never names them (a sealed
+// push's channel is chosen here, from the decrypted mailbox, so Google never sees which mailbox it is).
+
+export const channelIdFor = (mailbox: string) => `${CHANNEL_PREFIX}${mailbox}`;
+
+export type MailboxChannel = { id: string; name: string; description: string };
+
+export function mailboxChannels(boxes: ReadonlyArray<{ name: string; address: string; displayName: string | null }>): MailboxChannel[] {
+  return boxes.map((b) => ({ id: channelIdFor(b.name), name: b.displayName || b.address, description: b.address }));
+}
+
+/** Mailbox channels the device still has for mailboxes the member no longer sees (removed). */
+export function staleChannels(existing: readonly string[], wanted: readonly MailboxChannel[]): string[] {
+  const keep = new Set(wanted.map((c) => c.id));
+  return existing.filter((id) => id.startsWith(CHANNEL_PREFIX) && !keep.has(id));
+}
+
+/** The app icon's badge: the member's unread messages across their mailboxes (what the Caixas tab shows). */
+export const badgeOf = (boxes: ReadonlyArray<{ unread: number }>) => boxes.reduce((n, b) => n + Math.max(0, b.unread), 0);
+
+/**
+ * The local notification an Android sealed push becomes, once opened: on its mailbox's channel (when the device has
+ * it), grouped by mailbox, one per conversation (a new message replaces the conversation's notification), with the
+ * category's actions and the badge. Null `data` (a push that is not mail): shown as it is, on the server's channel.
+ */
+export function androidNotification(
+  opened: { title?: string; subtitle?: string; body?: string; data?: Record<string, unknown> },
+  o: { serverChannel?: string; tag?: string; hasChannel: (id: string) => boolean },
+) {
+  const data = mailDataOf(opened.data);
+  const own = data?.mailbox ? channelIdFor(data.mailbox) : null;
+  const channelId = own && o.hasChannel(own) ? own : (o.serverChannel ?? FALLBACK_CHANNEL);
+  const identifier = data?.threadId ?? o.tag;
+  return {
+    ...(identifier ? { identifier } : {}),
+    channelId,
+    content: {
+      ...(opened.title ? { title: opened.title } : {}),
+      ...(opened.subtitle ? { subtitle: opened.subtitle } : {}),
+      // "Mostrar prévia" off: the server sends an empty body.
+      ...(opened.body ? { body: opened.body } : {}),
+      data: opened.data ?? {},
+      sound: "default" as const,
+      ...(data ? { categoryIdentifier: MAIL_CATEGORY } : {}),
+      ...(data?.mailbox ? { threadIdentifier: channelIdFor(data.mailbox) } : {}),
+      ...(data?.badge !== undefined ? { badge: data.badge } : {}),
+    },
+  };
+}

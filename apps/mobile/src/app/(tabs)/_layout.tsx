@@ -8,18 +8,25 @@ import { useI18n } from "../../i18n";
 import { useTabBarHidden } from "../../model/chrome";
 import { badge, useMailboxes, useViewCounts } from "../../model/threads";
 import { setInboxMounted } from "../../navigation";
-import { flushNotificationTarget, useNotificationRouting } from "../../push/usePush";
+import { flushNotificationTarget, useAppBadge, useMailboxChannels, useNotificationCategory } from "../../push/usePush";
+import { useQuickActions } from "../../quick-actions";
 import { useColors } from "../../theme";
 
 export default function TabsLayout() {
   const c = useColors();
-  const { t } = useI18n();
-  const { totalUnread } = useMailboxes();
+  const { t, locale } = useI18n();
+  const { totalUnread, mailboxes, status } = useMailboxes();
   // Minhas: how many of my conversations have unread messages (my to-do with something new in it).
   const mineUnread = useViewCounts()?.assigned.unread ?? 0;
   // Edit mode on a list hides the tab bar: its bottom toolbar (archive, read, assign) takes the place.
   const hidden = useTabBarHidden();
-  useNotificationRouting();
+  // What the system shows outside the app follows the inbox: the icon badge, the mailboxes' Android channels, the
+  // notification actions and the icon's quick actions, in the app's language.
+  const loaded = status === "ready";
+  useAppBadge(mailboxes, loaded);
+  useMailboxChannels(mailboxes, loaded, locale);
+  useNotificationCategory(locale);
+  useQuickActions(locale);
   useEffect(() => {
     setInboxMounted(true);
     flushNotificationTarget();

@@ -29,7 +29,7 @@ describe("direct push transport", () => {
     expect(r.status === "granted" && registrationArgs(r, { direct: true })).toEqual({ token: "apns-tok", provider: "apns", platform: "ios", environment: "production", publicKey: "BPK" });
   });
 
-  it("Android: registers the decrypt task", async () => {
+  it("Android: registers the push task (sealed pushes, background actions)", async () => {
     m.ensurePushKey.mockResolvedValue({ publicKey: "BPK", keyId: "k1" });
     m.registerForPush.mockResolvedValue({ status: "granted", token: "fcm-tok", provider: "fcm", platform: "android", publicKey: "BPK" });
     expect(await directPushTransport.register()).toMatchObject({ status: "granted", provider: "fcm" });

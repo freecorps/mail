@@ -2,6 +2,7 @@
 import { createEmberWorker } from "@freecorps/ember-runtime";
 import { anyComponents, mutationGeneric, queryGeneric, v } from "@freecorps/ember-server";
 import { app, functions, http, schema } from "../src/app.ts";
+import { pushesFor } from "../ember/support.ts";
 
 export { Shard, System } from "@freecorps/ember-runtime";
 
@@ -27,6 +28,15 @@ export default createEmberWorker({
         },
       }),
       pruneDrafts: mutationGeneric({ args: {}, handler: (ctx: any) => ctx.runMutation("inbox:pruneDrafts", {}) }),
+      // Test-only: the pushes `support:onInbound` would send for a message of `threadId` (who, and what each gets).
+      inboundPushes: mutationGeneric({
+        args: { threadId: v.string() },
+        handler: (ctx: any, { threadId }: { threadId: string }) => {
+          const t = ctx.runQuery(anyComponents.email.lib.thread, { threadId });
+          const m = t.messages.findLast((x: any) => x.direction === "inbound");
+          return pushesFor(ctx, { threadId, messageId: m._id, mailbox: t.thread.mailbox, number: t.thread.number, from: m.from, subject: t.thread.subject, snippet: t.thread.snippet });
+        },
+      }),
       member: mutationGeneric({
         args: { userId: v.string() },
         handler: (ctx: any, { userId }: { userId: string }) => ctx.db.query("members").withIndex("by_user", (q: any) => q.eq("userId", userId)).first(),

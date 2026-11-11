@@ -107,6 +107,12 @@ export default defineSchema({
       updatedAt: v.number(),
     }).index("by_mailbox", ["mailbox"]),
 
+    /**
+     * A member's push preferences (ember/notifications.ts), one row per member, none until they change one: `muted`
+     * mailboxes push nothing to them; `preview: false` leaves the subject and the snippet out of the notification.
+     */
+    notificationPrefs: defineTable({ userId: v.string(), muted: v.array(v.string()), preview: v.boolean(), updatedAt: v.number() }).index("by_user", ["userId"]),
+
     /** Webhooks (ember/webhooks.ts): HTTPS endpoints for the service's events, signed with `secret` (Standard Webhooks). */
     webhooks: defineTable({
       endpoint: v.string(),
