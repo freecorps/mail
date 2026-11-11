@@ -36,7 +36,7 @@ export function RecipientInput({
   const listId = `${inputId}-list`;
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const [picked, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusOnMount) input.current?.focus();
@@ -45,6 +45,8 @@ export function RecipientInput({
   }, []);
   const chips = useMemo(() => value.map(chipOf), [value]);
   const options = useMemo(() => (open ? suggest(contacts, text, value) : []), [open, contacts, text, value]);
+  // The highlighted suggestion, kept inside the list: it also shrinks when contacts or chips change, not only on typing.
+  const active = options.length ? Math.min(picked, options.length - 1) : 0;
 
   // Once per address (case-insensitive, `chipEmail`): against the chips already there and within what is added, so a
   // pasted "a@x.com, A@x.com" or a suggestion picked twice makes one chip.
@@ -153,7 +155,7 @@ export function RecipientInput({
           onKeyDown={(e) => {
             if (options.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
               e.preventDefault();
-              setActive((a) => (a + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length);
+              setActive((active + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length);
             } else if (e.key === "Enter" || (e.key === "Tab" && text.trim())) {
               if (options.length && open) {
                 e.preventDefault();
