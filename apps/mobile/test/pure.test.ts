@@ -101,7 +101,14 @@ describe("format and i18n", () => {
   it("initials, sizes, recipients", () => {
     expect(initials("Ana Souza")).toBe("AS");
     expect(initials("caio.lima@user.test")).toBe("CL");
-    expect(initials("")).toBe("?");
+    expect(initials("")).toBe("");
+    // break-ui: emoji, punctuation, one letter, CJK, an address with no name.
+    expect(initials("🔥 Equipe Fogo")).toBe("EF");
+    expect(initials("🎉")).toBe("");
+    expect(initials("\"Ana\" (Suporte)")).toBe("AS");
+    expect(initials("x")).toBe("X");
+    expect(initials("李小龙")).toBe("李");
+    expect(initials("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.test")).toBe("A");
     expect(fileSize(1536, "en")).toBe("1.5 KB");
     expect(fileSize(1536, "pt-BR")).toBe("1,5 KB");
     expect(parseRecipients("a@b.test, Bia <bia@x.test>; nope, ")).toEqual({ valid: ["a@b.test", "Bia <bia@x.test>"], invalid: ["nope"] });
@@ -221,6 +228,16 @@ describe("optimistic updates", () => {
     setReplicaUser(null);
   });
 
+  it("undo of an archive brings the thread back to a filtered list that had dropped it", () => {
+    const t = thread({ _id: "email$threads_undo", status: "open", lastMessageAt: 50 });
+    const older = thread({ _id: "email$threads_old", status: "open", lastMessageAt: 10 });
+    const s = fakeStore([["inbox:threads", open, page([t, older])]]);
+    up["inbox:setStatus"]!(s.store, { threadId: t._id, status: "closed" }, rec);
+    expect(s.get("inbox:threads", open).page.map((x: Thread) => x._id)).toEqual([older._id]);
+    up["inbox:setStatus"]!(s.store, { threadId: t._id, status: "open" }, rec);
+    expect(s.get("inbox:threads", open).page.map((x: Thread) => x._id)).toEqual([t._id, older._id]);
+  });
+
   it("archive, assign (name from the loaded member list), compose", () => {
     const s = fakeStore([
       ["inbox:threads", all, page([thread()])],
@@ -271,6 +288,8 @@ describe("rows", () => {
     expect(threadRow(thread({ assigneeName: "Bia" }))).toMatchObject({ title: "Ana", unread: true, assigneeName: "Bia", pending: false, number: 7 });
     const hit = { messageId: "m1", threadId: "t1", mailbox: "support", direction: "inbound" as const, subject: "s", from: { email: "a@b.test" }, snippet: "x", at: 1 };
     expect(searchRows([hit, { ...hit, messageId: "m2" }, { ...hit, messageId: "m3", threadId: "t2" }]).map((r) => r.key)).toEqual(["m1", "m3"]);
+    expect(searchRows([{ ...hit, status: "closed", unreadCount: 1, assignee: "u1", assigneeName: "Bia" }])[0]).toMatchObject({ status: "closed", unread: true, assignee: "u1" });
+    expect(searchRows([hit])[0]).toMatchObject({ status: null, unread: false });
   });
   it("inline images map Content-ID to the attachment URL", () => {
     const m = { attachments: [{ filename: "l.png", contentType: "image/png", file: "f1", contentId: "<logo@x>", inline: true }, { filename: "a.pdf", contentType: "application/pdf", file: "f2" }] } as any;

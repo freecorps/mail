@@ -1,0 +1,73 @@
+// iOS: "Conversa arquivada · Desfazer" as a floating capsule above the tab bar (iOS has no system toast; this is the
+// shape Mail and Photos use for their undo hints). It fades and rises in 220 ms, ease-out; Reduce Motion: fade only.
+import { Platform, Pressable, StyleSheet, View } from "react-native";
+import Animated, { Easing, FadeIn, FadeInDown, FadeOut } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useI18n } from "../../i18n";
+import { haptics } from "../../lib/haptics";
+import { undoStore, useUndo } from "../../model/undo";
+import { corner, minTouch, radius, spacing, useColors } from "../../theme";
+import { ThemedText } from "../themed-text";
+import type { UndoBannerProps } from "./types";
+
+const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
+/** The tab bar (or, in Edit mode, the bottom toolbar) it floats above: iOS 26's floating bar is taller. */
+const BAR = parseInt(String(Platform.Version), 10) >= 26 ? 62 : 49;
+
+export function UndoBanner({ reduced }: UndoBannerProps) {
+  const entry = useUndo();
+  const c = useColors();
+  const { t } = useI18n();
+  const insets = useSafeAreaInsets();
+  if (!entry) return null;
+  const enter = reduced ? FadeIn.duration(150) : FadeInDown.duration(220).easing(EASE_OUT).withInitialValues({ transform: [{ translateY: 12 }] });
+  return (
+    <View pointerEvents="box-none" style={[styles.wrap, { bottom: insets.bottom + BAR + spacing.sm }]}>
+      <Animated.View
+        key={entry.id}
+        entering={enter}
+        exiting={FadeOut.duration(150)}
+        style={[styles.capsule, { backgroundColor: c.surface, shadowColor: "#000" }]}
+        accessibilityLiveRegion="polite"
+      >
+        <ThemedText variant="subheadline" numberOfLines={1} style={styles.text}>
+          {entry.message}
+        </ThemedText>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={t("undo.action")}
+          hitSlop={spacing.sm}
+          onPress={() => {
+            haptics.light();
+            undoStore.undo();
+          }}
+          style={({ pressed }) => [styles.action, pressed && styles.pressed]}
+        >
+          <ThemedText variant="subheadline" tone="tint" emphasized>
+            {t("undo.action")}
+          </ThemedText>
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: { position: "absolute", left: 0, right: 0, alignItems: "center", paddingHorizontal: spacing.lg },
+  capsule: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    ...corner(radius.full),
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
+    minHeight: minTouch,
+    maxWidth: 480,
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  text: { flexShrink: 1 },
+  action: { minHeight: minTouch, justifyContent: "center", paddingHorizontal: spacing.sm },
+  pressed: { opacity: 0.5 },
+});

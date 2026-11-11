@@ -40,6 +40,7 @@ export const Icons = {
   archive: icon("archivebox", "archive"),
   unarchive: icon("tray.and.arrow.up", "unarchive"),
   person: icon("person", "person"),
+  personFill: icon("person.fill", "person"),
   account: icon("person.crop.circle", "account_circle"),
   server: icon("server.rack", "dns"),
   bell: icon("bell", "notifications"),
@@ -66,6 +67,16 @@ export const Icons = {
   forward: icon("arrowshape.turn.up.right", "forward"),
   check: icon("checkmark", "check"),
   mail: icon("envelope.fill", "mail"),
+  waiting: icon("clock", "schedule"),
+  queued: icon("icloud.and.arrow.up", "cloud_upload"),
+  statusClosed: icon("archivebox", "archive"),
+  statusSpam: icon("xmark.bin", "report"),
+  select: icon("checkmark.circle", "checklist"),
+  selectAll: icon("checklist.checked", "select_all"),
+  selected: icon("checkmark.circle.fill", "check_circle"),
+  unselected: icon("circle", "radio_button_unchecked"),
+  readUnread: icon("envelope", "mark_email_read"),
+  more: icon("ellipsis.circle", "more_vert"),
 } satisfies Record<string, IconSpec>;
 
 /** A decorative glyph (hidden from screen readers; the surrounding control carries the label). */

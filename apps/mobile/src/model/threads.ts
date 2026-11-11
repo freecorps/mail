@@ -37,6 +37,7 @@ export interface ThreadRow {
   at: number;
   unread: boolean;
   status: ThreadStatus | null;
+  assignee: string | null;
   assigneeName: string | null;
   /** Created offline / not confirmed by the server yet. */
   pending: boolean;
@@ -57,6 +58,7 @@ export function threadRow(t: Thread): ThreadRow {
     at: t.lastMessageAt,
     unread: t.unreadCount > 0,
     status: t.status,
+    assignee: t.assignee ?? null,
     assigneeName: t.assigneeName ?? null,
     pending: isOptimisticId(t._id),
   };
@@ -81,9 +83,11 @@ export function searchRows(hits: readonly SearchHit[]): ThreadRow[] {
       subject: h.subject,
       snippet: h.snippet,
       at: h.at,
-      unread: false,
-      status: null,
-      assigneeName: null,
+      // The thread's state rides on the hit (null when searched on the device, offline).
+      unread: (h.unreadCount ?? 0) > 0,
+      status: h.status ?? null,
+      assignee: h.assignee ?? null,
+      assigneeName: h.assigneeName ?? null,
       pending: false,
     });
   }

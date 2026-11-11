@@ -7,27 +7,46 @@ import type { ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { ThreadStatus } from "../api";
 import { useI18n } from "../i18n";
-import { hueOf, initials } from "../lib/format";
+import { initials } from "../lib/format";
 import { corner, radius, screenEdge, spacing, useColors } from "../theme";
 import { Icons, Symbol, type IconSpec } from "./icons";
 import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
-export { EmptyState, IconButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented } from "./native";
+export { EmptyState, IconButton, LabeledPicker, ListActions, ListFilters, NativeIcon, RowMenu, Segmented, UndoBanner } from "./native";
 
-/** Initials on a stable hue, like Contacts/Mail (no platform avatar control exists). */
+/**
+ * A neutral monogram, like Contacts: white initials on a grey gradient (iOS), a Material tonal container (Android).
+ * No per-person colors: a list of 50 senders should read as text, not confetti. No platform avatar control exists.
+ */
 export function Avatar({ name, size = 40 }: { name: string; size?: number }) {
-  const { dark } = useColors();
-  const hue = hueOf(name.toLowerCase());
-  const bg = `hsl(${hue}, ${dark ? 45 : 60}%, ${dark ? 32 : 86}%)`;
-  const fg = `hsl(${hue}, 55%, ${dark ? 85 : 30}%)`;
+  const c = useColors();
+  const ios = process.env.EXPO_OS === "ios";
+  const letters = initials(name);
   return (
-    <View style={{ width: size, height: size, borderRadius: radius.full, backgroundColor: bg, alignItems: "center", justifyContent: "center" }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius.full,
+        backgroundColor: c.monogramFill,
+        ...(ios ? { backgroundImage: `linear-gradient(180deg, ${c.monogramTop}, ${c.monogramBottom})` } : {}),
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+      }}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
       {/* Initials scale with the circle, not with Dynamic Type (the circle does not grow). */}
-      <Text allowFontScaling={false} style={{ color: fg, fontWeight: "600", fontSize: size * 0.38 }}>
-        {initials(name)}
-      </Text>
+      {letters ? (
+        <Text allowFontScaling={false} numberOfLines={1} style={{ color: c.monogramText, fontWeight: ios ? "600" : "500", fontSize: size * 0.4, ...(ios ? { fontFamily: "ui-rounded" } : {}) }}>
+          {letters}
+        </Text>
+      ) : (
+        <Symbol icon={Icons.personFill} size={size * 0.55} color={c.monogramText} />
+      )}
     </View>
   );
 }

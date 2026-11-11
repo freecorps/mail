@@ -30,6 +30,8 @@ export interface RowMenuProps {
   actions: RowMenuAction[];
   href: string;
   disabled?: boolean;
+  /** iOS: show the destination as the context menu's preview (default true). */
+  preview?: boolean;
 }
 
 export interface IconButtonProps {
@@ -51,4 +53,18 @@ export interface ListActionsProps<T extends string> {
   /** Filters for the iOS navigation bar menu (Android shows them as chips in the list header instead). */
   filter?: ListFilterProps<T> | undefined;
   compose: { label: string; onPress(): void };
+  /** Enters Edit mode ("Editar" in the iOS navigation bar, a select action in the Android top app bar). */
+  edit?: { label: string; onPress(): void } | undefined;
+}
+
+export interface UndoBannerProps {
+  /** Reduce Motion: fade, no rise. */
+  reduced: boolean;
+}
+
+export interface LabeledPickerProps<T extends string | number> {
+  label: string;
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange(v: T): void;
 }

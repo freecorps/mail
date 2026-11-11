@@ -1,4 +1,5 @@
-// Assign (form sheet): team members as a native list with a checkmark on the current assignee.
+// Assign (form sheet): team members as a native list with a checkmark on the current assignee. From the list's Edit
+// mode it assigns several threads of one mailbox at once (`threadIds`, comma-separated), one optimistic call each.
 import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
 import { useConnectionState, useMutation } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
@@ -11,7 +12,8 @@ import { haptics } from "../lib/haptics";
 import { useColors } from "../theme";
 
 export function AssignScreen() {
-  const params = useLocalSearchParams<{ threadId: string; mailbox: string; current?: string }>();
+  const params = useLocalSearchParams<{ threadId: string; threadIds?: string; mailbox: string; current?: string }>();
+  const ids = params.threadIds ? params.threadIds.split(",").filter(Boolean) : [params.threadId];
   const current = params.current || null;
   const c = useColors();
   const { t } = useI18n();
@@ -21,7 +23,7 @@ export function AssignScreen() {
 
   const pick = (userId: string | null) => {
     haptics.selection();
-    void assign({ threadId: params.threadId, userId }).catch(() => {});
+    for (const threadId of ids) void assign({ threadId, userId }).catch(() => {});
     router.back();
   };
 

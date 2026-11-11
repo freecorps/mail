@@ -1,13 +1,15 @@
 // Settings tab: a native grouped form (SwiftUI Form on iOS, Material 3 list on Android). Language is a native picker;
-// sign-out is a destructive native button behind the system confirmation alert.
-import { Button, FieldGroup, Host, ListItem, Picker, Text } from "@expo/ui";
+// the conversation list's look (avatars, preview lines) and swipe actions are native toggles/pickers; sign-out is a
+// destructive native button behind the system confirmation alert.
+import { Button, FieldGroup, Host, ListItem, Picker, Switch, Text } from "@expo/ui";
 import { useConnectionState } from "@freecorps/ember-react-native";
 import { Alert } from "react-native";
 import { Icons } from "../components/icons";
-import { NativeIcon } from "../components/ui";
+import { LabeledPicker, NativeIcon } from "../components/ui";
 import { EMBER_URL, PUSH_TRANSPORT } from "../config";
 import { useI18n } from "../i18n";
-import type { LanguagePref } from "../prefs";
+import type { SwipeKind } from "../model/list-actions";
+import { setListPrefs, useListPrefs, type LanguagePref } from "../prefs";
 import { useSession } from "../session";
 import { useColors } from "../theme";
 
@@ -31,6 +33,21 @@ export function SettingsScreen() {
     { v: "pt-BR", label: "Português (Brasil)" },
     { v: "en", label: "English" },
   ];
+
+  const list = useListPrefs();
+  const ios = process.env.EXPO_OS === "ios";
+  const lineOptions = ([1, 2, 3] as const).map((n) => ({ value: n, label: t("settings.previewLines.n", { count: n }) }));
+  const swipeOptions = (["read", "archive", "assign", "none"] as SwipeKind[]).map((k) => ({ value: k, label: t(`settings.swipe.${k}`) }));
+  const pickers = {
+    lines: { label: t("settings.previewLines"), value: list.previewLines, options: lineOptions, onChange: (v: number) => setListPrefs({ previewLines: v as 1 | 2 | 3 }) },
+    leading: { label: t("settings.swipeLeading"), value: list.swipeLeading, options: swipeOptions, onChange: (v: SwipeKind) => setListPrefs({ swipeLeading: v }) },
+    trailing: { label: t("settings.swipeTrailing"), value: list.swipeTrailing, options: swipeOptions, onChange: (v: SwipeKind) => setListPrefs({ swipeTrailing: v }) },
+  };
+  const swipeFooter = (
+    <FieldGroup.SectionFooter>
+      <Text textStyle={{ color: colors.secondaryText }}>{t("settings.swipeFooter")}</Text>
+    </FieldGroup.SectionFooter>
+  );
 
   const confirmSignOut = () =>
     Alert.alert(t("settings.signOut"), t("settings.signOutConfirm"), [
@@ -57,6 +74,34 @@ export function SettingsScreen() {
             ))}
           </Picker>
         </FieldGroup.Section>
+
+        {/* iOS: labeled menu pickers in one Form section, like Mail's settings. Android: each dropdown under its title. */}
+        <FieldGroup.Section title={t("settings.appearance")}>
+          <Switch label={t("settings.avatars")} value={list.avatars} onValueChange={(v) => setListPrefs({ avatars: v })} />
+          {ios ? <LabeledPicker<number> {...pickers.lines} /> : null}
+        </FieldGroup.Section>
+        {ios ? null : (
+          <FieldGroup.Section title={pickers.lines.label}>
+            <LabeledPicker<number> {...pickers.lines} />
+          </FieldGroup.Section>
+        )}
+        {ios ? (
+          <FieldGroup.Section title={t("settings.swipe")}>
+            <LabeledPicker<SwipeKind> {...pickers.leading} />
+            <LabeledPicker<SwipeKind> {...pickers.trailing} />
+            {swipeFooter}
+          </FieldGroup.Section>
+        ) : (
+          <>
+            <FieldGroup.Section title={pickers.leading.label}>
+              <LabeledPicker<SwipeKind> {...pickers.leading} />
+            </FieldGroup.Section>
+            <FieldGroup.Section title={pickers.trailing.label}>
+              <LabeledPicker<SwipeKind> {...pickers.trailing} />
+              {swipeFooter}
+            </FieldGroup.Section>
+          </>
+        )}
 
         <FieldGroup.Section title={t("settings.notifications")}>
           <ListItem leading={<NativeIcon icon={Icons.bell} color={colors.tint} />}>

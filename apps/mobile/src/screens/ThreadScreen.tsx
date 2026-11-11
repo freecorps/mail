@@ -1,7 +1,7 @@
 // A conversation: messages (native text, HTML in a locked-down WebView), header actions as native toolbar items, and a
 // composer with a native segmented control (reply / internal note) and a native text field.
 import { Host, TextInput, type TextInputRef } from "@expo/ui";
-import { router, Stack, useLocalSearchParams } from "expo-router";
+import { router, Stack, useIsFocused, useIsPreview, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
 import { KeyboardAvoidingView, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
@@ -20,13 +20,19 @@ import { deliveryState, useThread, type MessageItem } from "../model/thread";
 import { composerMode, isPersonal, useMailboxes } from "../model/threads";
 import { replyAllCc } from "../model/forward";
 import { haptics } from "../lib/haptics";
+import { offerUndoArchive } from "../model/undo";
 import { corner, radius, screenEdge, spacing, type, useColors } from "../theme";
 
 export function ThreadScreen() {
   const { threadId } = useLocalSearchParams<{ threadId: string; mailbox?: string }>();
   const c = useColors();
   const { t } = useI18n();
-  const vm = useThread(threadId);
+  // A long-press preview from the list (iOS): read-only peek, nothing marked read, no header items, no composer. The
+  // route behind a preview stays mounted (unfocused) after the menu closes, so reading needs focus, not just "not a
+  // preview".
+  const preview = useIsPreview();
+  const focused = useIsFocused();
+  const vm = useThread(threadId, { markOnOpen: focused && !preview });
   const [loadImages, setLoadImages] = useState(false);
   const thread = vm.thread;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
@@ -69,6 +75,8 @@ export function ThreadScreen() {
               vm.toggleArchive();
               if (!closed) {
                 haptics.light();
+                const before = thread.status;
+                offerUndoArchive(t("undo.archived.one", { count: 1 }), [{ threadId, before }], vm.restoreStatus);
                 router.back();
               }
             }}
@@ -80,8 +88,8 @@ export function ThreadScreen() {
     </>
   );
 
-  if (vm.status === "loading") return <>{chrome}<Loading /></>;
-  if (!thread) return <>{chrome}<EmptyState icon={Icons.error} title={vm.error ? t("thread.notFound") : t("common.error")} body={vm.error?.message} /></>;
+  if (vm.status === "loading") return <>{preview ? null : chrome}<Loading /></>;
+  if (!thread) return <>{preview ? null : chrome}<EmptyState icon={Icons.error} title={vm.error ? t("thread.notFound") : t("common.error")} body={vm.error?.message} /></>;
 
   const header = (
     <View style={styles.header}>
@@ -111,7 +119,7 @@ export function ThreadScreen() {
   return (
     // Follows the keyboard's real frame (react-native-keyboard-controller), on both platforms.
     <KeyboardAvoidingView style={[styles.grow, { backgroundColor: c.groupedBackground }]} behavior="padding">
-      {chrome}
+      {preview ? null : chrome}
       <FlatList
         data={vm.items}
         keyExtractor={(i) => i.message._id}
@@ -130,7 +138,7 @@ export function ThreadScreen() {
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
-      {vm.canReply ? (
+      {preview ? null : vm.canReply ? (
         <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} />
       ) : (
         <ThemedText variant="subheadline" tone="secondary" style={styles.spam}>

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useConnectionState, useMutation, useQuerySnapshot } from "@freecorps/ember-react-native";
 import type { AttachmentArg } from "../lib/uploads";
-import { api, type Message, type Thread } from "../api";
+import { api, type Message, type Thread, type ThreadStatus } from "../api";
 import { isOptimisticId } from "../offline/optimistic";
 import type { LoadStatus, Source } from "./threads";
 
@@ -64,7 +64,8 @@ export function messageItems(messages: readonly Message[], urls: Record<string, 
   return messages.map((m) => ({ message: m, pending: isOptimisticId(m._id), cid: cidMap(m, urls) }));
 }
 
-export function useThread(threadId: string) {
+/** `markOnOpen: false` for a context-menu preview (iOS `Link.Preview`): peeking does not read the conversation. */
+export function useThread(threadId: string, { markOnOpen = true }: { markOnOpen?: boolean } = {}) {
   const s = useQuerySnapshot(api.inbox.thread, { threadId });
   const urlsSnap = useQuerySnapshot(api.inbox.attachments, { threadId });
   const { online } = useConnectionState();
@@ -82,10 +83,10 @@ export function useThread(threadId: string) {
   // Opening an unread thread marks it read, once per visit (marking it unread again afterwards sticks).
   const marked = useRef(false);
   useEffect(() => {
-    if (!thread || marked.current || isOptimisticId(thread._id)) return;
+    if (!markOnOpen || !thread || marked.current || isOptimisticId(thread._id)) return;
     marked.current = true;
     if (thread.unreadCount > 0) markRead({ threadId }).catch(() => {});
-  }, [thread, threadId, markRead]);
+  }, [thread, threadId, markRead, markOnOpen]);
 
   const swallow = (p: Promise<unknown>) => void p.catch(() => {});
   const toggleRead = useCallback(() => {
@@ -97,6 +98,8 @@ export function useThread(threadId: string) {
     swallow(setStatus({ threadId, status: thread.status === "closed" ? "open" : "closed" }));
   }, [thread, threadId, setStatus]);
   const assign = useCallback((userId: string | null) => swallow(assignTo({ threadId, userId })), [threadId, assignTo]);
+  /** Puts threads back to a status (undo of an archive). */
+  const restoreStatus = useCallback((id: string, status: ThreadStatus) => swallow(setStatus({ threadId: id, status })), [setStatus]);
   /** Resolves when the server confirmed (the optimistic message shows right away, also offline). */
   const reply = useCallback(
     (text: string, attachments?: AttachmentArg[], cc?: string[]) =>
@@ -116,6 +119,7 @@ export function useThread(threadId: string) {
     canReply: !!thread && thread.status !== "spam",
     toggleRead,
     toggleArchive,
+    restoreStatus,
     assign,
     reply,
     note,
