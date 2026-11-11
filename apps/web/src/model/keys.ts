@@ -1,5 +1,17 @@
 // Keyboard shortcuts (pure; tested). Single keys, Gmail-style, ignored while typing in a field.
-export type ShortcutAction = "next" | "prev" | "open" | "archive" | "reply" | "note" | "compose" | "search" | "unread" | "escape" | "help";
+export type ShortcutAction =
+  | "next"
+  | "prev"
+  | "open"
+  | "archive"
+  | "reply"
+  | "note"
+  | "compose"
+  | "search"
+  | "unread"
+  | "escape"
+  | "help"
+  | "sidebar";
 
 export interface KeyLike {
   key: string;
@@ -23,6 +35,7 @@ const KEYS: Record<string, ShortcutAction> = {
   u: "unread",
   Escape: "escape",
   "?": "help",
+  "[": "sidebar",
 };
 
 /** The action for a key press, or null. In a text field only Escape counts (it leaves the field). */
@@ -63,6 +76,7 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["n"], action: "note" },
   { keys: ["c"], action: "compose" },
   { keys: ["/"], action: "search" },
+  { keys: ["["], action: "sidebar" },
   { keys: ["Esc"], action: "escape" },
   { keys: ["?"], action: "help" },
 ];

@@ -118,6 +118,15 @@ export interface Member {
 export type SentThread = Thread & { lastSentAt: number };
 export type SentArgs = { mailbox: string; limit?: number };
 
+/** Lists across every mailbox the member sees (`inbox:view`), the home screen's views. */
+export const VIEWS = ["all", "assigned", "unread", "waiting"] as const;
+export type View = (typeof VIEWS)[number];
+export type ViewArgs = { view: View; status?: ThreadStatus; limit?: number };
+/** `partial`: some mailbox had more open/waiting threads than `assigned`/`unread` scan, so older matches may be missing. */
+export type ViewPage = { page: Thread[]; isDone: boolean; partial: boolean };
+/** A view's count (`inbox:views`); `capped` when a mailbox had more threads than the server counts. */
+export type ViewCount = { threads: number; unread: number; capped: boolean };
+
 export type PageOpts = { numItems: number; cursor: string | null };
 export type ThreadsArgs = { mailbox: string; status?: string; paginationOpts?: PageOpts };
 
@@ -301,6 +310,8 @@ export const api = {
     mailboxes: q<"query", Record<string, never>, Mailbox[]>("inbox:mailboxes"),
     threads: q<"query", ThreadsArgs, Page<Thread>>("inbox:threads"),
     sent: q<"query", SentArgs, { page: SentThread[]; isDone: boolean }>("inbox:sent"),
+    view: q<"query", ViewArgs, ViewPage>("inbox:view"),
+    views: q<"query", Record<string, never>, Record<View, ViewCount>>("inbox:views"),
     thread: q<"query", { threadId: string }, ThreadDetail>("inbox:thread"),
     search: q<"query", { query: string; mailbox?: string }, SearchHit[]>("inbox:search"),
     recent: q<"query", { threads?: number }, { threads: Thread[]; messages: Message[] }>("inbox:recent"),

@@ -20,10 +20,13 @@ export function AccountMenu({
   me,
   onShortcuts,
   onAdmin,
+  compact = false,
 }: {
   me: Extract<Me, { member: true }>;
   onShortcuts: () => void;
   onAdmin?: () => void;
+  /** Just the avatar (the sidebar's icon rail). */
+  compact?: boolean;
 }) {
   const { t } = useI18n();
   const prefs = usePrefs();
@@ -32,17 +35,26 @@ export function AccountMenu({
   const name = me.name ?? session.data?.user.name ?? email;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        aria-label={t("account.menu")}
-        className="pressable flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent data-[state=open]:bg-accent"
-      >
-        <Avatar name={name} seed={me.userId} className="size-7" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate font-medium text-foreground">{name}</span>
-          <span className="block truncate text-xs text-muted-foreground">{me.admin ? t("account.admin") : email}</span>
-        </span>
-        <ChevronsUpDown className="size-4 text-muted-foreground" aria-hidden="true" />
-      </DropdownMenuTrigger>
+      {compact ? (
+        <DropdownMenuTrigger
+          aria-label={t("account.menu")}
+          className="pressable grid size-9 place-items-center rounded-md hover:bg-accent data-[state=open]:bg-accent"
+        >
+          <Avatar name={name} seed={me.userId} className="size-7" />
+        </DropdownMenuTrigger>
+      ) : (
+        <DropdownMenuTrigger
+          aria-label={t("account.menu")}
+          className="pressable flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent data-[state=open]:bg-accent"
+        >
+          <Avatar name={name} seed={me.userId} className="size-7" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate font-medium text-foreground">{name}</span>
+            <span className="block truncate text-xs text-muted-foreground">{me.admin ? t("account.admin") : email}</span>
+          </span>
+          <ChevronsUpDown className="size-4 text-muted-foreground" aria-hidden="true" />
+        </DropdownMenuTrigger>
+      )}
       <DropdownMenuContent side="top" align="start" className="w-60">
         <DropdownMenuLabel className="font-normal">
           <span className="block truncate text-sm font-medium">{name}</span>

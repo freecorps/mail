@@ -20,7 +20,8 @@ import {
   urlAttrAllowed,
 } from "@/lib/emailHtml";
 import { bodyOf, HOSTILE_LEFTOVER, HOSTILE_SAMPLES, SAFE_SAMPLES } from "@freecorps/mail-email-html/test-samples";
-import { formatWhen, parseRecipients } from "@/lib/format";
+import { formatAge, formatWhen, initials, parseRecipients } from "@/lib/format";
+import { staleWaiting } from "@/model/today";
 import { inboxOptimisticUpdates, isOptimisticId } from "@/lib/optimistic";
 import { parsePrefs, resolveTheme } from "@/lib/prefs";
 import { cn } from "@/lib/utils";
@@ -106,6 +107,26 @@ describe("email HTML", () => {
 });
 
 describe("format and i18n", () => {
+  it("makes initials from words with letters, by code point", () => {
+    expect(initials("Fernanda Oliveira 🌻")).toBe("FO");
+    expect(initials("🌻")).toBe("?");
+    expect(initials("ana.beatriz@x.test")).toBe("AB");
+    expect(initials("Élise Østergaard")).toBe("ÉØ");
+  });
+
+  it("says how long ago, in the largest whole unit", () => {
+    const now = new Date(2026, 10, 10, 12, 0).getTime();
+    expect(formatAge(now - 5 * 60_000, now, "en")).toBe("5 min. ago");
+    expect(formatAge(now - 26 * 3_600_000, now, "en")).toBe("26 hr. ago");
+    expect(formatAge(now - 3 * 86_400_000, now, "pt-BR")).toBe("há 3 dias");
+  });
+
+  it("finds conversations waiting for more than a day, the longest first", () => {
+    const now = 10 * 86_400_000;
+    const at = (h: number) => ({ ...thread(), _id: `w${h}`, status: "waiting" as const, lastMessageAt: now - h * 3_600_000 });
+    expect(staleWaiting([at(2), at(30), at(80), at(23)], now).map((t) => t._id)).toEqual(["w80", "w30"]);
+  });
+
   it("formats list times relative to now", () => {
     const now = new Date(2026, 10, 5, 15, 0).getTime();
     expect(formatWhen(new Date(2026, 10, 5, 9, 5).getTime(), now, "pt-BR")).toBe("09:05");
@@ -130,6 +151,7 @@ describe("keyboard", () => {
     expect(shortcutFor({ key: "j" }, false)).toBe("next");
     expect(shortcutFor({ key: "e" }, false)).toBe("archive");
     expect(shortcutFor({ key: "/" }, false)).toBe("search");
+    expect(shortcutFor({ key: "[" }, false)).toBe("sidebar");
     expect(shortcutFor({ key: "c", metaKey: true }, false)).toBeNull();
     expect(shortcutFor({ key: "r" }, true)).toBeNull();
     expect(shortcutFor({ key: "Escape" }, true)).toBe("escape");
@@ -228,9 +250,29 @@ describe("theme", () => {
   });
 
   it("parses stored prefs field by field, with defaults for anything unknown", () => {
-    expect(parsePrefs(null)).toEqual({ theme: "system", locale: null, density: "comfortable" });
-    expect(parsePrefs({ theme: "dark", locale: "en", density: "compact" })).toEqual({ theme: "dark", locale: "en", density: "compact" });
-    expect(parsePrefs({ theme: "neon", locale: "fr", density: 3 })).toEqual({ theme: "system", locale: null, density: "comfortable" });
+    const defaults = {
+      theme: "system",
+      locale: null,
+      density: "comfortable",
+      reading: "split",
+      sidebarCollapsed: false,
+      panes: { sidebar: 248, list: 380 },
+    };
+    expect(parsePrefs(null)).toEqual(defaults);
+    expect(parsePrefs({ theme: "dark", locale: "en", density: "compact", reading: "focus", sidebarCollapsed: true })).toEqual({
+      ...defaults,
+      theme: "dark",
+      locale: "en",
+      density: "compact",
+      reading: "focus",
+      sidebarCollapsed: true,
+    });
+    expect(parsePrefs({ theme: "neon", locale: "fr", density: 3, reading: "zen", sidebarCollapsed: "yes" })).toEqual(defaults);
+  });
+
+  it("keeps pane widths inside their limits", () => {
+    expect(parsePrefs({ panes: { sidebar: 10, list: 9999 } }).panes).toEqual({ sidebar: 200, list: 640 });
+    expect(parsePrefs({ panes: { sidebar: 301.6, list: "wide" } }).panes).toEqual({ sidebar: 302, list: 380 });
   });
 });
 
