@@ -463,8 +463,10 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
     </>
   );
 
-  if (vm.status === "loading") return <>{preview ? null : chrome}<Loading /></>;
-  if (!thread) return <>{preview ? null : chrome}<EmptyState icon={Icons.error} title={vm.error || vm.gone ? t("thread.notFound") : t("common.error")} body={vm.error?.message} /></>;
+  // The chrome goes last: on Android the bottom toolbar is a view of this screen, and a sibling after it (the list)
+  // would sit on top and take its taps.
+  if (vm.status === "loading") return <><Loading />{preview ? null : chrome}</>;
+  if (!thread) return <><EmptyState icon={Icons.error} title={vm.error || vm.gone ? t("thread.notFound") : t("common.error")} body={vm.error?.message} />{preview ? null : chrome}</>;
 
   const statusItems: MenuItem[] = STATUS_CHOICES.map((s) => ({
     key: s,
@@ -610,7 +612,6 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
   const items = mergeTimeline(messages, (i) => i.message.at, events);
   return (
     <View style={[styles.grow, { backgroundColor: c.background }]}>
-      {preview ? null : chrome}
       <FlatList
         data={items}
         keyExtractor={(i) => (i.kind === "message" ? i.item.message._id : `ev:${i.event.id}`)}
@@ -647,6 +648,7 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
       ) : !ios && icons ? (
         <ReplyFab label={t("thread.reply")} onPress={startReply} />
       ) : null}
+      {preview ? null : chrome}
     </View>
   );
 }
