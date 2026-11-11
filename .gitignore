@@ -11,4 +11,13 @@ _generated/
 .expo/
 ios/
 android/
+# …except the native sources of apps/mobile's local Expo modules (apps/mobile/.gitignore says the same). EAS Build
+# reads every .gitignore on its own and drops a file any of them ignores, so the root has to say it too, or the
+# build gets empty modules/*/ios and the fingerprint differs from the one computed outside the build.
+!apps/mobile/modules/*/ios/
+!apps/mobile/modules/*/android/
+apps/mobile/modules/*/ios/build/
+apps/mobile/modules/*/android/build/
+apps/mobile/modules/*/android/.gradle/
+apps/mobile/modules/*/android/.cxx/
 .tmp/
