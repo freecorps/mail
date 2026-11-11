@@ -278,6 +278,20 @@ export const setStatus = mutation({
   },
 });
 
+/**
+ * Deletes a conversation for good: its messages, notes and files (the email component's `deleteThread`; a reply still
+ * waiting to go is canceled). Admins in a shared mailbox, the owner in a personal one; other members cannot.
+ */
+export const deleteThread = mutation({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    const { t, m } = threadOf(ctx, a.threadId);
+    const owner = ownerOf(ctx.db, t.thread.mailbox);
+    if (owner !== null ? owner !== m.userId : !m.admin) throw new Error("only an admin (or a personal mailbox's owner) deletes a conversation");
+    return ctx.runMutation(email.deleteThread, a) as { deleted: boolean; canceled?: number };
+  },
+});
+
 export const markUnread = mutation({
   args: { threadId: v.string() },
   handler: (ctx, a) => {

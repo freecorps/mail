@@ -14,6 +14,7 @@
 //   GET    /inbox/mailboxes        POST /inbox/mailboxes { name, address, display_name?, auto_reply?, owner?, catch_all?, retention? }
 //   GET    /inbox/threads?mailbox=&status=&cursor=   GET /inbox/threads/:id   POST /inbox/threads/:id/reply { text }
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
+//   DELETE /inbox/threads/:id (full_access: the conversation, its messages and files, for good)
 //   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
 //   GET    /webhooks               POST /webhooks { endpoint, events, project?, mailboxes?, description? } → signing_secret
 //   GET    /webhooks/:id (no secret: create and rotate return it)   PATCH /webhooks/:id { endpoint?, events?, project?, mailboxes?, description?, enabled? }
@@ -622,6 +623,19 @@ http.route({
     if (action === "status") return json({ status: await ctx.runMutation(email.setStatus, { threadId: id ?? "", status: b.status ?? "" }) });
     if (action === "read") return json({ ok: await ctx.runMutation(email.markRead, { threadId: id ?? "" }) });
     throw new ApiError(404, "not_found", "Not found");
+  }),
+});
+http.route({
+  pathPrefix: "/inbox/threads/",
+  method: "DELETE",
+  handler: route(async (ctx, _r, p, url) => {
+    need(p);
+    const [id, sub] = tail(url, "/inbox/threads/");
+    if (sub) throw new ApiError(404, "not_found", "Not found");
+    const t = (await ctx.runQuery(email.thread, { threadId: id ?? "" })) as { thread: { mailbox: string } } | null;
+    if (!t) throw new ApiError(404, "not_found", "Thread not found");
+    notPersonal(await personalMailboxes(ctx), t.thread.mailbox);
+    return json({ object: "thread", id, ...((await ctx.runMutation(email.deleteThread, { threadId: id ?? "" })) as object) });
   }),
 });
 http.route({

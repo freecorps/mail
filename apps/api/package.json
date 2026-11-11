@@ -14,18 +14,18 @@
     "domains": "bun scripts/domains.ts"
   },
   "dependencies": {
-    "@freecorps/ember-auth": "^0.5.9",
-    "@freecorps/ember-email": "^0.5.9",
-    "@freecorps/ember-push": "^0.5.9",
-    "@freecorps/ember-rate-limit": "^0.5.9",
-    "@freecorps/ember-runtime": "^0.5.9",
-    "@freecorps/ember-server": "^0.5.9",
-    "@freecorps/ember-values": "^0.5.9"
+    "@freecorps/ember-auth": "^0.5.10",
+    "@freecorps/ember-email": "^0.5.10",
+    "@freecorps/ember-push": "^0.5.10",
+    "@freecorps/ember-rate-limit": "^0.5.10",
+    "@freecorps/ember-runtime": "^0.5.10",
+    "@freecorps/ember-server": "^0.5.10",
+    "@freecorps/ember-values": "^0.5.10"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.5.1",
     "@cloudflare/workers-types": "^5.20261104.1",
-    "@freecorps/ember-cli": "^0.5.9",
+    "@freecorps/ember-cli": "^0.5.10",
     "wrangler": "^4.157.0",
     "@freecorps/mail-sdk": "workspace:*"
   }

@@ -14,8 +14,10 @@ import {
   Mail,
   MailOpen,
   StickyNote,
+  Trash2,
   UserRound,
 } from "lucide-react";
+import { useMutation } from "@freecorps/ember-react";
 import { toast } from "sonner";
 import { Avatar } from "@/components/Avatar";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -42,15 +44,20 @@ import { forwardedFiles, forwardSubject, forwardText, replyAllCc } from "@/model
 import { ComposeDialog, type ForwardSource } from "./ComposeDialog";
 import { Composer, type ComposerHandle } from "./Composer";
 import { EmailFrame } from "./EmailFrame";
+import { Confirm } from "./admin/parts";
+import { api } from "@/lib/api";
 
 export function ThreadView({
   threadId,
   onBack,
   composerRef,
   onOpenThread,
+  admin = false,
 }: {
   threadId: string;
   onBack: () => void;
+  /** The signed-in member is an admin: they may delete a shared mailbox's conversation. */
+  admin?: boolean;
   composerRef: Ref<ComposerHandle>;
   /** Opens another thread (a forwarded message's new conversation). */
   onOpenThread?: (threadId: string) => void;
@@ -61,6 +68,10 @@ export function ThreadView({
   const boxes = useMailboxes().mailboxes;
   // In your own mailbox there is nobody to assign to and nobody to leave a note for.
   const personal = isPersonal(boxes, vm.thread?.mailbox);
+  // Deleting is for admins (shared mailboxes) and for the owner (their own mailbox).
+  const canDelete = personal || admin;
+  const deleteThread = useMutation(api.inbox.deleteThread);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const own = boxes.find((b) => b.name === vm.thread?.mailbox)?.address ?? "";
   const others = useMemo(
     () =>
@@ -168,6 +179,16 @@ export function ThreadView({
           <Action label={unread ? t("thread.markRead") : t("thread.markUnread")} kbd="u" onClick={vm.toggleRead}>
             {unread ? <MailOpen /> : <Mail />}
           </Action>
+          {canDelete && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" aria-label={t("thread.delete")} onClick={() => setConfirmDelete(true)}>
+                  <Trash2 aria-hidden="true" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("thread.delete")}</TooltipContent>
+            </Tooltip>
+          )}
           {!personal && (
             <DropdownMenu>
               <Tooltip>
@@ -200,6 +221,22 @@ export function ThreadView({
           )}
         </div>
       </header>
+      <Confirm
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={t("thread.deleteTitle")}
+        body={t("thread.deleteBody")}
+        action={t("thread.delete")}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          deleteThread({ threadId })
+            .then(() => {
+              toast(t("thread.deleted"));
+              onBack();
+            })
+            .catch((e: Error) => toast.error(e.message));
+        }}
+      />
 
       <ol
         ref={scroller}
