@@ -32,39 +32,85 @@ export const isLinkRefusal = (e: unknown): boolean => /scheduled send can't link
 export type ScheduleOutcome = "done" | "queued" | "failed";
 
 /**
- * A scheduled send's states. Online, it counts as scheduled only once the server confirms it (`done`): the composer
- * stays open meanwhile and keeps its text on a refusal (`failed`). Offline, the mutation waits in the queue (`queued`):
- * that is "will be scheduled when it connects", not success; once it reaches the server, `later` (confirmed) or
- * `failed` (refused: the draft the send would have consumed is still there) says how it ended.
+ * A scheduled send's states. First the draft step (`prepare`: the draft written and its id known), then the send with
+ * that id (`send`: enqueued); only then is anything said. Online, it counts as scheduled once the server confirms it
+ * (`done`): the composer stays open meanwhile and keeps its text on a refusal (`failed`). Offline, the mutation waits in
+ * the queue (`queued`): that is "will be scheduled when it connects", not success; once it reaches the server, `later`
+ * (confirmed) or `failed` (refused: the draft the send would have consumed is still there) says how it ended.
  */
-export async function runScheduled(o: {
+export async function runScheduled<P>(o: {
   connected: boolean;
-  fire(): Promise<unknown>;
-  done(): void;
-  queued(): void;
-  later(): void;
-  failed(e: unknown): void;
+  prepare(): Promise<P>;
+  send(prepared: P): Promise<unknown>;
+  done(prepared: P): void;
+  queued(prepared: P): void;
+  later(prepared: P): void;
+  /** `prepared`: absent when the draft step itself failed. */
+  failed(e: unknown, prepared?: P): void;
 }): Promise<ScheduleOutcome> {
-  let p: Promise<unknown>;
+  let prepared: P;
   try {
-    p = o.fire();
+    prepared = await o.prepare();
   } catch (e) {
     o.failed(e);
     return "failed";
   }
+  let p: Promise<unknown>;
+  try {
+    p = o.send(prepared);
+  } catch (e) {
+    o.failed(e, prepared);
+    return "failed";
+  }
   if (!o.connected) {
-    o.queued();
-    p.then(o.later, o.failed);
+    o.queued(prepared);
+    p.then(
+      () => o.later(prepared),
+      (e: unknown) => o.failed(e, prepared),
+    );
     return "queued";
   }
   try {
     await p;
   } catch (e) {
-    o.failed(e);
+    o.failed(e, prepared);
     return "failed";
   }
-  o.done();
+  o.done(prepared);
   return "done";
+}
+
+/** The draft parts of a send (a `createDraftSaver`). */
+export interface DraftHandle {
+  flush(): Promise<void>;
+  detach(): { id: string | null; release(): void };
+  adopt(id: string): void;
+}
+
+/** What the draft step found: the id the send carries (null: a draft first saved offline), and the taken draft. */
+export interface PreparedDraft {
+  used: string | null;
+  release(): void;
+  /** The send was refused and the composer is still open: it goes on editing that same draft. */
+  restore(): void;
+}
+
+/**
+ * The draft step of a scheduled send: the latest text is written and the draft the send takes is known. Online, after
+ * the save answers (so the send carries its id and the server deletes it with the send). Offline the save waits in the
+ * queue ahead of the send; the id is the one known already, and a draft first saved offline, which has none yet, is
+ * deleted by `releaseDraft` once the schedule went through. Either way the saver starts a new draft for what comes next.
+ */
+export async function draftStep(d: DraftHandle, connected: boolean): Promise<PreparedDraft> {
+  if (connected) await d.flush();
+  else void d.flush();
+  const taken = d.detach();
+  return { used: taken.id, release: taken.release, restore: () => (taken.id ? d.adopt(taken.id) : undefined) };
+}
+
+/** The schedule went through: a draft the send did not carry by id is deleted now (the server deleted the other). */
+export function releaseDraft(p: PreparedDraft): void {
+  if (!p.used) p.release();
 }
 
 /** What this device knows of a forward it scheduled (the server keeps no link from the new thread to the original). */

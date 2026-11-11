@@ -20,7 +20,7 @@ import { useSendLater } from "../model/send";
 import { corner, radius, spacing, type, useColors } from "../theme";
 import { Icons, type IconSpec } from "./icons";
 import { IconButton, MenuButton, type MenuItem } from "./native";
-import { canSchedule, isLinkRefusal, runScheduled } from "../model/schedule";
+import { canSchedule, draftStep, isLinkRefusal, releaseDraft, runScheduled } from "../model/schedule";
 import { notify } from "../model/undo";
 import { setWhenRequest } from "../model/when-request";
 import { haptics } from "../lib/haptics";
@@ -217,22 +217,20 @@ export function QuickReply({
       setScheduling(true);
       saver.pause();
       const when = formatLater(sendAt!, Date.now(), locale, clock24, deviceTimeZone());
-      let used: string | null = null;
       let closed = false;
+      // The bar closes; the draft is released once the schedule went through (kept on a refusal).
       const leave = () => {
         closed = true;
-        saver.sent(used);
         setScheduling(false);
         clearBar();
       };
       void runScheduled({
         connected,
-        fire: async () => {
-          await saver.flush();
-          used = saver.id();
-          return reply(used, sendAt);
-        },
-        done: () => {
+        // The draft step first (written, its id known), then the send with that id: only then is anything said.
+        prepare: () => draftStep(saver, connected),
+        send: (prepared) => reply(prepared.used, sendAt),
+        done: (prepared) => {
+          releaseDraft(prepared);
           haptics.success();
           notify(t("compose.scheduledAt", { when }));
           leave();
@@ -241,10 +239,16 @@ export function QuickReply({
           notify(t("compose.scheduleQueued", { when }));
           leave();
         },
-        later: () => notify(t("compose.scheduledAt", { when })),
-        failed: (e) => {
+        later: (prepared) => {
+          releaseDraft(prepared);
+          notify(t("compose.scheduledAt", { when }));
+        },
+        failed: (e, prepared) => {
           notify(isLinkRefusal(e) ? t("compose.scheduleRefused") : t("compose.scheduleFailed"));
-          if (!closed) setScheduling(false);
+          // Still open (online): the text stays, and editing goes on saving that same draft.
+          if (closed) return;
+          prepared?.restore();
+          setScheduling(false);
         },
       });
       return;

@@ -30,7 +30,7 @@ import type { AttachmentArg } from "../lib/uploads";
 import { keepUndoneCompose, takeUndoneCompose } from "../model/undone-compose";
 import { newRequestId } from "../lib/request-id";
 import { useSendLater } from "../model/send";
-import { canSchedule, isLinkRefusal, runScheduled } from "../model/schedule";
+import { canSchedule, draftStep, isLinkRefusal, releaseDraft, runScheduled } from "../model/schedule";
 import { rememberScheduledForward } from "../model/scheduled-forwards";
 import { notify } from "../model/undo";
 import { setWhenRequest } from "../model/when-request";
@@ -408,11 +408,8 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
       sendAt,
       requestId: newRequestId(),
     };
-    let used: string | undefined;
-    const fire = async (): Promise<unknown> => {
-      // The draft is written first, so the send consumes it (and a refusal leaves it as it was).
-      await saver.flush();
-      used = saver.id() ?? undefined;
+    // The mutation itself, with the draft id the draft step found (it consumes that draft on the server).
+    const sendWith = async (used: string | null): Promise<unknown> => {
       const draft = used ? { draftId: used } : {};
       const copies = o.cc.length ? { cc: o.cc } : {};
       if (isReply && init.threadId) {
@@ -430,16 +427,19 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
       if (!from) throw new Error("no mailbox");
       return composeM({ mailbox: from, to: o.to.map((x) => x.trim()), ...copies, subject: subject.trim(), text: o.text, ...extra, ...draft });
     };
+    // The sheet closes; no more autosaves (the draft is released once the schedule went through, kept on a refusal).
     const leave = () => {
       done.current = true;
-      saver.sent(used);
       setLeaving(true);
     };
     const refused = (e: unknown) => notify(isLinkRefusal(e) ? t("compose.scheduleRefused") : t("compose.scheduleFailed"));
     void runScheduled({
       connected,
-      fire,
-      done: () => {
+      // The draft step first (written, its id known), then the send with that id: only then is anything said.
+      prepare: () => draftStep(saver, connected),
+      send: (prepared) => sendWith(prepared.used),
+      done: (prepared) => {
+        releaseDraft(prepared);
         haptics.success();
         notify(t("compose.scheduledAt", { when }));
         leave();
@@ -448,11 +448,16 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
         notify(t("compose.scheduleQueued", { when }));
         leave();
       },
-      later: () => notify(t("compose.scheduledAt", { when })),
-      failed: (e) => {
+      later: (prepared) => {
+        releaseDraft(prepared);
+        notify(t("compose.scheduledAt", { when }));
+      },
+      failed: (e, prepared) => {
         refused(e);
-        // Still open (online): the text stays and editing saves the draft again.
-        if (!done.current) setScheduling(false);
+        // Still open (online): the text stays, and editing goes on saving that same draft.
+        if (done.current) return;
+        prepared?.restore();
+        setScheduling(false);
       },
     });
   };

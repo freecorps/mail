@@ -9,7 +9,8 @@ import { combineDateTime, formatAgo, formatLater, fromWallClock, sendPresets, sn
 import { describe as describeEntry, mergeTimeline, quiet } from "../src/model/activity";
 import { keepsArchived, keepsSnoozed, parseListPrefs, swipeKinds } from "../src/model/list-actions";
 import { createPresence, effectiveState, presenceLine } from "../src/model/presence";
-import { ATTACH_LIMIT, canSchedule, editPlan, isLinkRefusal, runScheduled, scheduledOf } from "../src/model/schedule";
+import { ATTACH_LIMIT, canSchedule, draftStep, editPlan, isLinkRefusal, releaseDraft, runScheduled, scheduledOf } from "../src/model/schedule";
+import { createDraftSaver } from "../src/model/draft-saver";
 import { pruneForwards } from "../src/model/scheduled-forwards";
 import { menuEntryEnabled, menuEntryKind } from "../src/components/native/menu-items";
 import { canAddTag, createBlock, moveTag, tagSearch, threadTags, tagIndex, toggleTag, visibleChips, THREAD_TAGS_MAX } from "../src/model/tags";
@@ -398,34 +399,123 @@ describe("scheduled sends", () => {
     const hooks = { done: () => log.push("done"), queued: () => log.push("queued"), later: () => log.push("later"), failed: (e: unknown) => log.push(`failed:${(e as Error).message}`) };
     let settle!: { ok(): void; no(e: Error): void };
     const pending = () => new Promise<void>((ok, no) => (settle = { ok: () => ok(), no }));
+    const prepare = async () => "draft-1";
     // Online: nothing is said until the answer; then done.
-    const online = runScheduled({ connected: true, fire: pending, ...hooks });
-    await Promise.resolve();
+    const online = runScheduled({ connected: true, prepare, send: pending, ...hooks });
+    await new Promise((r) => setTimeout(r, 0));
     expect(log).toEqual([]);
     settle.ok();
     expect(await online).toBe("done");
     expect(log).toEqual(["done"]);
     // Online, refused: failed only (the composer keeps its text).
     log.length = 0;
-    const refused = runScheduled({ connected: true, fire: pending, ...hooks });
+    const refused = runScheduled({ connected: true, prepare, send: pending, ...hooks });
+    await new Promise((r) => setTimeout(r, 0));
     settle.no(new Error("a scheduled send can't link files"));
     expect(await refused).toBe("failed");
     expect(log).toEqual(["failed:a scheduled send can't link files"]);
-    // Offline: queued at once (not success), then how it ended once it reached the server.
+    // Offline: queued (not success), then how it ended once it reached the server.
     log.length = 0;
-    expect(await runScheduled({ connected: false, fire: pending, ...hooks })).toBe("queued");
+    expect(await runScheduled({ connected: false, prepare, send: pending, ...hooks })).toBe("queued");
     expect(log).toEqual(["queued"]);
     settle.ok();
     await Promise.resolve();
     expect(log).toEqual(["queued", "later"]);
     log.length = 0;
-    await runScheduled({ connected: false, fire: pending, ...hooks });
+    await runScheduled({ connected: false, prepare, send: pending, ...hooks });
     settle.no(new Error("refused"));
     await new Promise((r) => setTimeout(r, 0));
     expect(log).toEqual(["queued", "failed:refused"]);
-    // A fire that throws before any request: failed.
+    // A send that throws before any request: failed.
     log.length = 0;
-    expect(await runScheduled({ connected: true, fire: () => { throw new Error("no mailbox"); }, ...hooks })).toBe("failed");
+    expect(await runScheduled({ connected: true, prepare, send: () => { throw new Error("no mailbox"); }, ...hooks })).toBe("failed");
+  });
+
+  it("nothing is said before the draft step finished and the send went out with that step's draft id", async () => {
+    const order: string[] = [];
+    let finishPrep!: () => void;
+    const run = runScheduled({
+      connected: false,
+      prepare: () => new Promise<string>((ok) => (finishPrep = () => (order.push("prepared"), ok("d1")))),
+      send: (id) => (order.push(`send:${id}`), new Promise(() => {})),
+      done: () => order.push("done"),
+      queued: (id) => order.push(`queued:${id}`),
+      later: () => order.push("later"),
+      failed: () => order.push("failed"),
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(order).toEqual([]);
+    finishPrep();
+    expect(await run).toBe("queued");
+    expect(order).toEqual(["prepared", "send:d1", "queued:d1"]);
+  });
+
+  describe("the draft a scheduled send takes", () => {
+    // A draft saver whose saves the test answers (offline: they wait), and what it deleted.
+    function saverWith() {
+      const saves: Array<{ args: Record<string, unknown>; answer(id: string): void }> = [];
+      const removed: string[] = [];
+      const saver = createDraftSaver({
+        save: (args) => new Promise((ok) => saves.push({ args: args as never, answer: (id) => ok({ id }) })),
+        remove: async (id) => void removed.push(id),
+        delay: 1_000_000,
+      });
+      return { saver, saves, removed };
+    }
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const args = (text: string) => ({ kind: "reply" as const, threadId: "t1", text, cc: [], attachments: [] });
+
+    it("offline, a draft the server knows: the send carries its id (the server deletes it with the send), and the saver starts anew", async () => {
+      const { saver, saves, removed } = saverWith();
+      saver.adopt("d1");
+      saver.update(args("Amanhã cedo"));
+      const p = await draftStep(saver, false);
+      expect(p.used).toBe("d1");
+      // The latest text went into the queue ahead of the send, on that draft.
+      expect(saves.map((x) => x.args)).toEqual([expect.objectContaining({ id: "d1", text: "Amanhã cedo" })]);
+      releaseDraft(p);
+      await tick();
+      expect(removed).toEqual([]);
+      // What is typed next is a new draft (written after the queued save, which answers first).
+      saver.update(args("Outra"));
+      void saver.flush();
+      saves[0]!.answer("d1");
+      await tick();
+      expect(saves[1]!.args.id).toBeUndefined();
+      expect(saves[1]!.args.text).toBe("Outra");
+    });
+
+    it("offline, a draft first saved offline (no id yet): sent without one, it is deleted once the schedule went through and its save answered", async () => {
+      const { saver, saves, removed } = saverWith();
+      saver.update(args("Oi"));
+      const p = await draftStep(saver, false);
+      expect(p.used).toBeNull();
+      expect(saves).toHaveLength(1);
+      // Confirmed: released; the delete waits for the save's answer (its id).
+      releaseDraft(p);
+      await tick();
+      expect(removed).toEqual([]);
+      saves[0]!.answer("d9");
+      await tick();
+      expect(removed).toEqual(["d9"]);
+      // The answer no longer belongs to the saver (it starts anew).
+      expect(saver.id()).toBeNull();
+    });
+
+    it("online: the send carries the id the save just got; refused, the composer goes on with that same draft", async () => {
+      const { saver, saves } = saverWith();
+      saver.update(args("Oi"));
+      const step = draftStep(saver, true);
+      saves[0]!.answer("d5");
+      const p = await step;
+      expect(p.used).toBe("d5");
+      // Refused while open: editing saves the same draft again.
+      p.restore();
+      saver.update(args("Oi, corrigido"));
+      await tick();
+      void saver.flush();
+      expect(saves[1]!.args).toMatchObject({ id: "d5", text: "Oi, corrigido" });
+    });
   });
 
   it("menus: an item with a submenu opens it only when enabled and not empty; else a disabled plain item", () => {
