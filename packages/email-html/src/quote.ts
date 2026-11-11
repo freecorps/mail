@@ -134,7 +134,9 @@ export function splitQuotedText(text: string): QuoteSplit | null {
     const line = lines[i]!;
     // "On Wed, … <a@x> wrote:" on one line, or wrapped onto the next one.
     if (ATTRIBUTION_START.test(line)) {
-      const one = ATTRIBUTION_END.test(line) ? i + 1 : i + 1 < n && ATTRIBUTION_END.test(lines[i + 1]!) ? i + 2 : -1;
+      // Wrapped over two lines only when the first holds a date (a digit), as in HTML: "On my side…" then "Bia wrote:"
+      // is body.
+      const one = ATTRIBUTION_END.test(line) ? i + 1 : i + 1 < n && /\d/.test(line) && ATTRIBUTION_END.test(lines[i + 1]!) ? i + 2 : -1;
       if (one > 0 && hasQuoted(one) && onlyQuoted(one)) cut = i;
       continue;
     }

@@ -119,6 +119,15 @@ describe("text quotes", () => {
   });
 });
 
+describe("text quote wrap", () => {
+  it("a two-line attribution needs a date on its first line", () => {
+    const wrapped = "Thanks!\n\nOn Wed, Nov 5, 2026 at 10:12 AM Acme <s@acme.test>\nwrote:\n> Fixed?";
+    expect(splitQuotedText(wrapped)?.body).toBe("Thanks!");
+    const dateless = "Hi\nOn my side it works.\nBia wrote:\n> Still broken?";
+    expect(splitQuotedText(dateless)?.body).toBe("Hi\nOn my side it works.\nBia wrote:");
+  });
+});
+
 describe("snippets", () => {
   it("drop the trailing attribution and quote; keep everything else", async () => {
     const { snippetWithoutQuote } = await import("../src/quote");

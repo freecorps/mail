@@ -191,6 +191,13 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
     },
     [navigate],
   );
+  const step = useCallback(
+    (threadId: string) => {
+      setCursor(threadId);
+      navigate({ thread: threadId });
+    },
+    [navigate],
+  );
 
   // Title with the unread count (tabs in the background still tell there is mail).
   useEffect(() => {
@@ -516,8 +523,9 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
       key={route.thread}
       threadId={route.thread}
       onBack={() => navigate({ thread: null }, { push: true })}
-      onPrev={prevId ? () => open(prevId) : undefined}
-      onNext={nextId ? () => open(nextId) : undefined}
+      // Stepping replaces the history entry, as j/k do (Back leaves the conversation, not each step).
+      onPrev={prevId ? () => step(prevId) : undefined}
+      onNext={nextId ? () => step(nextId) : undefined}
       showBack={overlay}
       composerRef={composer}
       // From the context panel (an earlier conversation): the list cursor follows, so j/k continue from it.
