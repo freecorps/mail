@@ -1,6 +1,7 @@
 // "Atividade" (form sheet, from the conversation's Mais menu): the thread's whole timeline, newest first, as native
 // rows: who did what (assignments, status, tags, snoozes, scheduled sends) and every delivery event, with when.
-import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState, useQuery } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { api } from "../api";
@@ -42,7 +43,7 @@ export function ActivityScreen() {
       ) : !events.length ? (
         <EmptyState icon={Icons.activity} title={t("activity.empty")} />
       ) : (
-        <Host style={{ flex: 1 }} seedColor={c.tint}>
+        <BrandHost style={{ flex: 1 }}>
           <FieldGroup>
             <FieldGroup.Section>
               {events.map((e) => (
@@ -56,7 +57,7 @@ export function ActivityScreen() {
               ))}
             </FieldGroup.Section>
           </FieldGroup>
-        </Host>
+        </BrandHost>
       )}
     </>
   );

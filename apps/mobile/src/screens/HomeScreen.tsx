@@ -2,7 +2,8 @@
 // waiting: apps/api `inbox:view`) and a "Mailboxes" section (icon, name, the address as subtitle, unread count), as a
 // native grouped list (SwiftUI Form / Material 3 list). Compose: a navigation bar button on iOS, a FAB on Android.
 // Offline / pending shows as a row of its own.
-import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState } from "@freecorps/ember-react-native";
 import { router, useIsFocused } from "expo-router";
 import type { InboxView, Mailbox, ViewCounts } from "../api";
@@ -64,7 +65,7 @@ export function HomeScreen() {
     const offline = !conn.online || conn.pendingMutations > 0;
     const trailing = (s: string | null) => (s ? <Text textStyle={{ color: c.secondaryText }}>{s}</Text> : undefined);
     body = (
-      <Host style={{ flex: 1 }} seedColor={c.tint}>
+      <BrandHost style={{ flex: 1 }}>
         <FieldGroup>
           <FieldGroup.Section title={t("home.views")}>
             {(["all", "assigned", "unread", "waiting", "snoozed"] as const).map((v) => (
@@ -122,7 +123,7 @@ export function HomeScreen() {
             </FieldGroup.Section>
           ) : null}
         </FieldGroup>
-      </Host>
+      </BrandHost>
     );
   }
 

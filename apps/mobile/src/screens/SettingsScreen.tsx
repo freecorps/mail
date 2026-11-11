@@ -1,7 +1,8 @@
 // Settings tab: a native grouped form (SwiftUI Form on iOS, Material 3 list on Android). Language is a native picker;
 // the conversation list's look (avatars, preview lines) and swipe actions are native toggles/pickers; sign-out is a
 // destructive native button behind the system confirmation alert.
-import { Button, FieldGroup, Host, ListItem, Picker, Switch, Text } from "@expo/ui";
+import { Button, FieldGroup, ListItem, Picker, Switch, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { Alert } from "react-native";
@@ -81,7 +82,7 @@ export function SettingsScreen() {
     ]);
 
   return (
-    <Host style={{ flex: 1 }} seedColor={colors.tint}>
+    <BrandHost style={{ flex: 1 }}>
       <FieldGroup>
         <FieldGroup.Section title={t("settings.account")}>
           <ListItem leading={<NativeIcon icon={Icons.account} color={colors.tint} />} supportingText={user?.name ? user.email : undefined}>
@@ -168,6 +169,6 @@ export function SettingsScreen() {
           </Button>
         </FieldGroup.Section>
       </FieldGroup>
-    </Host>
+    </BrandHost>
   );
 }

@@ -2,7 +2,8 @@
 // 08:00"), then a date and time of the member's own: SwiftUI's graphical DatePicker on iOS (confirmed from the
 // toolbar), Material's date and time dialogs on Android. What the time is for comes from whoever opened the sheet
 // (`model/when-request.ts`); with nothing to do, it closes.
-import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { router, Stack } from "expo-router";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Icons } from "../components/icons";
@@ -74,7 +75,7 @@ export function WhenScreen() {
           </Stack.Toolbar>
         </>
       ) : null}
-      <Host style={{ flex: 1 }} seedColor={c.tint}>
+      <BrandHost style={{ flex: 1 }}>
         <FieldGroup>
           {req.custom ? null : (
             <FieldGroup.Section title={title}>
@@ -98,7 +99,7 @@ export function WhenScreen() {
             </FieldGroup.SectionFooter>
           </FieldGroup.Section>
         </FieldGroup>
-      </Host>
+      </BrandHost>
     </>
   );
 }

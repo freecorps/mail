@@ -11,6 +11,9 @@ export function useHeaderColors() {
     // Android: Material's top app bar title (title large, 22 sp). Left unset, react-native-screens' toolbar title did not
     // follow the system font scale and ended up smaller than the body text at a large text size.
     headerTitleStyle: { color: c.label, ...(process.env.EXPO_OS === "android" ? { fontSize: type.title2.fontSize } : {}) },
+    // Android: the top app bar on the screen's own surface (the dynamic surface the lists and Compose forms use), not
+    // react-navigation's white / near-black card.
+    ...(process.env.EXPO_OS === "android" ? { headerStyle: { backgroundColor: c.background } } : {}),
     headerLargeTitleStyle: { color: c.label },
   };
 }

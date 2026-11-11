@@ -1,6 +1,7 @@
 // Sign-in / sign-up: a native form with native text fields (SwiftUI TextField/SecureField, Compose text fields) and
 // native buttons.
-import { Button, FieldGroup, Host, Text, TextInput, type TextInputRef } from "@expo/ui";
+import { Button, FieldGroup, Text, TextInput, type TextInputRef } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useRef, useState } from "react";
 import { ActivityIndicator, Platform, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -39,8 +40,11 @@ export function SignInScreen() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.groupedBackground, ...(Platform.OS === "android" ? { paddingTop: insets.top, paddingBottom: insets.bottom } : null) }}>
-      <Host style={{ flex: 1 }} seedColor={c.tint}>
+    <View style={{ flex: 1, ...(Platform.OS === "android"
+          ? // The form's own surface behind the status and navigation bars (Compose's FieldGroup is on `surface`).
+            { backgroundColor: c.background, paddingTop: insets.top, paddingBottom: insets.bottom }
+          : { backgroundColor: c.groupedBackground }) }}>
+      <BrandHost style={{ flex: 1 }}>
         <FieldGroup>
           <FieldGroup.Section>
             <FieldGroup.SectionHeader>
@@ -82,7 +86,7 @@ export function SignInScreen() {
             </FieldGroup.SectionFooter>
           </FieldGroup.Section>
         </FieldGroup>
-      </Host>
+      </BrandHost>
       {busy ? (
         <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
           <ActivityIndicator accessibilityLabel={t("common.loading")} />

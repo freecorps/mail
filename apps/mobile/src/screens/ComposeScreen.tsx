@@ -9,7 +9,8 @@
 // was not native enough on a phone (see the PR of this layer).
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { fillSavedReply } from "@freecorps/mail-email-html/compose";
-import { Host, Switch } from "@expo/ui";
+import { Switch } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { router, Stack, useIsFocused, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Alert, StyleSheet, TextInput, View } from "react-native";
@@ -644,9 +645,9 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
               <ThemedText variant="subheadline" style={styles.grow}>
                 {t("compose.signatureOn")}
               </ThemedText>
-              <Host matchContents seedColor={c.tint}>
+              <BrandHost matchContents>
                 <Switch value={withSignature && !!signature} onValueChange={setWithSignature} disabled={!signature} />
-              </Host>
+              </BrandHost>
             </View>
             {signature ? (
               <ThemedText variant="subheadline" tone="secondary" style={!withSignature && styles.off} selectable>

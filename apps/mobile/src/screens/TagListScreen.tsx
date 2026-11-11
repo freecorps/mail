@@ -1,6 +1,7 @@
 // Ajustes › Etiquetas: each mailbox's tags in their order (a native grouped list), a row per tag (to rename, recolor,
 // move or delete it) and "Nova etiqueta" per mailbox. Tags belong to the mailbox: any member who sees it manages them.
-import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
+import { FieldGroup, ListItem, Text } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useQuery } from "@freecorps/ember-react-native";
 import { router } from "expo-router";
 import { api } from "../api";
@@ -20,7 +21,7 @@ export function TagListScreen() {
   if (status === "loading" || !tags) return <Loading />;
   const groups = byMailbox(tags, mailboxes.map((b) => b.name));
   return (
-    <Host style={{ flex: 1 }} seedColor={c.tint}>
+    <BrandHost style={{ flex: 1 }}>
       <FieldGroup>
         {groups.map((g, i) => {
           const box = mailboxes.find((b) => b.name === g.mailbox);
@@ -49,6 +50,6 @@ export function TagListScreen() {
           );
         })}
       </FieldGroup>
-    </Host>
+    </BrandHost>
   );
 }

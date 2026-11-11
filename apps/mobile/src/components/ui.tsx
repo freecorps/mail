@@ -1,7 +1,8 @@
 // Small shared pieces that have no native control on either platform (avatar, status label, unread dot, connection
 // strip), plus thin wrappers that put a native @expo/ui control into a React Native layout. Everything interactive is
 // native: buttons come from @expo/ui (SwiftUI / Jetpack Compose), icons from SF Symbols / Material Symbols.
-import { Button, Host, type ButtonVariant } from "@expo/ui";
+import { Button, type ButtonVariant } from "@expo/ui";
+import { BrandHost } from "./native/brand-host";
 import { useConnectionState } from "@freecorps/ember-react-native";
 import type { ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
@@ -111,9 +112,9 @@ export function Loading() {
 export function NativeButton({ label, onPress, variant = "text", disabled }: { label: string; onPress(): void; variant?: ButtonVariant; disabled?: boolean }) {
   const c = useColors();
   return (
-    <Host matchContents seedColor={c.tint}>
+    <BrandHost matchContents>
       <Button label={label} variant={variant} onPress={onPress} disabled={!!disabled} />
-    </Host>
+    </BrandHost>
   );
 }
 

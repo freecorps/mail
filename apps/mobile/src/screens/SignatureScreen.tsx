@@ -4,7 +4,8 @@
 // when the screen loses focus, the app goes to the background or the screen closes is saved then (left blank, it is
 // deleted). Off deletes it. The server picks the signature when a message goes out (the composer can leave it out for
 // one message).
-import { FieldGroup, Host, Switch, Text, TextInput } from "@expo/ui";
+import { FieldGroup, Switch, Text, TextInput } from "@expo/ui";
+import { BrandHost } from "../components/native/brand-host";
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { Stack, useIsFocused } from "expo-router";
 import { useEffect, useMemo, useRef } from "react";
@@ -69,7 +70,7 @@ export function SignatureScreen() {
   return (
     <>
       <Stack.Screen options={{ title: t("signature.title") }} />
-      <Host style={{ flex: 1 }} seedColor={c.tint}>
+      <BrandHost style={{ flex: 1 }}>
         <FieldGroup>
           <FieldGroup.Section title={t("signature.default")}>
             <Switch label={t("signature.use")} value={!!fallback} onValueChange={(on) => turn(null, on, suggestedSignature(name, mailboxes.length === 1 ? mailboxes[0] : null))} />
@@ -95,7 +96,7 @@ export function SignatureScreen() {
             );
           })}
         </FieldGroup>
-      </Host>
+      </BrandHost>
     </>
   );
 }
@@ -121,12 +122,12 @@ function Offline() {
   const c = useColors();
   const { t } = useI18n();
   return (
-    <Host style={{ flex: 1 }} seedColor={c.tint}>
+    <BrandHost style={{ flex: 1 }}>
       <FieldGroup>
         <FieldGroup.Section>
           <Text textStyle={{ color: c.secondaryText }}>{t("signature.offline")}</Text>
         </FieldGroup.Section>
       </FieldGroup>
-    </Host>
+    </BrandHost>
   );
 }
