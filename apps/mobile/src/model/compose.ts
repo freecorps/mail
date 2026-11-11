@@ -71,6 +71,43 @@ export function backspaceToken(count: number, selected: number | null): { remove
   return selected !== null && selected < count ? { remove: selected } : { select: count - 1 };
 }
 
+/**
+ * A token field takes what is typed as a token when it loses focus, but not when focus went to one of its own
+ * suggestions: tapping one can blur the field first, and the pick replaces the typed fragment instead of joining it. So
+ * the commit waits a moment, and a suggestion being pressed (or the field focused again) holds it.
+ */
+export function createBlurCommit(o: { commit(): void; delay?: number; setTimeout?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>; clearTimeout?: (t: ReturnType<typeof setTimeout>) => void }) {
+  const set = o.setTimeout ?? setTimeout;
+  const clear = o.clearTimeout ?? clearTimeout;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let picking = false;
+  const stop = () => {
+    if (timer !== null) clear(timer);
+    timer = null;
+  };
+  return {
+    blur() {
+      stop();
+      timer = set(() => {
+        timer = null;
+        if (!picking) o.commit();
+      }, o.delay ?? 150);
+    },
+    /** The field has focus again: what is typed stays text. */
+    focus: stop,
+    /** A suggestion is being pressed: no commit until it is let go. */
+    pickStart() {
+      picking = true;
+      stop();
+    },
+    /** Let go: picked (the fragment was replaced) or the press was cancelled (the fragment stays typed). */
+    pickEnd() {
+      picking = false;
+    },
+    dispose: stop,
+  };
+}
+
 /** The mode a reply or note draft opens in, from the draft itself: a note stays a note, a draft with Cc is reply all. */
 export function draftReplyMode(d: { kind: string; cc: readonly string[] }): ReplyMode {
   return d.kind === "note" ? "note" : d.cc.length ? "all" : "reply";

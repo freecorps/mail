@@ -68,6 +68,13 @@ export function createOutbox(opts: { now?: () => number; setTimeout?: (fn: () =>
       j.cancelled?.();
       return true;
     },
+    /** Sends one now (its "Desfazer" is no longer offered). False when it already went or was undone. */
+    sendNow(id: string): boolean {
+      const j = take(id);
+      if (!j) return false;
+      j.run();
+      return true;
+    },
     /** Sends everything waiting now (the app is going to the background). */
     flushAll() {
       for (const id of [...jobs.keys()]) take(id)?.run();
@@ -84,7 +91,9 @@ export type Outbox = ReturnType<typeof createOutbox>;
 
 /**
  * Schedules a send and offers "Desfazer" for it on the undo banner. Once the send goes out (its delay ran out, or the
- * app went to the background and `flushAll` sent it), the banner goes too: there is nothing left to undo.
+ * app went to the background and `flushAll` sent it), the banner goes too: there is nothing left to undo. The banner
+ * has one slot: when another notice takes it (an archive, a second send), this send goes out at once instead of
+ * waiting with no way left to undo it.
  */
 export function scheduleWithUndo(o: {
   outbox: Outbox;
@@ -101,7 +110,7 @@ export function scheduleWithUndo(o: {
     o.run();
   };
   const id = o.outbox.schedule(o.entry, o.delayMs, run, o.restore);
-  if (id) banner = o.undo.show(o.message, () => o.outbox.cancel(id), o.delayMs);
+  if (id) banner = o.undo.show(o.message, () => o.outbox.cancel(id), o.delayMs, () => o.outbox.sendNow(id));
   return id;
 }
 

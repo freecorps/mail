@@ -1,5 +1,6 @@
 // "Desfazer" after an archive: one pending undo at a time (a newer action replaces it, like Mail and Gmail), shown by
-// the undo banner for a few seconds. A plain store (useSyncExternalStore), no React Native: tested in vitest.
+// the undo banner for a few seconds. An entry can say what happens when a newer one takes its place (`onReplaced`):
+// a send waiting out its undo delay goes out then, since its "Desfazer" is no longer offered. A plain store (useSyncExternalStore), no React Native: tested in vitest.
 import { useSyncExternalStore } from "react";
 import type { ThreadStatus } from "../api";
 import type { ArchiveRecord } from "./list-actions";
@@ -18,6 +19,8 @@ export function createUndoStore(opts: { ms?: number; setTimeout?: (fn: () => voi
   const clear = opts.clearTimeout ?? clearTimeout;
   let defaultMs = opts.ms ?? 6000;
   let current: UndoEntry | null = null;
+  /** What the shown entry does when a newer one replaces it (not when it times out, is undone or dismissed). */
+  let replaced: (() => void) | null = null;
   let timer: Timer | null = null;
   let seq = 0;
   const listeners = new Set<() => void>();
@@ -30,16 +33,23 @@ export function createUndoStore(opts: { ms?: number; setTimeout?: (fn: () => voi
     if (!current || (id !== undefined && current.id !== id)) return;
     stop();
     current = null;
+    replaced = null;
     emit();
   };
   return {
-    /** Offers an undo for `ms` (longer for screen reader users, who need time to reach the button). */
-    show(message: string, undo: (() => void) | undefined, ms = defaultMs): number {
+    /**
+     * Offers an undo for `ms` (longer for screen reader users, who need time to reach the button). `onReplaced` runs if
+     * a newer entry takes the slot while this one is still shown.
+     */
+    show(message: string, undo: (() => void) | undefined, ms = defaultMs, onReplaced?: () => void): number {
       stop();
+      const before = replaced;
       const id = ++seq;
       current = { id, message, undo };
+      replaced = onReplaced ?? null;
       timer = set(() => dismiss(id), ms);
       emit();
+      before?.();
       return id;
     },
     /** Runs the undo of the shown entry (once) and hides it. */

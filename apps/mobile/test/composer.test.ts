@@ -5,7 +5,7 @@ import type { OptimisticLocalStore } from "@freecorps/ember-react-native";
 import { fillSavedReply } from "@freecorps/mail-email-html/compose";
 import { describe, expect, it, vi } from "vitest";
 import type { Draft, SaveDraftArgs } from "../src/api";
-import { addTokens, backspaceToken, contactsFrom, draftReplyMode, insertText, quoteHeader, quotedMessage, replyState, replySubject, replyVars, splitTyped, suggest, suggestedSignature, validToken, withTyped } from "../src/model/compose";
+import { addTokens, backspaceToken, contactsFrom, createBlurCommit, draftReplyMode, insertText, quoteHeader, quotedMessage, replyState, replySubject, replyVars, splitTyped, suggest, suggestedSignature, validToken, withTyped } from "../src/model/compose";
 import { createDraftSaver, draftHasContent, replyDraftArgs } from "../src/model/draft-saver";
 import { createOutbox, parseUndoDelay, scheduleWithUndo } from "../src/model/outbox";
 import { createSignatureSaver } from "../src/model/signature-saver";
@@ -69,11 +69,40 @@ describe("undo send (outbox)", () => {
     vi.advanceTimersByTime(10_000);
     expect(run2).not.toHaveBeenCalled();
 
-    // A newer notice in the slot is not dismissed by an earlier send going out.
-    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "compose", text: "x" }, delayMs: 5000, run: vi.fn() });
-    undo.show("Arquivada", vi.fn());
-    box.flushAll();
+    // Another notice takes the slot (an archive): the send can no longer be undone, so it goes out at once, and the
+    // archive keeps its own "Desfazer".
+    const run3 = vi.fn();
+    const back3 = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "reply", threadId: "t1", text: "x" }, delayMs: 5000, run: run3, restore: back3 });
+    const unarchive = vi.fn();
+    undo.show("Arquivada", unarchive);
+    expect(run3).toHaveBeenCalledOnce();
+    expect(box.get()).toEqual([]);
     expect(undo.get()?.message).toBe("Arquivada");
+    undo.undo();
+    expect(unarchive).toHaveBeenCalledOnce();
+    expect(back3).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(10_000);
+    expect(run3).toHaveBeenCalledOnce();
+
+    // A second send takes the slot: the first goes out now, the second waits with its own "Desfazer".
+    const first = vi.fn();
+    const second = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando 1", entry: { kind: "compose", text: "a" }, delayMs: 5000, run: first });
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando 2", entry: { kind: "compose", text: "b" }, delayMs: 5000, run: second });
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).not.toHaveBeenCalled();
+    expect(undo.get()?.message).toBe("Enviando 2");
+    vi.advanceTimersByTime(5000);
+    expect(second).toHaveBeenCalledOnce();
+    expect(undo.get()).toBeNull();
+
+    // Undone, timed out or dismissed: nothing extra goes out when the next notice shows.
+    const later = vi.fn();
+    scheduleWithUndo({ outbox: box, undo, message: "Enviando", entry: { kind: "compose", text: "c" }, delayMs: 5000, run: later });
+    undo.undo();
+    undo.show("Link copiado", undefined);
+    expect(later).not.toHaveBeenCalled();
 
     // Undo send off: sent at once, no banner.
     undo.dismiss();
@@ -236,6 +265,32 @@ describe("recipients", () => {
     expect(backspaceToken(0, null)).toBeNull();
   });
 
+  it("leaving the field commits what is typed, but not when focus went to a suggestion (the pick replaces it)", () => {
+    vi.useFakeTimers();
+    const commit = vi.fn();
+    const b = createBlurCommit({ commit, delay: 150 });
+    b.blur();
+    vi.advanceTimersByTime(150);
+    expect(commit).toHaveBeenCalledOnce();
+    // Tapping a suggestion: the field blurs, then the press starts; nothing is committed, before or after the pick.
+    b.blur();
+    b.pickStart();
+    vi.advanceTimersByTime(1000);
+    b.pickEnd();
+    vi.advanceTimersByTime(1000);
+    expect(commit).toHaveBeenCalledOnce();
+    // A slow press still holds it; focus coming back keeps the text as text.
+    b.pickStart();
+    b.blur();
+    vi.advanceTimersByTime(1000);
+    b.pickEnd();
+    b.blur();
+    b.focus();
+    vi.advanceTimersByTime(1000);
+    expect(commit).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+  });
+
   it("contacts from the mail on the device, newest first, never the member's own mailboxes; suggestions fold accents", () => {
     const contacts = contactsFrom(
       [{ contact: "marina@cliente.test", contactName: "Marina Costa", lastMessageAt: 10 }],
@@ -370,5 +425,40 @@ describe("drafts offline (optimistic)", () => {
     expect(st.get({})).toHaveLength(2);
     up["inbox:deleteDraft"]!(st.s, { id: st.get({})[0]!._id }, rec);
     expect(st.get({})).toHaveLength(1);
+  });
+
+  it("the first save's temporary row is replaced, not duplicated, once later saves and sends carry the real id", () => {
+    const st = store([
+      [{ threadId: "t1" }, []],
+      [{}, []],
+    ]);
+    // Reply: the first save shows under a temporary id; the next one carries the server's id.
+    up["inbox:saveDraft"]!(st.s, { kind: "reply", threadId: "t1", text: "Oi" }, rec);
+    expect(st.get({ threadId: "t1" })[0]!._id.startsWith("optimistic:")).toBe(true);
+    up["inbox:saveDraft"]!(st.s, { id: "d1", kind: "reply", threadId: "t1", text: "Oi, Marina" }, rec);
+    expect(st.get({ threadId: "t1" })).toMatchObject([{ _id: "d1", text: "Oi, Marina" }]);
+    expect(st.get({})).toHaveLength(1);
+    // A note of the same thread is another draft.
+    up["inbox:saveDraft"]!(st.s, { kind: "note", threadId: "t1", text: "interno" }, rec);
+    expect(st.get({ threadId: "t1" })).toHaveLength(2);
+    // Sent with the real id right after the first answer: the temporary row goes too.
+    up["inbox:note"]!(st.s, { threadId: "t1", text: "interno", draftId: "d2" }, rec);
+    expect(st.get({ threadId: "t1" }).map((d) => d.kind)).toEqual(["reply"]);
+
+    // A new message: the save with its id replaces the newest temporary row of that mailbox, not another one.
+    up["inbox:saveDraft"]!(st.s, { kind: "compose", mailbox: "privacy", text: "outro" }, rec);
+    up["inbox:saveDraft"]!(st.s, { kind: "compose", mailbox: "support", text: "a" }, rec);
+    up["inbox:saveDraft"]!(st.s, { id: "c1", kind: "compose", mailbox: "support", text: "ab" }, rec);
+    const compose = () => st.get({}).filter((d) => d.kind === "compose");
+    expect(compose().map((d) => [d._id.startsWith("optimistic:") ? "temp" : d._id, d.text])).toEqual([
+      ["c1", "ab"],
+      ["temp", "outro"],
+    ]);
+    up["inbox:saveDraft"]!(st.s, { id: "c1", kind: "compose", mailbox: "support", text: "abc" }, rec);
+    expect(compose()).toHaveLength(2);
+    // Sent with an id the cache does not know (its first save still under a temporary id): that row goes.
+    up["inbox:saveDraft"]!(st.s, { kind: "compose", mailbox: "support", text: "novo" }, rec);
+    up["inbox:compose"]!(st.s, { mailbox: "support", to: ["a@b.co"], subject: "", text: "novo", draftId: "c2" }, rec);
+    expect(compose().map((d) => d.text)).toEqual(["abc", "outro"]);
   });
 });

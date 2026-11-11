@@ -179,6 +179,15 @@ export function QuickReply({
       const draftId = saver.id();
       void noteM({ threadId, text: body, ...(draftId ? { draftId } : {}) }).catch(() => {});
       saver.sent(draftId);
+      // The files picked for the reply are not the note's: sending it (or it failing) leaves them alone. With some, the
+      // bar stays open as the reply they belong to, and saves it as that reply's draft.
+      if (uploads.items.length) {
+        dirty.current = true;
+        setText("");
+        setModeState("reply");
+        saver.update(replyDraftArgs({ kind: "reply", threadId, text: "", cc: [], autoCc: [], bcc: restored.current.bcc, attachments: uploads.attachments }));
+        return;
+      }
     } else {
       const quoted = quotedMessage(messages);
       const header = quoted ? quoteHeader(quoted, locale, clock24) : undefined;

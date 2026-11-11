@@ -5,10 +5,10 @@
 // takes it as a token when sending or saving the draft. While typing, people from the mail
 // on the device are suggested under the row. Neither platform has a token field control (UISearchToken is for search
 // bars only), so the tokens are drawn here; the field itself is the system text field.
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, TextInput, View, type TextInputInstance } from "react-native";
 import { useI18n } from "../i18n";
-import { addressOf, addTokens, backspaceToken, splitTyped, suggest, tokenOf, validToken, type Contact } from "../model/compose";
+import { addressOf, addTokens, backspaceToken, createBlurCommit, splitTyped, suggest, tokenOf, validToken, type Contact } from "../model/compose";
 import { corner, minTouch, radius, screenEdge, spacing, type, useColors } from "../theme";
 import { Avatar, Separator } from "./ui";
 import { ThemedText } from "./themed-text";
@@ -60,6 +60,11 @@ export function TokenField({
     onChange(tokens.filter((_, j) => j !== i));
     setSelected(null);
   };
+  // Leaving the field takes what is typed as a token, unless focus went to a suggestion (`createBlurCommit`).
+  const commitTyped = useRef(() => {});
+  commitTyped.current = () => void (text.trim() && commit(`${text},`));
+  const onBlurCommit = useMemo(() => createBlurCommit({ commit: () => commitTyped.current() }), []);
+  useEffect(() => onBlurCommit.dispose, [onBlurCommit]);
 
   return (
     <View>
@@ -102,8 +107,11 @@ export function TokenField({
                 else setSelected(next.select);
               }}
               onSubmitEditing={() => commit(`${text},`)}
-              onBlur={() => text.trim() && commit(`${text},`)}
-              onFocus={onFocus}
+              onBlur={onBlurCommit.blur}
+              onFocus={() => {
+                onBlurCommit.focus();
+                onFocus?.();
+              }}
               submitBehavior="submit"
               autoFocus={autoFocus}
               autoCapitalize="none"
@@ -122,7 +130,10 @@ export function TokenField({
           {hits.map((h: Contact) => (
             <Pressable
               key={h.email}
+              onPressIn={onBlurCommit.pickStart}
+              onPressOut={onBlurCommit.pickEnd}
               onPress={() => {
+                // The pick replaces what was typed (it never becomes a token of its own).
                 onChange(addTokens(tokens, [tokenOf(h)]));
                 setText("");
                 input.current?.focus();
