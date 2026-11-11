@@ -39,8 +39,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ios: {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: true,
-    // iPad multitasking (Split View, Slide Over, resizable windows): every orientation on iPad (the plugin writes
-    // UISupportedInterfaceOrientations~ipad), portrait on iPhone; the lists split into list and detail when wide.
+    // iPad multitasking (Split View, Slide Over, resizable windows): every orientation on iPad, portrait on iPhone.
+    // `orientation: "portrait"` sets only UISupportedInterfaceOrientations; with a tablet and no full screen, Expo's
+    // prebuild (@expo/config-plugins, withRequiresFullScreen) writes all four into UISupportedInterfaceOrientations~ipad.
+    // The lists split into list and detail when wide.
     requireFullScreen: false,
     infoPlist: {
       // Standard encryption only: HTTPS/TLS, and on iOS Apple's CryptoKit (HPKE, in the Notification Service Extension)

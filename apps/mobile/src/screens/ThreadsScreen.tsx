@@ -229,9 +229,10 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     {
       compose: !searchOnly && (() => compose()),
       search: () => search.current?.focus(),
-      next: split && (() => move(1)),
-      previous: split && (() => move(-1)),
-      close: split && current ? () => setCurrent(null) : editing ? stopEditing : navigation.canGoBack() && (() => navigation.goBack()),
+      // Edit mode owns the keys like it owns taps: no moving the pane's selection, and Esc leaves it first.
+      next: split && !editing && (() => move(1)),
+      previous: split && !editing && (() => move(-1)),
+      close: editing ? stopEditing : split && current ? () => setCurrent(null) : navigation.canGoBack() && (() => navigation.goBack()),
     },
     focused,
   );
