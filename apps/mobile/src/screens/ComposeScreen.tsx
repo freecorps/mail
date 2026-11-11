@@ -430,22 +430,23 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
             {/* "Enviar mais tarde" beside Send (Mail's long-press menu, made visible): presets with their time, "Escolher…". */}
             {note || !laterIcon ? null : (
               <Stack.Toolbar.Menu icon={laterIcon} accessibilityLabel={t("compose.sendLater")} title={t("compose.sendLater")} disabled={!ready}>
-                {schedulable.ok ? (
-                  <>
-                    {choices.map((x) => (
-                      <Stack.Toolbar.MenuAction key={x.key} icon={laterItemIcon} subtitle={x.detail} onPress={() => send(x.at)}>
-                        {x.label}
-                      </Stack.Toolbar.MenuAction>
-                    ))}
-                    <Stack.Toolbar.MenuAction icon={pickIcon} onPress={pickLater}>
-                      {t("when.pick")}
-                    </Stack.Toolbar.MenuAction>
-                  </>
-                ) : (
-                  <Stack.Toolbar.MenuAction icon={blockedIcon} disabled onPress={() => {}}>
-                    {t("compose.scheduleBlocked")}
-                  </Stack.Toolbar.MenuAction>
-                )}
+                {/* Direct children only: the native menu does not read through a fragment. */}
+                {schedulable.ok
+                  ? [
+                      ...choices.map((x) => (
+                        <Stack.Toolbar.MenuAction key={x.key} icon={laterItemIcon} {...(ios ? { subtitle: x.detail } : {})} onPress={() => send(x.at)}>
+                          {ios ? x.label : `${x.label} · ${x.detail}`}
+                        </Stack.Toolbar.MenuAction>
+                      )),
+                      <Stack.Toolbar.MenuAction key="pick" icon={pickIcon} onPress={pickLater}>
+                        {t("when.pick")}
+                      </Stack.Toolbar.MenuAction>,
+                    ]
+                  : [
+                      <Stack.Toolbar.MenuAction key="blocked" icon={blockedIcon} disabled onPress={() => {}}>
+                        {t("compose.scheduleBlocked")}
+                      </Stack.Toolbar.MenuAction>,
+                    ]}
               </Stack.Toolbar.Menu>
             )}
             <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready} onPress={() => send()}>

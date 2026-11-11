@@ -165,13 +165,19 @@ export const ExpandedMessage = memo(function ExpandedMessage({
         <AttachmentList attachments={visibleFiles(m)} urls={urls} />
       </View>
       {scheduled ? (
-        <View style={[styles.scheduled, { backgroundColor: c.fill }]} accessible={false}>
-          <Symbol icon={Icons.scheduled} size={17} color={c.tint} />
-          <ThemedText variant="footnote" style={styles.grow} numberOfLines={2}>
-            {t("thread.scheduledFor", { when: scheduled.when })}
-          </ThemedText>
-          {scheduled.onEdit ? <NativeButton label={t("thread.editScheduled")} onPress={scheduled.onEdit} /> : null}
-          {scheduled.onCancel ? <NativeButton label={t("thread.cancelSend")} onPress={scheduled.onCancel} /> : null}
+        <View style={[styles.scheduled, { backgroundColor: c.fill }]}>
+          <View style={styles.line}>
+            <Symbol icon={Icons.scheduled} size={17} color={c.tint} />
+            <ThemedText variant="footnote" style={styles.grow}>
+              {t("thread.scheduledFor", { when: scheduled.when })}
+            </ThemedText>
+          </View>
+          {scheduled.onEdit || scheduled.onCancel ? (
+            <View style={styles.scheduledActions}>
+              {scheduled.onEdit ? <NativeButton variant="outlined" label={t("thread.editScheduled")} onPress={scheduled.onEdit} /> : null}
+              {scheduled.onCancel ? <NativeButton variant="outlined" label={t("thread.cancelSend")} onPress={scheduled.onCancel} /> : null}
+            </View>
+          ) : null}
         </View>
       ) : null}
     </View>
@@ -198,5 +204,7 @@ const styles = StyleSheet.create({
   text: { lineHeight: 23, paddingHorizontal: screenEdge, paddingBottom: spacing.sm },
   files: { paddingHorizontal: screenEdge, paddingBottom: spacing.lg },
   glyph: { alignItems: "center", justifyContent: "center" },
-  scheduled: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm, marginHorizontal: screenEdge, marginBottom: spacing.lg, paddingLeft: spacing.md, paddingRight: spacing.xs, paddingVertical: spacing.xs, ...corner(radius.sm) },
+  // The time on its own line (it never gives way to the buttons), then the actions, wrapping at large text sizes.
+  scheduled: { gap: spacing.sm, marginHorizontal: screenEdge, marginBottom: spacing.lg, padding: spacing.md, ...corner(radius.sm) },
+  scheduledActions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, justifyContent: "flex-end" },
 });

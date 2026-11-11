@@ -340,8 +340,8 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
             ) : (
               <Stack.Toolbar.Menu icon={snoozeIcon} title={t("thread.snooze")}>
                 {snoozer.choices().map((x) => (
-                  <Stack.Toolbar.MenuAction key={x.key} icon={snoozeIcon} subtitle={x.detail} onPress={() => snoozeAt(x.at)}>
-                    {x.label}
+                  <Stack.Toolbar.MenuAction key={x.key} icon={snoozeIcon} {...(ios ? { subtitle: x.detail } : {})} onPress={() => snoozeAt(x.at)}>
+                    {ios ? x.label : `${x.label} · ${x.detail}`}
                   </Stack.Toolbar.MenuAction>
                 ))}
                 <Stack.Toolbar.MenuAction icon={pickIcon} onPress={snoozeCustom}>
@@ -431,7 +431,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
           <ThemedText variant="footnote" tone="secondary" style={styles.grow} numberOfLines={2}>
             {t("thread.snoozedUntil", { when: formatLater(thread.snoozedUntil, Date.now(), locale, clock24, zone) })}
           </ThemedText>
-          <NativeButton label={t("thread.unsnooze")} onPress={unsnooze} />
+          <NativeButton variant="outlined" label={t("thread.unsnooze")} onPress={unsnooze} />
         </View>
       ) : null}
       {!preview && !loadAll && blockedSenders.length ? (

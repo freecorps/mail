@@ -22,7 +22,7 @@ export function ActivityLine({ event, ago }: { event: TimelineEvent; ago: string
   return (
     <View style={styles.row} accessible accessibilityLabel={`${event.text}, ${ago}`}>
       <Symbol icon={EVENT_ICONS[event.icon]} size={13} color={event.icon === "failed" ? c.danger : c.secondaryLabel} />
-      <ThemedText variant="footnote" tone="secondary" style={styles.text} numberOfLines={2}>
+      <ThemedText variant="footnote" tone="secondary" style={styles.text}>
         {event.text}
         <ThemedText variant="footnote" tone="tertiary">{` · ${ago}`}</ThemedText>
       </ThemedText>
