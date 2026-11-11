@@ -172,7 +172,8 @@ export function Composer({
       skipOnce.current = false;
       return;
     }
-    const empty = body.empty && !ready.length;
+    // A note carries no files: the reply's leftover ones do not make an empty note box worth a draft.
+    const empty = body.empty && (mode === "note" || !ready.length);
     if (kind.current !== mode) {
       // Switching between reply and note moves the draft to the other kind.
       kind.current = mode;
