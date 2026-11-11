@@ -119,6 +119,7 @@ await mail.emails.send({ from: "hello@acme.com", to: "bo@example.com", template:
 await mail.suppressions.add("gone@example.com");
 await mail.domains.create({ name: "mail.acme.com" });         // DNS records to check, then domains.verify(id)
 await mail.apiKeys.create({ name: "app", permission: "sending_access", project: "app", domain: "acme.com" });
+await mail.inbox.mailboxes();                                 // counts: threads, unread (without snoozed ones), snoozed
 await mail.inbox.threads({ mailbox: "support", status: "open" });  // snoozed threads are left out
 await mail.inbox.threads({ mailbox: "support", snoozed: true });   // only the snoozed ones, soonest to wake first
 await mail.inbox.sent({ mailbox: "support" });                // what it sent, newest first; `next` goes on as `before`

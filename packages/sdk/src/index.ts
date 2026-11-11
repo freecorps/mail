@@ -540,8 +540,15 @@ export class EmberMail {
   };
 
   readonly inbox = {
-    /** Every mailbox; a personal one (`owner` set) without its counts: only its owner reads it, in their inbox. */
-    mailboxes: () => this.request<{ data: Array<{ name: string; address: string; display_name: string | null; owner: string | null; catch_all: boolean; retention: MailboxRetention | null; unread?: number; threads?: number }> }>("GET", "/inbox/mailboxes"),
+    /**
+     * Every mailbox; a personal one (`owner` set) without its counts: only its owner reads it, in their inbox. The
+     * counts match `threads`: `threads` and `unread` (messages) leave the snoozed threads out, `snoozed` counts those.
+     */
+    mailboxes: () =>
+      this.request<{ data: Array<{ name: string; address: string; display_name: string | null; owner: string | null; catch_all: boolean; retention: MailboxRetention | null; unread?: number; threads?: number; snoozed?: number }> }>(
+        "GET",
+        "/inbox/mailboxes",
+      ),
     /** `owner`: personal to that user (no admin or key reads it); null: shared again; absent: as it was. `catch_all`: takes every address of its domain no mailbox has. `retention`: days closed and spam conversations are kept (then deleted with their messages and files); null: kept forever; absent: as it was. */
     upsertMailbox: (o: { name: string; address: string; display_name?: string | null; auto_reply?: { subject: string; text: string; html?: string } | null; owner?: string | null; catch_all?: boolean | null; retention?: MailboxRetention | null }) => this.request<{ id: string }>("POST", "/inbox/mailboxes", o),
     /** A mailbox's threads, newest first; snoozed ones are left out, and `snoozed: true` lists only them (soonest to wake first). */

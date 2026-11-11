@@ -522,9 +522,11 @@ http.route({
   handler: route(async (ctx, _r, p) => {
     need(p, "inbox");
     const boxes = (await ctx.runQuery(email.mailboxes, {})) as any[];
-    const unread = await ctx.runQuery(email.unread, {});
     const personal = await personalMailboxes(ctx);
-    // A personal mailbox is listed (with its owner) but its counts are its owner's business.
+    // A personal mailbox is listed (with its owner) but its counts are its owner's business. The others' counts match
+    // GET /inbox/threads: `threads` and `unread` (messages) without the snoozed threads, `snoozed` those apart.
+    const shared = boxes.map((b) => b.name as string).filter((n) => !Object.hasOwn(personal, n));
+    const counts = (await ctx.runQuery("inbox:mailboxCounts" as any, { mailboxes: shared })) as Record<string, { threads: number; unread: number; snoozed: number }>;
     return json({
       data: boxes.map((b) => ({
         name: b.name,
@@ -533,7 +535,7 @@ http.route({
         owner: personal[b.name] ?? null,
         catch_all: !!b.catchAll,
         retention: b.retention ? { closed_days: b.retention.closedDays ?? null, spam_days: b.retention.spamDays ?? null } : null,
-        ...(Object.hasOwn(personal, b.name) ? {} : (unread as any)[b.name]),
+        ...(counts[b.name] ?? {}),
       })),
     });
   }),

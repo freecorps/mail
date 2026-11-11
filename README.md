@@ -76,7 +76,9 @@ entrega; o SDK tem `verifyWebhook`). Erros no formato do Resend: `{ statusCode, 
 
 `GET /inbox/threads?mailbox=<nome>` lista as conversas da caixa, da mais recente para a mais antiga (`status`, `limit`,
 `cursor`). Desde o Ember 0.7, as conversas adiadas (soneca, pelo app) ficam fora dessa lista até acordarem.
-`snoozed=true` lista só as adiadas, da que acorda primeiro para a última.
+`snoozed=true` lista só as adiadas, da que acorda primeiro para a última. `GET /inbox/mailboxes` segue a mesma regra:
+`threads` e `unread` (mensagens não lidas) de cada caixa compartilhada contam sem as adiadas, e `snoozed` conta as
+adiadas. As caixas pessoais vêm sem contagens.
 
 ```ts
 import { EmberMail } from "@freecorps/mail-sdk";
@@ -167,7 +169,9 @@ Webhooks events: `email.received` and the delivery ones; the SDK has `verifyWebh
 
 `GET /inbox/threads?mailbox=<name>` lists the mailbox's conversations, newest first (`status`, `limit`, `cursor`).
 Since Ember 0.7, snoozed conversations (snoozed in the app) are left out of that list until they wake up.
-`snoozed=true` lists only the snoozed ones, soonest to wake first.
+`snoozed=true` lists only the snoozed ones, soonest to wake first. `GET /inbox/mailboxes` follows the same rule: each
+shared mailbox's `threads` and `unread` (unread messages) leave the snoozed conversations out, and `snoozed` counts
+them. Personal mailboxes come without counts.
 
 ### For agents
 

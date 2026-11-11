@@ -1251,8 +1251,13 @@ describe("mail app", () => {
       const b = ((await q("inbox:mailboxes", {}, who)) as any[]).find((x) => x.name === name);
       return { threads: b.threads, unread: b.unread };
     };
+    // Over HTTP (an API key: shared mailboxes only), the same counts, and `snoozed` apart.
+    const httpBadge = async (name: string) => (await admin.inbox.mailboxes()).data!.data.find((b) => b.name === name)!;
     const ea0 = await badge("eva", "ea");
     const eia0 = await badge("eva", "eia");
+    expect(await httpBadge("ea")).toMatchObject({ ...ea0, snoozed: 0 });
+    expect(await httpBadge("eia")).not.toHaveProperty("unread");
+    expect(await httpBadge("eia")).not.toHaveProperty("snoozed");
 
     // Snoozed: out of every other view and count, listed soonest to wake first; Edu can't snooze in eb.
     const now = Date.now();
@@ -1261,6 +1266,11 @@ describe("mail app", () => {
     expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
     expect(await badge("edu", "ea")).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
     expect(await badge("eva", "eia")).toEqual({ threads: eia0.threads - 1, unread: eia0.unread - 1 });
+    expect(((await q("inbox:mailboxes", {}, "eva")) as any[]).find((b) => b.name === "ea")).toMatchObject({ snoozed: 1 });
+    expect(await httpBadge("ea")).toMatchObject({ threads: ea0.threads - 1, unread: ea0.unread - 1, snoozed: 1 });
+    // The badge adds up with the default list.
+    const listed = (await admin.inbox.threads({ mailbox: "ea", limit: 100 })).data!.page;
+    expect({ threads: listed.length, unread: listed.reduce((n, t) => n + t.unreadCount, 0) }).toEqual({ threads: ea0.threads - 1, unread: ea0.unread - 1 });
 
     // HTTP: `GET /inbox/threads` leaves them out too; `snoozed=true` lists only them. Never a personal mailbox.
     const byKey = async (qs: string) => SELF.fetch(`${BASE}/inbox/threads?${qs}`, { headers: { authorization: "Bearer admin-secret" } });
@@ -1301,6 +1311,7 @@ describe("mail app", () => {
     expect(woke.thread).toMatchObject({ status: "open", unreadCount: 1, hasUnread: true });
     // Woken (by time: back as new, unread), it counts again.
     expect(await badge("eva", "ea")).toEqual({ threads: ea0.threads, unread: ea0.unread + 1 });
+    expect(await httpBadge("ea")).toMatchObject({ threads: ea0.threads, unread: ea0.unread + 1, snoozed: 0 });
     expect(subjects(await q("inbox:view", { view: "assigned" }, "eva"))[0]).toBe("exact three");
     expect(subjects(await q("inbox:view", { view: "snoozed" }, "eva"))).toEqual(["exact four"]);
 

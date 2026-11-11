@@ -3,7 +3,7 @@
 // via ember/auth.config.ts, or SSO). Members see only their mailboxes; admins see every shared one; a personal mailbox
 // only its owner (ember/access.ts). Push devices register here. Lists, counts, tags, the activity timeline, snooze,
 // scheduled sends and presence are the email component's (Ember 0.7), behind the same rule.
-import { anyComponents as components, internalMutationGeneric as internalMutation, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
+import { anyComponents as components, internalMutationGeneric as internalMutation, internalQueryGeneric as internalQuery, mutationGeneric as mutation, queryGeneric as query, v } from "@freecorps/ember-server";
 import { escapeHtml } from "@freecorps/ember-email";
 import { PushNotifications } from "@freecorps/ember-push";
 import { canSee, canSeeWith, ownerOf, owners, type Member } from "./access.ts";
@@ -125,10 +125,29 @@ export const generateUploadUrl = mutation({
   },
 });
 
+/** A mailbox's badge: `threads` and `unread` messages without its snoozed threads (they count again when they wake), and `snoozed` threads apart. */
+export type MailboxCount = { threads: number; unread: number; snoozed: number };
+
+/** Badges from the email component's `counts` aggregates (a few group reads per mailbox, no thread scan). */
+function mailboxCountsOf(ctx: Ctx, names: string[]): Record<string, MailboxCount> {
+  const out: Record<string, MailboxCount> = {};
+  for (const mailbox of names) {
+    const c = ctx.runQuery(email.counts, { mailbox }) as { all: { threads: number; unread: number }; snoozed: { threads: number } };
+    out[mailbox] = { threads: c.all.threads, unread: c.all.unread, snoozed: c.snoozed.threads };
+  }
+  return out;
+}
+
+/** The badges of `mailboxes`, in one transaction, for the HTTP API (`GET /inbox/mailboxes`, which never asks for a personal one). */
+export const mailboxCounts = internalQuery({
+  args: { mailboxes: v.array(v.string()) },
+  handler: (ctx, a) => mailboxCountsOf(ctx as unknown as Ctx, a.mailboxes),
+});
+
 /**
- * Mailboxes this member can see, with their counts: `threads` and `unread` messages, snoozed threads left out (as in
- * `views` and the lists: they count again when they wake), from the email component's `counts` aggregates.
- * `personal`: their own mailbox, no one else's.
+ * Mailboxes this member can see, with their badges (`MailboxCount`: `threads`, `unread`, `snoozed`), the same
+ * rule as `views` and the lists: snoozed threads are out of `threads` and `unread`. `personal`: their own mailbox,
+ * no one else's.
  */
 export const mailboxes = query({
   args: {},
@@ -136,10 +155,8 @@ export const mailboxes = query({
     const m = member(ctx);
     const personal = owners(ctx.db);
     const all = (ctx.runQuery(email.mailboxes, {}) as Array<{ name: string; address: string; displayName?: string }>).filter((b) => canSeeWith(personal, m, b.name));
-    return all.map((b) => {
-      const c = (ctx.runQuery(email.counts, { mailbox: b.name }) as { all: { threads: number; unread: number } }).all;
-      return { name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), unread: c.unread, threads: c.threads };
-    });
+    const counts = mailboxCountsOf(ctx, all.map((b) => b.name));
+    return all.map((b) => ({ name: b.name, address: b.address, displayName: b.displayName ?? null, personal: personal.has(b.name), ...counts[b.name]! }));
   },
 });
 
