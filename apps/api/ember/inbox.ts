@@ -127,6 +127,125 @@ export const threads = query({
   },
 });
 
+// ---------------------------------------------------------------------------------------------- views
+// Lists across every mailbox the member can see, for the home screen of the clients (Mail.app's "All Inboxes"):
+//
+//   all       every thread, newest first (`status` narrows it, as in `threads`)
+//   assigned  threads assigned to the member; open and waiting ones unless `status` says otherwise
+//   unread    threads with unread messages; open and waiting ones unless `status` says otherwise
+//   waiting   threads waiting on the contact
+//
+// Each mailbox is read through the email component's own index (`threads`: by mailbox, or by mailbox and status, newest
+// first) and the pages are merged, so `all` and `waiting` are exact. The component has no index by assignee or by
+// unread, so `assigned` and `unread` scan each mailbox's open and waiting threads (what is still being worked on: a new
+// message reopens a closed thread) up to VIEW_SCAN, and say `partial` when a mailbox had more than that.
+
+export const VIEWS = ["all", "assigned", "unread", "waiting"] as const;
+export type View = (typeof VIEWS)[number];
+/** Most threads one `view` read returns (the list grows its `limit` as it scrolls, up to here). */
+export const VIEW_MAX = 300;
+/** Most threads `assigned` and `unread` read per mailbox and status to find theirs (and `views` to count them). */
+export const VIEW_SCAN = 500;
+const ACTIVE = ["open", "waiting"] as const;
+
+const statusArg = v.optional(v.union(v.literal("open"), v.literal("waiting"), v.literal("closed"), v.literal("spam")));
+type ThreadRow = { _id: string; mailbox: string; status: string; lastMessageAt: number; unreadCount: number; assignee?: string };
+type Page = { page: ThreadRow[]; isDone: boolean; continueCursor: string };
+
+/** Which ranges (mailbox × status) a view reads, and which of their threads it keeps. */
+function planOf(view: View, status: string | undefined, m: Member, personal: Map<string, string>) {
+  switch (view) {
+    case "all":
+      return { statuses: [status], keep: undefined };
+    case "waiting":
+      return { statuses: ["waiting"], keep: undefined };
+    case "assigned":
+      // A personal mailbox has no assignment: nothing to read there.
+      return { statuses: status ? [status] : [...ACTIVE], keep: (t: ThreadRow) => t.assignee === m.userId, skip: (mb: string) => personal.has(mb) };
+    case "unread":
+      return { statuses: status ? [status] : [...ACTIVE], keep: (t: ThreadRow) => t.unreadCount > 0 };
+  }
+}
+
+/**
+ * The newest `want` threads of one mailbox (and status) that `keep` accepts. `done`: no other thread of the range
+ * matches; `partial`: the scan stopped at VIEW_SCAN threads before finding `want` or reaching the end.
+ */
+function rangeOf(ctx: Ctx, mailbox: string, status: string | undefined, keep: ((t: ThreadRow) => boolean) | undefined, want: number) {
+  const rows: ThreadRow[] = [];
+  let cursor: string | null = null;
+  let scanned = 0;
+  for (;;) {
+    const numItems = keep ? Math.min(100, VIEW_SCAN - scanned) : want;
+    const r = ctx.runQuery(email.threads, { mailbox, ...(status ? { status } : {}), paginationOpts: { numItems, cursor } }) as Page;
+    scanned += r.page.length;
+    rows.push(...(keep ? r.page.filter(keep) : r.page));
+    if (rows.length >= want) return { rows: rows.slice(0, want), done: r.isDone && rows.length === want, partial: false };
+    if (r.isDone) return { rows, done: true, partial: false };
+    if (scanned >= VIEW_SCAN) return { rows, done: false, partial: true };
+    cursor = r.continueCursor;
+  }
+}
+
+const newestFirst = (a: ThreadRow, b: ThreadRow) => b.lastMessageAt - a.lastMessageAt || (a._id < b._id ? 1 : a._id > b._id ? -1 : 0);
+
+/**
+ * A view across the member's mailboxes, newest first: `{ page, isDone, partial }`. `limit` grows as the list scrolls
+ * (like `sent`), up to VIEW_MAX. `partial`: some mailbox had more open and waiting threads than `assigned`/`unread`
+ * scan, so older matches may be missing.
+ */
+export const view = query({
+  args: { view: v.union(...VIEWS.map((x) => v.literal(x))), status: statusArg, limit: v.optional(v.number()) },
+  handler: (ctx, a) => {
+    const m = member(ctx);
+    const want = Math.min(Math.max(Math.trunc(a.limit ?? 30), 1), VIEW_MAX);
+    const personal = owners(ctx.db);
+    const plan = planOf(a.view as View, a.status, m, personal);
+    const skip = "skip" in plan ? plan.skip : undefined;
+    const ranges = memberMailboxes(ctx, m)
+      .filter((mb) => !skip?.(mb))
+      .flatMap((mb) => plan.statuses.map((s) => rangeOf(ctx, mb, s, plan.keep, want)));
+    const rows = ranges.flatMap((r) => r.rows).sort(newestFirst);
+    return { page: rows.slice(0, want), isDone: rows.length <= want && ranges.every((r) => r.done), partial: ranges.some((r) => r.partial) };
+  },
+});
+
+/** A view's count: its threads, their unread messages, and `capped` when a mailbox had more than VIEW_SCAN to count. */
+export type ViewCount = { threads: number; unread: number; capped: boolean };
+
+/**
+ * The home screen's counts, one per view. `all` is the email component's aggregate (exact: every thread and unread
+ * message of the member's mailboxes); the others count the open and waiting threads of each mailbox, up to VIEW_SCAN
+ * per mailbox and status.
+ */
+export const views = query({
+  args: {},
+  handler: (ctx) => {
+    const m = member(ctx);
+    const personal = owners(ctx.db);
+    const boxes = memberMailboxes(ctx, m);
+    const agg = ctx.runQuery(email.unread, { mailboxes: boxes }) as Record<string, { unread: number; threads: number }>;
+    const zero = (): ViewCount => ({ threads: 0, unread: 0, capped: false });
+    const out = { all: zero(), assigned: zero(), unread: zero(), waiting: zero() } satisfies Record<View, ViewCount>;
+    for (const mb of boxes) {
+      out.all.threads += agg[mb]?.threads ?? 0;
+      out.all.unread += agg[mb]?.unread ?? 0;
+      for (const status of ACTIVE) {
+        const r = rangeOf(ctx, mb, status, undefined, VIEW_SCAN);
+        const add = (c: ViewCount, list: ThreadRow[]) => {
+          c.threads += list.length;
+          c.unread += list.reduce((n, t) => n + t.unreadCount, 0);
+          c.capped ||= !r.done;
+        };
+        if (!personal.has(mb)) add(out.assigned, r.rows.filter((t) => t.assignee === m.userId));
+        add(out.unread, r.rows.filter((t) => t.unreadCount > 0));
+        if (status === "waiting") add(out.waiting, r.rows);
+      }
+    }
+    return out;
+  },
+});
+
 /** Most sent conversations one `sent` read returns (the list grows its `limit` as it scrolls, up to here). */
 export const SENT_MAX = 300;
 

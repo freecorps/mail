@@ -787,4 +787,63 @@ describe("mail app", () => {
     const refused = await SELF.fetch(`${BASE}/inbox/threads/${again._id}`, { method: "DELETE", headers: { authorization: "Bearer admin-secret" } });
     expect(refused.status).toBe(403);
   });
+  it("views: all, assigned to me, unread and waiting across the member's mailboxes, with counts; personal ones only to their owner", async () => {
+    // Two shared mailboxes and two personal ones: Lia sees va, vb and her own; Rui sees va and his own.
+    for (const name of ["va", "vb"]) expect((await admin.inbox.upsertMailbox({ name, address: `${name}@acme.test` })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "lia", name: "Lia", mailboxes: ["va", "vb"] })).error).toBeNull();
+    expect((await admin.inbox.addMember({ user_id: "rui", name: "Rui", mailboxes: ["va"] })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "lia", address: "lia@acme.test", owner: "lia" })).error).toBeNull();
+    expect((await admin.inbox.upsertMailbox({ name: "rui", address: "rui@acme.test", owner: "rui" })).error).toBeNull();
+    // One message each, oldest first (a few ms apart so "newest first" is unambiguous).
+    const ids: Record<string, string> = {};
+    for (const [key, to] of [["a1", "va"], ["a2", "va"], ["b1", "vb"], ["a3", "va"], ["p2", "rui"], ["b2", "vb"], ["p1", "lia"]] as const) {
+      const m = inbound("ana@user.test", `${to}@acme.test`, mime({ from: "ana@user.test", to: `${to}@acme.test`, subject: `view ${key}`, text: key, id: `view-${key}@user.test` }));
+      await worker.email(m.msg as never, env as never, createExecutionContext());
+      expect(m.out.rejected).toBeNull();
+      const page = (await call("query", "inbox:threads", { mailbox: to }, `user:${to === "rui" ? "rui" : "lia"}`)).value.page as any[];
+      ids[key] = page.find((t) => t.subject === `view ${key}`)._id;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    const view = async (who: string, args: Record<string, unknown>) => (await call("query", "inbox:view", args, `user:${who}`)).value as { page: any[]; isDone: boolean; partial: boolean };
+    const keys = (v: { page: any[] }) => v.page.map((t) => t.subject.slice(5));
+
+    // All: merged newest first across va, vb and her own mailbox; never Rui's.
+    expect(keys(await view("lia", { view: "all" }))).toEqual(["p1", "b2", "a3", "b1", "a2", "a1"]);
+    expect(await view("lia", { view: "all", limit: 2 })).toMatchObject({ isDone: false, partial: false });
+    expect(keys(await view("lia", { view: "all", limit: 2 }))).toEqual(["p1", "b2"]);
+    expect((await view("lia", { view: "all", limit: 6 })).isDone).toBe(true);
+    expect(keys(await view("rui", { view: "all" }))).toEqual(["p2", "a3", "a2", "a1"]);
+
+    // Assign a2 to Lia and a3 to Rui; b1 to Lia, then archived. a1 waits on the contact; a3 and p1 are read.
+    for (const [t, userId] of [["a2", "lia"], ["a3", "rui"], ["b1", "lia"]] as const) expect((await call("mutation", "inbox:assign", { threadId: ids[t], userId }, "user:lia")).ok).toBe(true);
+    expect((await call("mutation", "inbox:setStatus", { threadId: ids.b1, status: "closed" }, "user:lia")).ok).toBe(true);
+    expect((await call("mutation", "inbox:setStatus", { threadId: ids.a1, status: "waiting" }, "user:lia")).ok).toBe(true);
+    for (const t of ["a3", "p1"]) expect((await call("mutation", "inbox:markRead", { threadId: ids[t] }, "user:lia")).ok).toBe(true);
+
+    // Assigned to me: open and waiting ones (b1 is archived), or the status asked for.
+    expect(keys(await view("lia", { view: "assigned" }))).toEqual(["a2"]);
+    expect(keys(await view("lia", { view: "assigned", status: "closed" }))).toEqual(["b1"]);
+    expect(keys(await view("rui", { view: "assigned" }))).toEqual(["a3"]);
+    // Unread: open and waiting threads with unread messages (b1 is archived, a3 and p1 read).
+    expect(keys(await view("lia", { view: "unread" }))).toEqual(["b2", "a2", "a1"]);
+    expect(await view("lia", { view: "unread", limit: 2 })).toMatchObject({ isDone: false });
+    expect(keys(await view("rui", { view: "unread" }))).toEqual(["p2", "a2", "a1"]);
+    // Waiting, and `all` narrowed by status.
+    expect(keys(await view("lia", { view: "waiting" }))).toEqual(["a1"]);
+    expect(keys(await view("lia", { view: "all", status: "closed" }))).toEqual(["b1"]);
+
+    // The home screen's counts: `all` from the aggregate (every thread, unread messages), the rest by thread.
+    expect((await call("query", "inbox:views", {}, "user:lia")).value).toEqual({
+      all: { threads: 6, unread: 4, capped: false },
+      assigned: { threads: 1, unread: 1, capped: false },
+      unread: { threads: 3, unread: 3, capped: false },
+      waiting: { threads: 1, unread: 1, capped: false },
+    });
+    expect((await call("query", "inbox:views", {}, "user:rui")).value).toMatchObject({ all: { threads: 4, unread: 3 }, assigned: { threads: 1, unread: 0 }, unread: { threads: 3 } });
+
+    // Members only; an unknown view is refused by the validator.
+    expect((await call("query", "inbox:view", { view: "all" }, "user:stranger")).error.message).toMatch(/not a member/);
+    expect((await call("query", "inbox:views", {})).error.message).toMatch(/unauthenticated/);
+    expect((await call("query", "inbox:view", { view: "starred" }, "user:lia")).error).toBeTruthy();
+  });
 });

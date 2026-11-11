@@ -118,6 +118,7 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
 
 | Tarefa | Status |
 |---|---|
+| api: visões (`inbox:view`, `inbox:views`) | review |
 | E1 email liso + assinatura + HTML (Ember) | todo |
 | M1 fundação mobile | todo |
 | M2 navegação mobile | todo |
