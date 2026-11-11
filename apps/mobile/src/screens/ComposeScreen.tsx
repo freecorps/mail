@@ -10,7 +10,7 @@
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import { fillSavedReply } from "@freecorps/mail-email-html/compose";
 import { Host, Switch } from "@expo/ui";
-import { router, Stack, useLocalSearchParams, usePreventRemove } from "expo-router";
+import { router, Stack, useIsFocused, useLocalSearchParams, usePreventRemove } from "expo-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActionSheetIOS, Alert, StyleSheet, TextInput, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -20,6 +20,7 @@ import { TokenField } from "../components/token-field";
 import { UploadStrip } from "../components/Uploads";
 import { IconButton, Loading, MenuButton, Separator, ThemedText } from "../components/ui";
 import { useI18n } from "../i18n";
+import { useShortcuts } from "../keys";
 import { formatFull } from "../lib/format";
 import { useUploadOne, useUploads } from "../lib/uploads";
 import { addressOf, contactsFrom, insertText, quoteHeader, quotedMessage, replySubject, replyVars, validToken, withTyped, type ReplyMode } from "../model/compose";
@@ -471,6 +472,9 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
   const savedItems = saved.length
     ? saved.map((r) => ({ key: r._id, label: r.title, onPress: () => (setBody((b) => insertText(b, fillSavedReply(r.text, vars))), touch()) }))
     : [{ key: "none", label: t("compose.noSavedReplies"), disabled: true, onPress: () => {} }];
+
+  // ⌘↩ sends (also from inside a field); Esc closes once no field has the keyboard (the same as Cancel).
+  useShortcuts({ send: ready && !scheduling && (() => send()), close: () => router.back() }, useIsFocused());
 
   // ---- Chrome -------------------------------------------------------------------------------------------------------
   const title = note ? t("compose.noteTitle") : isReply ? t("compose.replyTitle") : kind === "forward" ? t("forward.title") : t("compose.title");

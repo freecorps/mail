@@ -1,6 +1,7 @@
 // Root: providers (gestures, keyboard frame tracking, theme, i18n, Ember, session), then one native stack whose reachable
 // screens follow the session (Stack.Protected): sign-in, "not a member yet", or the tabs with a conversation (pushed
-// over the tabs: no tab bar, like Mail.app), compose (modal) and assign (form sheet) on top.
+// over the tabs: no tab bar, like Mail.app), compose (modal) and assign (form sheet) on top. The hardware keyboard's
+// shortcuts (src/keys.tsx) wrap it all, so every screen's commands reach iOS.
 import { EmberProvider } from "@freecorps/ember-react-native";
 import { Stack } from "expo-router";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router/react-navigation";
@@ -13,6 +14,7 @@ import { useReducedMotion } from "react-native-reanimated";
 import { Loading, UndoBanner } from "../components/ui";
 import { emberClient } from "../ember";
 import { I18nProvider, useI18n } from "../i18n";
+import { KeyCommandsRoot } from "../keys";
 import { outbox } from "../model/outbox";
 import { undoStore } from "../model/undo";
 import { useLanguagePref } from "../prefs";
@@ -30,11 +32,13 @@ export default function RootLayout() {
       <KeyboardProvider>
         <ThemeProvider value={theme}>
           <I18nProvider locale={lang.locale} clock24={lang.clock24}>
-            <EmberProvider client={emberClient}>
-              <SessionProvider lang={lang}>
-                <RootStack />
-              </SessionProvider>
-            </EmberProvider>
+            <KeyCommandsRoot>
+              <EmberProvider client={emberClient}>
+                <SessionProvider lang={lang}>
+                  <RootStack />
+                </SessionProvider>
+              </EmberProvider>
+            </KeyCommandsRoot>
           </I18nProvider>
           <StatusBar style="auto" />
         </ThemeProvider>

@@ -4,11 +4,12 @@
 // Offline / pending shows as a row of its own.
 import { FieldGroup, Host, ListItem, Text } from "@expo/ui";
 import { useConnectionState } from "@freecorps/ember-react-native";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import type { InboxView, Mailbox, ViewCounts } from "../api";
 import { Icons, type IconSpec } from "../components/icons";
 import { EmptyState, ListActions, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
+import { useShortcuts } from "../keys";
 import { byMailbox, tagColor } from "../model/tags";
 import { badge, useMailboxes, useTagIndex, useViewCounts } from "../model/threads";
 import { type, useColors, useTagColors } from "../theme";
@@ -43,6 +44,8 @@ export function HomeScreen() {
   const counts = useViewCounts();
   const conn = useConnectionState();
   const compose = () => router.push("/compose");
+  // ⌘N; ⌘F goes to the search tab (the home has no search bar of its own).
+  useShortcuts({ compose, search: () => router.navigate("/search") }, useIsFocused());
   const hue = useTagColors();
   const { tags: allTags } = useTagIndex();
   const order = vm.mailboxes.map((b) => b.name);

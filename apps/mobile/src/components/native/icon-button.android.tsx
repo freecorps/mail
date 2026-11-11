@@ -9,8 +9,8 @@ import type { IconButtonProps } from "./types";
 export function IconButton({ icon, label, onPress, disabled, variant = "filled" }: IconButtonProps) {
   const c = useColors();
   // Compose tints the glyph with the button's content color; the raster color is only a placeholder.
-  const source = useMaterialSource(icon, 24, variant === "plain" ? c.secondaryText : c.onTint);
-  const Button = variant === "plain" ? StandardIconButton : FilledIconButton;
+  const source = useMaterialSource(icon, 24, variant === "filled" ? c.onTint : c.secondaryText);
+  const Button = variant === "filled" ? FilledIconButton : StandardIconButton;
   return (
     <Host matchContents>
       <Button onClick={onPress} enabled={!disabled} modifiers={[semantics({ contentDescription: label })]}>

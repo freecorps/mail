@@ -5,14 +5,18 @@
 // selects several rows for a bottom toolbar (archive, read/unread, assign). Pull to refresh resyncs the Ember client;
 // archiving offers "Desfazer". The chrome follows the platform: on iOS the filter menu, "Editar" and compose in the
 // navigation bar and the header search bar; on Android FilterChips, a select action in the top app bar and a FAB.
+// A wide window (iPad, a large Android screen) shows the list and the selected conversation side by side: a tap selects
+// (highlighted), the detail pane shows it (ThreadPane), J/K and the arrows move the selection.
 import { useMutation } from "@freecorps/ember-react-native";
-import { router, Stack, useIsFocused, useLocalSearchParams } from "expo-router";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { BackHandler, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { router, Stack, useIsFocused, useLocalSearchParams, useNavigation } from "expo-router";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BackHandler, FlatList, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View, type ListViewToken } from "react-native";
+import type { SearchBarCommands } from "react-native-screens";
 import Animated, { LinearTransition } from "react-native-reanimated";
 import { api, INBOX_VIEWS, type InboxView, type Tag } from "../api";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
 import { SwipeGroupProvider, SwipeRow, useSwipeGroup, type SwipeAction } from "../components/swipe-row";
+import { SplitLayout } from "../components/split-layout";
 import { SkeletonRows, textInset, ThreadRowContent } from "../components/thread-row";
 import { ConnectionBanner, EmptyState, ListActions, ListFilters, NativeButton, RowMenu, Separator, ThemedText } from "../components/ui";
 import type { RowMenuAction } from "../components/native";
@@ -29,6 +33,9 @@ import { formatLater, type LaterChoice } from "../lib/when";
 import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
+import { useShortcuts } from "../keys";
+import { nextAfter, paneLayout, reselect, step } from "../model/split";
+import { ThreadPane, type ThreadHost } from "./ThreadScreen";
 import { screenEdge, spacing, useColors, type Palette } from "../theme";
 
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
@@ -176,6 +183,59 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     if (focused && showRows) setThreadOrder(vm.rows.filter((r) => !r.pending).map((r) => ({ threadId: r.threadId, mailbox: r.mailbox })));
   }, [focused, showRows, vm.rows]);
 
+  // ---- Split (wide window) ---------------------------------------------------------------------------------------
+  const { width } = useWindowDimensions();
+  const layout = paneLayout(width);
+  const split = layout.split;
+  const openable = useMemo(() => (showRows ? vm.rows.filter((r) => !r.pending) : []), [showRows, vm.rows]);
+  const [current, setCurrent] = useState<string | null>(null);
+  // A new list (another filter, a search) starts with nothing open; a conversation that left this one passes the
+  // selection to its neighbor.
+  useEffect(() => setCurrent(null), [filter, debounced, searchOnly]);
+  const shown = useRef(openable);
+  const rowsRef = useRef(openable);
+  useEffect(() => {
+    rowsRef.current = openable;
+    if (vm.status !== "ready") return;
+    const before = shown.current;
+    shown.current = openable;
+    setCurrent((cur) => reselect(before, openable, cur));
+  }, [openable, vm.status]);
+  const paneHost = useMemo<ThreadHost>(
+    () => ({
+      pane: true,
+      leave: () => setCurrent((cur) => (cur ? (nextAfter(rowsRef.current, cur)?.threadId ?? null) : null)),
+      go: (to) => setCurrent(to.threadId),
+    }),
+    [],
+  );
+  const open = useCallback((row: ThreadRow) => setCurrent(row.threadId), []);
+  const listRef = useRef<FlatList<ThreadRow>>(null);
+  const visible = useRef(new Set<string>());
+  const onViewable = useRef(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+    visible.current = new Set(viewableItems.map((v) => (v.item as ThreadRow).threadId));
+  }).current;
+  // J/K and the arrows: the next row, scrolled into view without animation (nothing the keyboard does animates).
+  const move = (dir: 1 | -1) => {
+    const to = step(openable, current, dir);
+    if (!to) return;
+    setCurrent(to.threadId);
+    const index = vm.rows.findIndex((r) => r.threadId === to.threadId);
+    if (index >= 0 && !visible.current.has(to.threadId)) listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 });
+  };
+  const search = useRef<SearchBarCommands>(null);
+  const navigation = useNavigation();
+  useShortcuts(
+    {
+      compose: !searchOnly && (() => compose()),
+      search: () => search.current?.focus(),
+      next: split && (() => move(1)),
+      previous: split && (() => move(-1)),
+      close: split && current ? () => setCurrent(null) : editing ? stopEditing : navigation.canGoBack() && (() => navigation.goBack()),
+    },
+    focused,
+  );
+
   // ---- Pull to refresh -------------------------------------------------------------------------------------------
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -244,6 +304,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
       />
       {android && editing && !query ? null : (
         <Stack.SearchBar
+          ref={search}
           placeholder={searchOnly || source.view ? t("search.placeholder") : t("threads.search")}
           hideWhenScrolling={false}
           autoCapitalize="none"
@@ -251,7 +312,13 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
           onCancelButtonPress={() => setQuery("")}
         />
       )}
+      <SplitLayout
+        split={split}
+        listWidth={layout.split ? layout.listWidth : 0}
+        detail={current ? <ThreadPane threadId={current} host={paneHost} /> : <EmptyState icon={Icons.mail} title={t("split.empty")} />}
+      >
       <Animated.FlatList
+        ref={listRef as never}
         style={{ backgroundColor: c.background }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
@@ -272,6 +339,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
             editing={editing}
             selected={selected.has(item.threadId)}
             onToggle={toggle}
+            current={split && item.threadId === current}
+            onOpen={split && !editing ? open : undefined}
           />
         )}
         ListEmptyComponent={empty}
@@ -286,7 +355,11 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         onEndReachedThreshold={0.5}
         onScrollBeginDrag={group.closeAll}
         refreshControl={showRows ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[c.tint]} /> : undefined}
+        onViewableItemsChanged={onViewable}
+        // Far rows have no measured layout yet: jump by the average row height instead.
+        onScrollToIndexFailed={(info) => listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false })}
       />
+      </SplitLayout>
       {searchOnly ? null : editing ? (
         <EditChrome
           allSelected={allSelected}
@@ -444,6 +517,8 @@ const ThreadItem = memo(function ThreadItem({
   editing,
   selected,
   onToggle,
+  current,
+  onOpen,
 }: {
   row: ThreadRow;
   when: string;
@@ -452,6 +527,10 @@ const ThreadItem = memo(function ThreadItem({
   editing: boolean;
   selected: boolean;
   onToggle(threadId: string): void;
+  /** Shown in the detail pane (split): highlighted like Mail's selected row. */
+  current: boolean;
+  /** Split: a tap selects the row for the detail pane instead of opening the conversation's route. */
+  onOpen: ((row: ThreadRow) => void) | undefined;
 }) {
   const { t, c, prefs } = ops;
   const canAssign = ops.canAssign(row);
@@ -531,9 +610,18 @@ const ThreadItem = memo(function ThreadItem({
 
   return (
     <SwipeRow leading={swipes.leading} trailing={swipes.trailing}>
-      <RowMenu href={href} title={menuTitle(row.subject.trim() || t("threads.noSubject"))} actions={actions} disabled={row.pending}>
+      <RowMenu
+        href={href}
+        title={menuTitle(row.subject.trim() || t("threads.noSubject"))}
+        actions={actions}
+        disabled={row.pending}
+        // Split: no peek (its tap would open the conversation full screen over the pane that already shows it).
+        preview={!onOpen}
+        onOpen={onOpen ? () => onOpen(row) : undefined}
+      >
         <Pressable
           accessibilityRole="button"
+          accessibilityState={{ selected: current }}
           accessibilityLabel={label}
           accessibilityHint={row.snippet}
           // VoiceOver / TalkBack reach the swipe and menu actions through the rotor / actions menu.
@@ -542,7 +630,7 @@ const ThreadItem = memo(function ThreadItem({
           android_ripple={{ color: c.fill }}
           onPressIn={() => setPressed(true)}
           onPressOut={() => setPressed(false)}
-          style={StyleSheet.flatten([styles.pressable, { backgroundColor: pressed && ios ? c.fill : c.background }])}
+          style={StyleSheet.flatten([styles.pressable, { backgroundColor: current ? c.selectedRow : pressed && ios ? c.fill : c.background }])}
         >
           {content}
         </Pressable>

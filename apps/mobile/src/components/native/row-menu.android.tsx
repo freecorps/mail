@@ -8,12 +8,12 @@ import type { RowMenuProps } from "./types";
 
 type Pressy = { onPress?: () => void; onLongPress?: () => void };
 
-export function RowMenu({ children, actions, href, disabled }: RowMenuProps) {
+export function RowMenu({ children, actions, href, disabled, onOpen }: RowMenuProps) {
   const [open, setOpen] = useState(false);
   const row = isValidElement(children)
     ? cloneElement(children as ReactElement<Pressy>, {
         // A disabled row (an optimistic thread not yet on the server) neither opens nor shows the menu.
-        onPress: disabled ? undefined : () => router.push(href as never),
+        onPress: disabled ? undefined : (onOpen ?? (() => router.push(href as never))),
         onLongPress: disabled || !actions.length ? undefined : () => setOpen(true),
       })
     : children;

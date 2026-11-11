@@ -4,11 +4,13 @@
 // conversation of the list it came from; the bottom toolbar (iOS: UIToolbar; Android: the Material floating toolbar
 // with a reply FAB) has Arquivar, Atribuir, Responder and Mais (encaminhar, não lida, copiar link, excluir). Remote
 // images wait behind one compact row ("Carregar imagens", or always for that sender on this device). Responder opens
-// the reply bar in place of the toolbar.
+// the reply bar in place of the toolbar. On a wide iPad window the same view is the detail pane beside the list
+// (`ThreadPane`): no navigation bar of its own, its actions in a bar at the bottom of the pane, leaving it shows the next
+// conversation instead of going back.
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Linking from "expo-linking";
-import { router, Stack, useIsFocused, useIsPreview, useLocalSearchParams } from "expo-router";
+import { router, Stack, useIsFocused, useIsPreview, useLocalSearchParams, useNavigation } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, FlatList, Pressable, StyleSheet, View } from "react-native";
 import { KeyboardChatScrollView } from "react-native-keyboard-controller";
@@ -18,7 +20,7 @@ import { Icons, Symbol, useToolbarIcon, type IconSpec } from "../components/icon
 import { CollapsedMessage, ExpandedMessage } from "../components/message-item";
 import { ReplyFab } from "../components/native/reply-fab";
 import { QuickReply, threadDraft } from "../components/quick-reply";
-import { ConnectionBanner, EmptyState, Loading, MenuButton, NativeButton, Separator, ThemedText } from "../components/ui";
+import { ConnectionBanner, EmptyState, IconButton, Loading, MenuButton, NativeButton, Separator, ThemedText } from "../components/ui";
 import type { MenuItem } from "../components/native";
 import { useI18n } from "../i18n";
 import { hasRemoteImages } from "../lib/emailHtml";
@@ -28,6 +30,8 @@ import { replyAllCc } from "../model/forward";
 import { useMembers, useThread, type MessageItem } from "../model/thread";
 import type { Message, Thread } from "../api";
 import { useThreadNeighbors } from "../model/thread-order";
+import type { OrderEntry } from "../model/thread-view";
+import { useShortcuts } from "../keys";
 import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, senderKey, STATUS_CHOICES, writtenText } from "../model/thread-view";
 import { useOutbox, type OutboxEntry } from "../model/outbox";
 import { isPersonal, useMailboxes } from "../model/threads";
@@ -55,13 +59,45 @@ const STATUS_ICON: Record<ThreadStatus, IconSpec> = {
   spam: Icons.statusSpamMenu,
 };
 
+/** Where a conversation shows, and what leaving it and stepping to a neighbor mean there. */
+export interface ThreadHost {
+  /** The detail pane beside the list (wide iPad window), not a screen of its own. */
+  pane: boolean;
+  /**
+   * Done with it here (archived, snoozed, deleted): back to the list (its route), or on to the next conversation (the
+   * pane). `instant`: from the keyboard, which never animates.
+   */
+  leave(instant?: boolean): void;
+  /** Previous / next conversation of the list. */
+  go(to: OrderEntry): void;
+}
+
 /** Route: `/thread/[threadId]`. The previous / next arrows swap `threadId` in place, and each one starts fresh. */
 export function ThreadScreen() {
   const { threadId, from } = useLocalSearchParams<{ threadId: string; mailbox?: string; from?: string }>();
-  return <ThreadView key={threadId} threadId={threadId} fromList={from === "list"} />;
+  const navigation = useNavigation();
+  const host = useMemo<ThreadHost>(
+    () => ({
+      pane: false,
+      leave: (instant) => {
+        // The keyboard's Esc / E pops without the slide (set on the screen before it goes).
+        if (instant) navigation.setOptions({ animation: "none" });
+        if (instant) requestAnimationFrame(() => router.back());
+        else router.back();
+      },
+      go: (to) => router.setParams({ threadId: to.threadId, mailbox: to.mailbox }),
+    }),
+    [navigation],
+  );
+  return <ThreadView key={threadId} threadId={threadId} fromList={from === "list"} host={host} />;
 }
 
-function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolean }) {
+/** The detail pane of the list beside it (src/screens/ThreadsScreen.tsx): one conversation, remounted per selection. */
+export function ThreadPane({ threadId, host }: { threadId: string; host: ThreadHost }) {
+  return <ThreadView key={threadId} threadId={threadId} fromList={false} host={host} />;
+}
+
+function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: boolean; host: ThreadHost }) {
   const c = useColors();
   const { t } = useI18n();
   const ios = process.env.EXPO_OS === "ios";
@@ -183,7 +219,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     if (!thread) return;
     router.push({ pathname: "/assign", params: { threadId, mailbox: thread.mailbox, current: thread.assignee ?? "" } });
   }, [thread, threadId]);
-  const archive = () => {
+  const archive = (instant = false) => {
     if (!thread) return;
     if (thread.status === "closed") {
       vm.toggleArchive();
@@ -192,7 +228,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     vm.toggleArchive();
     haptics.light();
     offerUndoArchive(t("undo.archived.one", { count: 1 }), [{ threadId, before: thread.status }], vm.restoreStatus);
-    router.back();
+    host.leave(instant);
   };
   const copyLink = () => {
     void Clipboard.setStringAsync(Linking.createURL(`thread/${threadId}`)).then(() => {
@@ -207,7 +243,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         text: t("thread.delete"),
         style: "destructive",
         onPress: () => {
-          router.back();
+          host.leave();
           vm.remove();
         },
       },
@@ -218,9 +254,9 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   const snoozeTarget = () => [{ threadId, until: thread?.snoozed ? (thread.snoozedUntil ?? null) : null }];
   const snoozeAt = (at: number) => {
     snoozer.run(snoozeTarget(), at);
-    router.back();
+    host.leave();
   };
-  const snoozeCustom = () => snoozer.ask(snoozeTarget(), { custom: true, then: () => router.back() });
+  const snoozeCustom = () => snoozer.ask(snoozeTarget(), { custom: true, then: () => host.leave() });
   const unsnooze = () => {
     haptics.light();
     void unsnoozeM({ threadId }).catch(() => {});
@@ -258,18 +294,39 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
     if (plan.as === "reply") router.push({ pathname: "/compose", params: { threadId, mode: m.cc.length ? "all" : "reply", restore } });
     else {
       // A new conversation canceled before it went is gone: it reopens as the forward it was, or as a new message.
-      router.back();
+      host.leave();
       router.push({
         pathname: "/compose",
         params: plan.as === "forward" ? { forwardThread: plan.forwardThread, forwardMessage: plan.forwardMessage, restore } : { mailbox: thread.mailbox, restore },
       });
     }
   };
-  const go = (to: { threadId: string; mailbox: string } | null) => {
+  const go = (to: OrderEntry | null, keyboard = false) => {
     if (!to) return;
-    haptics.selection();
-    router.setParams({ threadId: to.threadId, mailbox: to.mailbox });
+    if (!keyboard) haptics.selection();
+    host.go(to);
   };
+  const replyAll = useCallback(() => router.push({ pathname: "/compose", params: { threadId, mode: "all" } }), [threadId]);
+
+  // ---- Keyboard (iPad) --------------------------------------------------------------------------------------------
+  // The pane leaves moving around, Esc and ⌘N to its list; a conversation on its own route has them all.
+  const keys = focused && !preview && !!thread;
+  useShortcuts(
+    {
+      reply: vm.canReply && !barOpen && startReply,
+      replyAll: vm.canReply && others.length > 0 && replyAll,
+      archive: thread?.status !== "closed" && (() => archive(true)),
+      ...(host.pane
+        ? {}
+        : {
+            next: around.next && (() => go(around.next, true)),
+            previous: around.prev && (() => go(around.prev, true)),
+            close: () => host.leave(true),
+            compose: () => thread && router.push({ pathname: "/compose", params: { mailbox: thread.mailbox } }),
+          }),
+    },
+    keys,
+  );
 
   const unread = (thread?.unreadCount ?? 0) > 0;
   const closed = thread?.status === "closed";
@@ -294,7 +351,41 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
   const activityIcon = useToolbarIcon(Icons.activity, tint);
   const icons = !!(prevIcon && nextIcon && archiveIcon && assignIcon && replyIcon && moreIcon);
 
-  const chrome = (
+  // The More menu of the pane's bar (a native menu button; the route has it in its toolbar).
+  const moreItems: MenuItem[] = thread
+    ? [
+        ...(lastMail ? [{ key: "fwd", label: t("thread.forward"), icon: Icons.forward, onPress: () => forward(lastMail._id) }] : []),
+        { key: "read", label: unread ? t("thread.markRead") : t("thread.markUnread"), icon: unread ? Icons.markRead : Icons.markUnread, onPress: vm.toggleRead },
+        { key: "tags", label: t("thread.tags"), icon: Icons.tag, onPress: openTags },
+        thread.snoozed
+          ? { key: "wake", label: t("thread.unsnooze"), icon: Icons.wake, onPress: unsnooze }
+          : {
+              key: "snooze",
+              label: t("thread.snooze"),
+              icon: Icons.snooze,
+              onPress: () => {},
+              submenu: [
+                ...snoozer.choices().map((x) => ({ key: x.key, label: `${x.label} · ${x.detail}`, icon: Icons.snooze, onPress: () => snoozeAt(x.at) })),
+                { key: "pick", label: t("when.pick"), icon: Icons.calendar, onPress: snoozeCustom },
+              ],
+            },
+        { key: "activity", label: t("thread.activity"), icon: Icons.activity, onPress: openActivity },
+        { key: "link", label: t("thread.copyLink"), icon: Icons.link, onPress: copyLink },
+        ...(canDelete ? [{ key: "delete", label: t("thread.delete"), icon: Icons.trash, destructive: true, onPress: confirmDelete }] : []),
+      ]
+    : [];
+  const paneBar =
+    thread && !barOpen ? (
+      <View style={[styles.paneBar, { borderTopColor: c.separator, backgroundColor: c.background, paddingBottom: Math.max(insets.bottom, spacing.sm) }]}>
+        <IconButton variant="toolbar" icon={closed ? Icons.unarchive : Icons.archive} label={closed ? t("thread.unarchive") : t("thread.archive")} onPress={() => archive()} />
+        {personal ? null : <IconButton variant="toolbar" icon={Icons.assign} label={t("thread.assign")} onPress={assignSheet} />}
+        <MenuButton variant="icon" icon={Icons.more} label={t("thread.more")} items={moreItems} />
+        <View style={styles.grow} />
+        {vm.canReply ? <NativeButton variant="filled" label={t("thread.reply")} onPress={startReply} /> : null}
+      </View>
+    ) : null;
+
+  const chrome = host.pane ? null : (
     <>
       <Stack.Screen options={{ title: thread?.number ? t("thread.title", { number: thread.number }) : "" }} />
       {icons && (around.prev || around.next) ? (
@@ -309,7 +400,7 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
       ) : null}
       {thread && icons && !barOpen ? (
         <Stack.Toolbar placement="bottom">
-          <Stack.Toolbar.Button icon={archiveIcon} accessibilityLabel={closed ? t("thread.unarchive") : t("thread.archive")} onPress={archive}>
+          <Stack.Toolbar.Button icon={archiveIcon} accessibilityLabel={closed ? t("thread.unarchive") : t("thread.archive")} onPress={() => archive()}>
             {closed ? t("thread.unarchive") : t("thread.archive")}
           </Stack.Toolbar.Button>
           <Stack.Toolbar.Spacer />
@@ -532,14 +623,23 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
         // The list rides the keyboard with the reply bar (react-native-keyboard-controller's chat scroll view), so the
         // end of the conversation stays above both.
         renderScrollComponent={(props) => <KeyboardChatScrollView {...props} offset={insets.bottom} />}
-        // Android: room for the floating toolbar and the FAB over the end of the conversation.
-        contentContainerStyle={{ paddingBottom: !ios && !barOpen && !preview ? 96 : spacing.lg }}
+        // Android: room for the floating toolbar and the FAB over the end of the conversation (the pane has its bar).
+        contentContainerStyle={{ paddingBottom: !ios && !host.pane && !barOpen && !preview ? 96 : spacing.lg }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="interactive"
         keyboardShouldPersistTaps="handled"
       />
       {preview ? null : barOpen ? (
         <QuickReply thread={thread} messages={vm.items.map((i) => i.message)} others={others} notes={!!box && !personal} focus={opened_ === "focus"} onClose={closeBar} onExpand={expandBar} onUndone={reopenBar} />
+      ) : host.pane ? (
+        <>
+          {!vm.canReply ? (
+            <ThemedText variant="subheadline" tone="secondary" style={styles.spam}>
+              {t("thread.spamNoReply")}
+            </ThemedText>
+          ) : null}
+          {paneBar}
+        </>
       ) : !vm.canReply ? (
         // Android: above the floating toolbar, which covers the bottom of the screen; iOS: above the home indicator.
         <ThemedText variant="subheadline" tone="secondary" style={[styles.spam, { paddingBottom: !ios && thread && icons ? 96 : insets.bottom + spacing.lg }]}>
@@ -592,4 +692,5 @@ const styles = StyleSheet.create({
   expandRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: screenEdge, paddingTop: spacing.md, paddingBottom: spacing.sm },
   pressed: { opacity: 0.5 },
   spam: { textAlign: "center", padding: spacing.lg },
+  paneBar: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.md, paddingTop: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
 });

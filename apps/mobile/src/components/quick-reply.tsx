@@ -5,13 +5,14 @@
 // the conversation is opened again, on any of their devices. A reply waits out the undo-send delay as a pending
 // message; a note goes at once (it is never emailed).
 import { useConnectionState, useMutation, useQuery } from "@freecorps/ember-react-native";
-import { router } from "expo-router";
+import { router, useIsFocused } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, TextInput, View, type LayoutChangeEvent, type TextInputInstance } from "react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api, type Draft, type Message, type Thread } from "../api";
 import { useI18n } from "../i18n";
+import { useShortcuts } from "../keys";
 import { useUploadOne, useUploads } from "../lib/uploads";
 import { draftReplyMode, quoteHeader, quotedMessage, replyState, type ReplyMode } from "../model/compose";
 import { createDraftSaver, replyDraftArgs } from "../model/draft-saver";
@@ -282,6 +283,8 @@ export function QuickReply({
       );
     clearBar();
   };
+  // ⌘↩ sends from the field (iPad with a keyboard).
+  useShortcuts({ send: canSend && !scheduling && (() => send()) }, useIsFocused());
 
   const expand = async () => {
     holding.current = true;
