@@ -428,7 +428,7 @@ export const webhookSecret = query({
   args: { id: v.string() },
   handler: (ctx, a) => {
     adminOf(ctx);
-    return (ctx.runQuery("webhooks:get" as any, a) as { signing_secret: string }).signing_secret;
+    return ctx.runQuery("webhooks:secret" as any, a) as string;
   },
 });
 

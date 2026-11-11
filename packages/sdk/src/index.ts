@@ -319,6 +319,7 @@ export async function verifyWebhook<D = Record<string, unknown>>(o: {
   } catch {
     throw new WebhookVerificationError("the secret is not a whsec_ base64 secret");
   }
+  if (!raw.length) throw new WebhookVerificationError("the secret is empty");
   const key = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
   const data = new TextEncoder().encode(`${id}.${t}.${o.body}`);
   for (const part of sig.split(" ")) {
@@ -512,7 +513,8 @@ export class EmberMail {
     create: (o: { endpoint: string; events: WebhookEventType[]; project?: string | null; mailboxes?: string[] | null; description?: string | null }) =>
       this.request<{ object: "webhook"; id: string; signing_secret: string }>("POST", "/webhooks", o),
     list: () => this.request<{ object: "list"; data: Webhook[] }>("GET", "/webhooks"),
-    get: (id: string) => this.request<Webhook & { object: "webhook"; signing_secret: string }>("GET", `/webhooks/${encodeURIComponent(id)}`),
+    /** The webhook, without its secret (`create` and `rotateSecret` return that). */
+    get: (id: string) => this.request<Webhook & { object: "webhook" }>("GET", `/webhooks/${encodeURIComponent(id)}`),
     /** Patch: absent fields keep their value; null clears `project`, `mailboxes`, `description`. */
     update: (id: string, o: { endpoint?: string; events?: WebhookEventType[]; project?: string | null; mailboxes?: string[] | null; description?: string | null; enabled?: boolean }) =>
       this.request<Webhook & { object: "webhook" }>("PATCH", `/webhooks/${encodeURIComponent(id)}`, o),

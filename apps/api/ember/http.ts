@@ -16,7 +16,7 @@
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
 //   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
 //   GET    /webhooks               POST /webhooks { endpoint, events, project?, mailboxes?, description? } → signing_secret
-//   GET    /webhooks/:id           PATCH /webhooks/:id { endpoint?, events?, project?, mailboxes?, description?, enabled? }
+//   GET    /webhooks/:id (no secret: create and rotate return it)   PATCH /webhooks/:id { endpoint?, events?, project?, mailboxes?, description?, enabled? }
 //   DELETE /webhooks/:id           POST /webhooks/:id/rotate | /test     GET /webhooks/:id/deliveries
 //   POST   /webhooks/deliveries/:id/retry
 //

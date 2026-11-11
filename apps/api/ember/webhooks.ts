@@ -105,6 +105,26 @@ export const load = internalQuery({
   },
 });
 
+/** The first `max` characters of a response body, reading no more than needed (an error page may be huge). */
+async function head(res: Response, max: number): Promise<string> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const dec = new TextDecoder();
+  let text = "";
+  try {
+    while (text.length < max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += dec.decode(value, { stream: true });
+    }
+  } catch {
+    // a broken body: keep what came
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return text.slice(0, max);
+}
+
 /** One attempt: POST the stored body, signed, within TIMEOUT_MS; the outcome goes to `record`. */
 export const deliver = internalAction({
   args: { id: v.string() },
@@ -141,7 +161,7 @@ export const deliver = internalAction({
       });
       status = res.status;
       ok = res.status >= 200 && res.status < 300;
-      if (!ok) error = `HTTP ${res.status}${(await res.text().catch(() => "")).slice(0, 200).replace(/^(.)/, " $1")}`;
+      if (!ok) error = `HTTP ${res.status}${(await head(res, 200)).replace(/^(.)/, " $1")}`;
       else await res.body?.cancel();
     } catch (e) {
       error = (e as Error)?.name === "TimeoutError" ? `timeout after ${TIMEOUT_MS / 1000} s` : String((e as Error)?.message ?? e).slice(0, 300);
@@ -262,16 +282,17 @@ const byId = (ctx: { db: Db }, id: string) => {
 };
 
 /**
- * Pausing holds a webhook's pending deliveries (their attempts canceled); turning it back on schedules them. One batch
- * of 500 pending rows from `from` (their `at`, oldest first); true when there may be more (the caller schedules
- * `setPendingJob` to go on). Rows already in the wanted state are skipped, so a batch boundary never repeats work.
+ * Pausing holds a webhook's pending deliveries (their attempts canceled); turning it back on schedules them. One page
+ * of 500 pending rows (oldest first); the cursor of the next one, or false when done (the caller schedules
+ * `setPendingJob` to go on).
  */
-function setPending(ctx: MCtx, webhookId: string, enabled: boolean, from: number): number | false {
-  const rows = ctx.db
-    .query("webhookDeliveries")
-    .withIndex("by_webhook_status", (q: any) => q.eq("webhookId", webhookId).eq("status", "pending").gte("at", from))
-    .take(500) as Array<{ _id: string; at: number; jobId?: string }>;
-  for (const d of rows) {
+function setPending(ctx: MCtx, webhookId: string, enabled: boolean, cursor: string | null): string | false {
+  const page = (ctx.db.query("webhookDeliveries").withIndex("by_webhook_status", (q: any) => q.eq("webhookId", webhookId).eq("status", "pending")) as any).paginate({ numItems: 500, cursor }) as {
+    page: Array<{ _id: string; jobId?: string }>;
+    isDone: boolean;
+    continueCursor: string;
+  };
+  for (const d of page.page) {
     if (!enabled && d.jobId) {
       ctx.scheduler.cancel(d.jobId);
       ctx.db.patch(d._id, { jobId: undefined });
@@ -279,19 +300,18 @@ function setPending(ctx: MCtx, webhookId: string, enabled: boolean, from: number
       ctx.db.patch(d._id, { jobId: ctx.scheduler.runAfter(0, "webhooks:deliver" as any, { id: d._id }), nextAt: ctx.now });
     }
   }
-  const last = rows[rows.length - 1]?.at;
-  // A full batch goes on from its last `at` (no progress: 500 rows share one instant, stop rather than loop).
-  return rows.length === 500 && last !== undefined && last > from ? last : false;
+  // Patching jobId leaves the index fields alone, so the cursor stays valid across the batches.
+  return page.isDone ? false : page.continueCursor;
 }
 
 export const setPendingJob = internalMutation({
-  args: { webhookId: v.string(), enabled: v.boolean(), from: v.number() },
+  args: { webhookId: v.string(), enabled: v.boolean(), cursor: v.string() },
   handler: (ctx, a) => {
     const w = ctx.db.get(a.webhookId as any) as WebhookDoc | null;
     // Toggled again meanwhile: the newer toggle runs its own pass.
     if (!w || w.enabled !== a.enabled) return null;
-    const next = setPending(ctx as any, a.webhookId, a.enabled, a.from);
-    if (next !== false) ctx.scheduler.runAfter(0, "webhooks:setPendingJob" as any, { ...a, from: next });
+    const next = setPending(ctx as any, a.webhookId, a.enabled, a.cursor);
+    if (next !== false) ctx.scheduler.runAfter(0, "webhooks:setPendingJob" as any, { ...a, cursor: next });
     return null;
   },
 });
@@ -312,8 +332,8 @@ export const update = internalMutation({
     const w = byId(ctx as any, a.id);
     checkScope(ctx as any, a);
     if (a.enabled !== undefined && a.enabled !== w.enabled) {
-      const next = setPending(ctx as any, w._id, a.enabled, 0);
-      if (next !== false) ctx.scheduler.runAfter(0, "webhooks:setPendingJob" as any, { webhookId: w._id, enabled: a.enabled, from: next });
+      const next = setPending(ctx as any, w._id, a.enabled, null);
+      if (next !== false) ctx.scheduler.runAfter(0, "webhooks:setPendingJob" as any, { webhookId: w._id, enabled: a.enabled, cursor: next });
     }
     ctx.db.patch(w._id as any, {
       ...(a.endpoint !== undefined ? { endpoint: checkEndpoint(a.endpoint) } : {}),
@@ -361,7 +381,9 @@ export const dropDeliveries = internalMutation({
 });
 
 export const list = internalQuery({ args: {}, handler: (ctx) => (ctx.db.query("webhooks").collect() as WebhookDoc[]).sort((a, b) => a.createdAt - b.createdAt).map(view) });
-export const get = internalQuery({ args: { id: v.string() }, handler: (ctx, a) => ({ ...view(byId(ctx as any, a.id)), signing_secret: byId(ctx as any, a.id).secret }) });
+export const get = internalQuery({ args: { id: v.string() }, handler: (ctx, a) => view(byId(ctx as any, a.id)) });
+/** The signing secret alone: shown at create and rotate, and on demand in the admin screen; never in a plain read. */
+export const secret = internalQuery({ args: { id: v.string() }, handler: (ctx, a) => byId(ctx as any, a.id).secret });
 
 export const deliveries = internalQuery({
   args: { id: v.string(), limit: v.optional(v.number()) },

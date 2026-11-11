@@ -146,5 +146,6 @@ describe("verifyWebhook (Standard Webhooks)", () => {
     await expect(verifyWebhook({ secret, headers, body, now: (ts + 301) * 1000 })).rejects.toThrow(/timestamp/);
     await expect(verifyWebhook({ secret, headers: { "webhook-id": id }, body })).rejects.toThrow(/missing/);
     await expect(verifyWebhook({ secret: "whsec_not base64!", headers, body, now: ts * 1000 })).rejects.toBeInstanceOf(WebhookVerificationError);
+    await expect(verifyWebhook({ secret: "whsec_", headers, body, now: ts * 1000 })).rejects.toThrow(/empty/);
   });
 });

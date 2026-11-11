@@ -672,7 +672,10 @@ describe("mail app", () => {
       const acme = await admin.webhooks.create({ endpoint: "https://hooks.test/acme", events: ["email.delivered"], project: "acme" });
       const sales = await admin.webhooks.create({ endpoint: "https://hooks.test/privacy", events: ["email.received"], mailboxes: ["privacy"] });
       expect((await admin.webhooks.list()).data!.data.map((w) => w.endpoint)).toEqual(["https://hooks.test/all", "https://hooks.test/acme", "https://hooks.test/privacy"]);
-      expect((await admin.webhooks.get(all.data!.id)).data).toMatchObject({ signing_secret: all.data!.signing_secret, events: ["email.received", "email.delivered"], description: "everything" });
+      const read = (await admin.webhooks.get(all.data!.id)).data!;
+      expect(read).toMatchObject({ events: ["email.received", "email.delivered"], description: "everything" });
+      expect(read).not.toHaveProperty("signing_secret"); // only create and rotate return it
+      expect((await call("query", "console:webhookSecret", { id: all.data!.id }, "user:root-1")).value).toBe(all.data!.signing_secret);
       expect((await sender.webhooks.list()).error).toMatchObject({ statusCode: 403 });
 
       // email.received: support → only the unfiltered webhook; signed per Standard Webhooks.
