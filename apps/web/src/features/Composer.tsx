@@ -53,6 +53,7 @@ export function Composer({
   const { t } = useI18n();
   const reply = useMutation(api.inbox.reply);
   const note = useMutation(api.inbox.note);
+  const saveDraft = useMutation(api.inbox.saveDraft);
   const [picked, setMode] = useState<ComposerMode>("reply");
   const mode = composerMode(picked, p.notes);
   const editor = useRef<RichEditorHandle>(null);
@@ -239,13 +240,32 @@ export function Composer({
     const draft = hold.draft;
     editor.current?.clear();
     uploads.clear();
+    // What was sent, as its draft: an undo or a failure after this composer is gone writes it back, so the text
+    // comes back when the conversation opens again (the pending save was dropped by the send, and the server draft
+    // may predate the last keystrokes).
+    const snapshot: SaveDraftArgs =
+      m === "note"
+        ? { kind: "note", threadId: p.threadId, text }
+        : {
+            kind: "reply",
+            threadId: p.threadId,
+            text,
+            bodyHtml: html,
+            ...(cc ? { cc } : {}),
+            ...(files.length ? { attachments: files } : {}),
+          };
     const restore = () => {
-      hold.release();
       void draft.then((id) => {
-        if (id && mounted.current) autosave.adopt(id);
+        if (mounted.current) {
+          if (id) autosave.adopt(id);
+          hold.release();
+          return;
+        }
+        // Released only once written back, so the conversation does not restore the older draft in between.
+        void saveDraft({ ...snapshot, ...(id ? { id } : {}) })
+          .catch(() => {})
+          .finally(() => hold.release());
       });
-      // Gone (another conversation opened): the draft is still on the server, released, so it comes back when the
-      // conversation opens again.
       if (!mounted.current) return;
       sending.current = false;
       setMode(m);
@@ -311,6 +331,8 @@ export function Composer({
       >
         <LazyEditor
           handle={editor}
+          // Remounted (the thread left spam, a lazy load): it starts from what was written, not blank.
+          initialHtml={body.html}
           label={isNote ? t("thread.note") : t("thread.replyMode")}
           placeholder={isNote ? t("thread.notePlaceholder") : t("thread.replyPlaceholder", { name: p.contact.name })}
           onChange={(v) => {
