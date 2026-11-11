@@ -239,3 +239,16 @@ describe("response order: handled only once the action is sent or queued on disk
     expect(tap.log).toEqual(["markHandled", "clearLast", "route"]);
   });
 });
+
+describe("Android task payload", () => {
+  it("a response is read checked, flat or under notificationResponse; anything else is null, never a throw", async () => {
+    const { responseOf } = await import("../src/push/mail-push");
+    const flat = { actionIdentifier: "archive", notification: { date: 5, request: { identifier: "n1", content: { data: { threadId: "t" } } } } };
+    expect(responseOf(flat)).toMatchObject({ actionIdentifier: "archive", userText: null, notification: { date: 5, request: { identifier: "n1", content: { data: { threadId: "t" } } } } });
+    expect(responseOf({ notificationResponse: { ...flat, userText: "Oi" } })).toMatchObject({ actionIdentifier: "archive", userText: "Oi" });
+    expect(responseOf({ actionIdentifier: "archive" })).toBeNull();
+    expect(responseOf({ actionIdentifier: "archive", notification: { request: {} } })).toBeNull();
+    expect(responseOf(null)).toBeNull();
+    expect(responseOf("x")).toBeNull();
+  });
+});

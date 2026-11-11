@@ -26,6 +26,7 @@ import {
   mailboxChannels,
   mailDataOf,
   remember,
+  responseOf,
   staleChannels,
   type ActionCall,
   type PushAction,
@@ -193,7 +194,13 @@ export function installNotificationResponses(): void {
  * shows the server's fallback text: never silence.
  */
 export async function onPushTask(payload: unknown): Promise<void> {
-  if (payload && typeof payload === "object" && "actionIdentifier" in payload) return handleResponse(payload as Notifications.NotificationResponse);
+  // A tapped action (any nesting the task delivers it in), checked before anything reads it.
+  const response = responseOf(payload);
+  if (response) return handleResponse(response as unknown as Notifications.NotificationResponse);
+  if (payload && typeof payload === "object" && ("actionIdentifier" in payload || "notificationResponse" in payload)) {
+    console.warn("[push] action payload without a usable response");
+    return;
+  }
   const sealed = extractEncryptedPush(payload);
   if (!sealed) return;
   try {

@@ -149,3 +149,23 @@ export function androidNotification(
     },
   };
 }
+
+/**
+ * A notification response from the Android push task's payload, checked: the task's payload is untyped, and a
+ * response nested differently (under `notificationResponse`, or without its request) must not throw halfway. Null when
+ * it is not a usable response (the task then shows nothing and handles nothing).
+ */
+export function responseOf(payload: unknown): { actionIdentifier: string; userText?: string | null; notification: { date: number; request: { identifier: string; content: { data?: unknown } } } } | null {
+  const o = payload as Record<string, any> | null;
+  if (!o || typeof o !== "object") return null;
+  const r = typeof o.actionIdentifier === "string" ? o : o.notificationResponse && typeof o.notificationResponse === "object" ? o.notificationResponse : null;
+  if (!r || typeof r.actionIdentifier !== "string") return null;
+  const n = r.notification;
+  const id = n?.request?.identifier;
+  if (typeof id !== "string") return null;
+  return {
+    actionIdentifier: r.actionIdentifier,
+    userText: typeof r.userText === "string" ? r.userText : null,
+    notification: { date: typeof n.date === "number" ? n.date : 0, request: { identifier: id, content: { data: n.request.content?.data } } },
+  };
+}
