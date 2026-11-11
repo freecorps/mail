@@ -67,3 +67,27 @@ export function afterListChange<T extends Keyed>(before: readonly T[], after: re
   if (current === null || after.some((r) => r.threadId === current)) return current;
   return acted.has(current) ? reselect(before, after, current) : current;
 }
+
+/**
+ * J/K from the open conversation: the row `dir` away. Listed, the one beside it (`step`). No longer listed (kept open by
+ * `afterListChange`), its neighbor in `where`, the list it was last seen in, that is still listed now; so the keys go
+ * on from where it was, not from the top.
+ */
+export function stepFrom<T extends Keyed>(rows: readonly T[], where: readonly Keyed[] | null, current: string | null, dir: 1 | -1): T | null {
+  const i = current === null || !where || rows.some((r) => r.threadId === current) ? -1 : where.findIndex((r) => r.threadId === current);
+  if (i < 0 || !where) return step(rows, current, dir);
+  const now = new Map(rows.map((r) => [r.threadId, r]));
+  for (let j = i + dir; j >= 0 && j < where.length; j += dir) {
+    const r = now.get(where[j]!.threadId);
+    if (r) return r;
+  }
+  return null;
+}
+
+/** What the pane shows once its conversation leaves from the pane (archive, snooze, delete): `nextAfter` when it is
+ * listed; kept off the list, its surviving neighbor in `where`, below it first. */
+export function leaveFrom<T extends Keyed>(rows: readonly T[], where: readonly Keyed[] | null, current: string): T | null {
+  if (rows.some((r) => r.threadId === current)) return nextAfter(rows, current);
+  if (!where?.some((r) => r.threadId === current)) return null;
+  return stepFrom(rows, where, current, 1) ?? stepFrom(rows, where, current, -1);
+}

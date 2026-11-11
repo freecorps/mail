@@ -34,7 +34,7 @@ import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
 import { useShortcuts } from "../keys";
-import { afterListChange, nextAfter, paneLayout, step } from "../model/split";
+import { afterListChange, leaveFrom, paneLayout, stepFrom } from "../model/split";
 import { ThreadPane, type ThreadHost } from "./ThreadScreen";
 import { screenEdge, spacing, useColors, type Palette } from "../theme";
 
@@ -209,10 +209,16 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     shown.current = openable;
     setCurrent((cur) => afterListChange(before, openable, cur, acted.current));
   }, [openable, vm.status]);
+  // The list the open conversation was last seen in: once it is kept open off the list, the pane's next and J/K go on
+  // from where it was.
+  const where = useRef<readonly ThreadRow[] | null>(null);
+  useEffect(() => {
+    if (current && openable.some((r) => r.threadId === current)) where.current = openable;
+  }, [current, openable]);
   const paneHost = useMemo<ThreadHost>(
     () => ({
       pane: true,
-      leave: () => setCurrent((cur) => (cur ? (nextAfter(rowsRef.current, cur)?.threadId ?? null) : null)),
+      leave: () => setCurrent((cur) => (cur ? (leaveFrom(rowsRef.current, where.current, cur)?.threadId ?? null) : null)),
       go: (to) => {
         acted.current.clear();
         setCurrent(to.threadId);
@@ -231,8 +237,9 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   }).current;
   // J/K and the arrows: the next row, scrolled into view without animation (nothing the keyboard does animates).
   const move = (dir: 1 | -1) => {
-    const to = step(openable, current, dir);
+    const to = stepFrom(openable, where.current, current, dir);
     if (!to) return;
+    acted.current.clear();
     setCurrent(to.threadId);
     const index = vm.rows.findIndex((r) => r.threadId === to.threadId);
     if (index >= 0 && !visible.current.has(to.threadId)) listRef.current?.scrollToIndex({ index, animated: false, viewPosition: 0.5 });

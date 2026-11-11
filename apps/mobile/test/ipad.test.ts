@@ -1,7 +1,7 @@
 // iPad: the split layout by window width, moving the selection, and the hardware keyboard's commands and registry.
 import { describe, expect, it, vi } from "vitest";
 import { translate } from "../src/i18n/strings";
-import { afterListChange, nextAfter, paneLayout, reselect, SPLIT_MIN_WIDTH, step } from "../src/model/split";
+import { afterListChange, leaveFrom, nextAfter, paneLayout, reselect, SPLIT_MIN_WIDTH, step, stepFrom } from "../src/model/split";
 import { actionOf, BINDINGS, createShortcutRegistry, keyCommands, SHORTCUT_TITLES, type ShortcutAction } from "../src/model/shortcuts";
 
 const rows = (...ids: string[]) => ids.map((threadId) => ({ threadId }));
@@ -57,6 +57,20 @@ describe("selection", () => {
     expect(afterListChange(list, rows("b", "c"), "a", new Set(["a"]))).toBe("b");
     expect(afterListChange(list, rows("a", "c"), "a", new Set(["a"]))).toBe("a");
     expect(afterListChange(list, list, null, new Set(["a"]))).toBeNull();
+  });
+
+  it("from a conversation kept open off the list, J/K and the pane's archive go on from where it was", () => {
+    const was = rows("a", "b", "c", "d");
+    const now = rows("a", "c", "d"); // "b" was read in Não lidas and left
+    expect(ids(stepFrom(now, was, "b", 1))).toBe("c");
+    expect(ids(stepFrom(now, was, "b", -1))).toBe("a");
+    expect(stepFrom(rows("a"), was, "d", 1)).toBeNull();
+    // Listed: as before.
+    expect(ids(stepFrom(now, was, "c", 1))).toBe("d");
+    expect(ids(leaveFrom(now, was, "b"))).toBe("c");
+    expect(ids(leaveFrom(rows("a"), was, "b"))).toBe("a");
+    expect(ids(leaveFrom(now, was, "c"))).toBe("d");
+    expect(leaveFrom(now, null, "b")).toBeNull();
   });
 
   it("keeps a selection still listed and hands a vanished one to its surviving neighbor", () => {
