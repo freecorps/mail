@@ -6,7 +6,8 @@ import { useEmberClient } from "@freecorps/ember-react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export type AttachmentArg = { file: string; filename: string; contentType: string };
+/** A file of a send or draft. `size`: its bytes when known (a draft's files carry the server's; the server ignores a client's). */
+export type AttachmentArg = { file: string; filename: string; contentType: string; size?: number };
 
 export type Upload = {
   id: string;
@@ -75,7 +76,7 @@ export function useUploads(uploadOne: UploadOne, pick: () => Promise<PickedFile[
     if (!files.length) return;
     setItems((xs) => {
       const have = new Set(xs.map((x) => x.file));
-      const more = files.filter((f) => !have.has(f.file)).map((f) => ({ id: `u${++seq.current}`, name: f.filename, type: f.contentType, size: 0, loaded: 0, status: "ready" as const, file: f.file }));
+      const more = files.filter((f) => !have.has(f.file)).map((f) => ({ id: `u${++seq.current}`, name: f.filename, type: f.contentType, size: f.size ?? 0, loaded: f.size ?? 0, status: "ready" as const, file: f.file }));
       return [...xs, ...more];
     });
   }, []);
@@ -86,6 +87,8 @@ export function useUploads(uploadOne: UploadOne, pick: () => Promise<PickedFile[
 
   const busy = items.some((x) => x.status === "uploading");
   const failed = items.some((x) => x.status === "failed");
-  const attachments: AttachmentArg[] = items.filter((x) => x.status === "ready").map((x) => ({ file: x.file!, filename: x.name, contentType: x.type }));
+  // With the size when known (a draft's stored one, or the picked file's), so a restored draft or an undone send
+  // knows whether it may be scheduled.
+  const attachments: AttachmentArg[] = items.filter((x) => x.status === "ready").map((x) => ({ file: x.file!, filename: x.name, contentType: x.type, ...(x.size ? { size: x.size } : {}) }));
   return { items, add, remove, restore, clear, busy, failed, attachments };
 }
