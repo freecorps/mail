@@ -8,15 +8,27 @@ Stack: [Vite+](https://viteplus.dev) (`vp`), React 19, [shadcn/ui](https://ui.sh
 Better Auth's client, and Ember's React client (`@freecorps/ember-react` over `@freecorps/ember-client`). It calls the
 same `inbox:*` functions as mobile.
 
-| Inbox                                             | Conversation                                              | Compose                                               |
+## Screenshots
+
+Taken at 1440 × 900 and 375 × 812 from a local `ember dev` with the sample data under [Develop](#develop), a few more
+inbound demo conversations and a second teammate (`.test` addresses only), in pt-BR.
+
+| Inbox: tags, assignees, Aguardando                | Conversation: activity, note, signature                   | Compose windows (one open, one minimized)             |
 | ------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------- |
 | ![Inbox, light](docs/screenshots/inbox-light.png) | ![Conversation, light](docs/screenshots/thread-light.png) | ![Compose, light](docs/screenshots/compose-light.png) |
 | ![Inbox, dark](docs/screenshots/inbox-dark.png)   | ![Conversation, dark](docs/screenshots/thread-dark.png)   | ![Compose, dark](docs/screenshots/compose-dark.png)   |
 
-| ⌘K                                                            | Phone (375px)                                     |
-| ------------------------------------------------------------- | ------------------------------------------------- |
-| ![Command palette, light](docs/screenshots/palette-light.png) | ![Phone, light](docs/screenshots/phone-light.png) |
-| ![Command palette, dark](docs/screenshots/palette-dark.png)   | ![Phone, dark](docs/screenshots/phone-dark.png)   |
+| Tag menu (`l`)                                      | ⌘K on the open conversation                                   | Adiadas (snoozed)                                     |
+| --------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------------------- |
+| ![Tag menu, light](docs/screenshots/tags-light.png) | ![Command palette, light](docs/screenshots/palette-light.png) | ![Snoozed, light](docs/screenshots/snoozed-light.png) |
+| ![Tag menu, dark](docs/screenshots/tags-dark.png)   | ![Command palette, dark](docs/screenshots/palette-dark.png)   | ![Snoozed, dark](docs/screenshots/snoozed-dark.png)   |
+
+| Phone: list                                       | Phone: conversation                                                   | Phone: composer (full screen)                                      |
+| ------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| ![Phone, light](docs/screenshots/phone-light.png) | ![Phone conversation, light](docs/screenshots/phone-thread-light.png) | ![Phone composer, light](docs/screenshots/phone-compose-light.png) |
+| ![Phone, dark](docs/screenshots/phone-dark.png)   | ![Phone conversation, dark](docs/screenshots/phone-thread-dark.png)   | ![Phone composer, dark](docs/screenshots/phone-compose-dark.png)   |
+
+The admin screen is under [Administration](#administration).
 
 ## Features
 
@@ -44,6 +56,7 @@ same `inbox:*` functions as mobile.
 | Keyboard                          | `j`/`k` (or ↓/↑) move through the list, and open the next thread when one is already open. `Enter`/`o` opens. `x` selects, `shift+j`/`shift+k` extend the selection. `e` archives (the selection when there is one). `u` marks unread. `h` snoozes, `l` tags. `r` replies. `n` writes a note. `c` composes. `i` shows the context panel. `/` searches. `[` collapses or expands the sidebar. `⌘K` / `Ctrl+K` opens the command palette (go to a view, mailbox or admin section, search conversations, archive / assign / change status on the open one, compose, theme, density, layout), with no open/close animation. `Esc` leaves a field or closes the thread. `?` lists all the shortcuts. Shortcuts keep working after a click inside an email (the frame forwards keys). `⌘/Ctrl+Enter` sends, `⌘/Ctrl+Shift+Enter` sends later. In a compose window `Esc` minimizes it and the inbox keys stay off.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | Context panel                     | `i` or the header button: the contact (copy the address), their earlier conversations (`inbox:search` on their address, every mailbox you see) and every file in the conversation. Beside the messages when the pane is at least 760px wide (remembered), over them otherwise (each time).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Accessibility                     | Semantic landmarks (`nav`, `main`, sections with labels), real buttons and links, Radix menus and dialogs (focus trap, Esc, roving focus), `aria-current` on the open thread and mailbox, screen-reader text for unread state, visible focus rings, and `prefers-reduced-motion`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Phone                             | One pane at a time below 768px: the sidebar is a picker in the list header, a floating button composes, the conversation has its actions in the back bar, and below 640px compose windows open full screen. `viewport-fit=cover` with safe-area padding (shell, button, toasts, the compose dock), 16px editor text on touch screens so iOS does not zoom, no long-press selection on controls, and a `theme-color` that follows the chosen theme.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Theme                             | System, light or dark, and a comfortable or compact density, set in the account menu. Both are applied before first paint (`public/theme.js`). Email bodies stay on white, as senders design them. Type scale, radius, elevation, density and motion are tokens in `src/index.css`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 
 Not in the web inbox: push and the offline replica. Mobile keeps mail on the device. The web keeps nothing in browser
@@ -68,9 +81,9 @@ the `console:*` functions (`apps/api/ember/console.ts`), which check `admin` on 
 A personal mailbox stays its owner's business here too: admins see that it exists and who owns it, never its counts,
 its sent emails or its suppressions.
 
-| Light                                                      | Dark                                                      |
-| ---------------------------------------------------------- | --------------------------------------------------------- |
-| ![Admin overview, light](docs/screenshots/admin-light.png) | ![Admin mailboxes, dark](docs/screenshots/admin-dark.png) |
+| Light                                                      | Dark                                                     |
+| ---------------------------------------------------------- | -------------------------------------------------------- |
+| ![Admin overview, light](docs/screenshots/admin-light.png) | ![Admin overview, dark](docs/screenshots/admin-dark.png) |
 
 ## Same origin
 
@@ -96,9 +109,14 @@ provides `vp`, so the global CLI is optional.
 cd apps/api && EMBER_ADMIN_TOKEN=dev-admin bunx ember dev --port 8790
 # terminal 2: sample data (mailboxes, a member bia@acme.test / ember-mail-dev-123, inbound mail)
 cd apps/mobile && EMBER_URL=http://127.0.0.1:8790 bun scripts/seed-dev.ts
-# terminal 3: the web inbox at http://localhost:5180
+# terminal 3: the web inbox at http://localhost:5180 (PORT=… for another port)
 cd apps/web && MAIL_API_URL=http://127.0.0.1:8790 bun run dev
 ```
+
+Sign in as `bia@acme.test` / `ember-mail-dev-123`. The seed gives that member both mailboxes and four conversations,
+plus a teammate (Caio Rocha) to assign to. To make Bia an admin (for **Administração**), post her again with
+`admin: true` (`POST /inbox/members { user_id, name, mailboxes, admin: true }`, `Bearer dev-admin`; the seed prints
+the user id). Tags, snoozes, notes and replies are made in the app.
 
 | Script               | What                                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -121,10 +139,9 @@ first use.
 
 The root `bun run check` runs typecheck, `vp check`, every test and this build. CI runs the same.
 
-Before this PR, the app was checked end to end in a real browser against `ember dev` seeded with the script above.
-The run covered sign-in, the inbox with unread counts, `j`/`Enter`, the sandboxed HTML message with its tracker
-blocked by CSP, the signed PDF link, reply (`r`, ⌘Enter), note (`n`), assign, compose (`c`), archive (`e`), search
-(`/`) and sign-out. It ran both through the Vite+ proxy and through the production Worker (`wrangler dev`).
+The app has been checked end to end in a real browser against that setup, through the Vite+ proxy and through the
+production Worker (`wrangler dev`): sign-in, the lists and counts, `j`/`Enter`, the sandboxed HTML message with its
+tracker blocked by CSP, the signed PDF link, reply, note, assign, compose, archive, search and sign-out.
 
 ## Deploy (Cloudflare Workers static assets)
 

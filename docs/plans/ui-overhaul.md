@@ -253,4 +253,4 @@ Release e bump.
 |---|---|
 | Passada de movimento + break-ui | web em review (`ui/web/08-polish`); mobile todo |
 | Admin + web no celular | web em review (`ui/web/08-polish`) |
-| Screenshots + READMEs | todo |
+| Screenshots + READMEs | web em review (`ui/web/09-docs`); mobile todo |
