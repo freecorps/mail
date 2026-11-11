@@ -1,16 +1,18 @@
 // Swipe actions on a list row, like Mail.app: drag to reveal the actions behind the row, a full swipe runs the edge
 // action (the edge button grows over the others and a haptic marks the point, iOS), a flick counts like a long drag,
 // and a half-open row stays open until tapped, scrolled or another row opens. The finger drives a shared value on
-// the UI thread (Gesture Handler + Reanimated); React only hears about it when a swipe settles.
+// the UI thread (Gesture Handler + Reanimated); React only hears about it when a swipe settles. Only transforms and
+// opacity move per frame: the action panels are row-wide layers slid into view, never resized. Distances are the
+// row's own width (measured: the iPad split's list column is a third of the window).
 // Screen readers get the same actions as accessibility actions on the row (ThreadsScreen), not through this gesture.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Pressable, StyleSheet, useWindowDimensions, View, type ColorValue } from "react-native";
+import { Pressable, StyleSheet, useWindowDimensions, View, type ColorValue, type LayoutChangeEvent } from "react-native";
 import { GestureDetector, usePanGesture } from "react-native-gesture-handler";
-import Animated, { Easing, ReduceMotion, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming, type SharedValue } from "react-native-reanimated";
+import Animated, { ReduceMotion, interpolate, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming, type SharedValue } from "react-native-reanimated";
 import { scheduleOnRN } from "react-native-worklets";
 import { haptics } from "../lib/haptics";
 import { FULL_SWIPE, rubberband, settleSwipe, SWIPE_BUTTON } from "../model/list-actions";
-import { spacing } from "../theme";
+import { EASE_OUT, motion, spacing } from "../theme";
 import { Symbol, type IconSpec } from "./icons";
 import { ThemedText } from "./themed-text";
 
@@ -26,7 +28,6 @@ export interface SwipeAction {
   removes?: boolean;
 }
 
-const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 /** iOS: the screen's edge belongs to the back gesture of the navigation stack. */
 const EDGE_SLOP = { left: process.env.EXPO_OS === "ios" ? -24 : 0 };
 
@@ -86,7 +87,20 @@ export const SwipeGroupProvider = GroupCtx.Provider;
 
 export function SwipeRow({ leading, trailing, enabled = true, children }: { leading: SwipeAction | null; trailing: SwipeAction[]; enabled?: boolean; children: ReactNode }) {
   const group = useContext(GroupCtx);
-  const { width } = useWindowDimensions();
+  // The window until the row is measured (its first layout comes before any drag can start).
+  const windowWidth = useWindowDimensions().width;
+  const [rowWidth, setRowWidth] = useState(windowWidth);
+  const w = useSharedValue(windowWidth);
+  const onLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const next = e.nativeEvent.layout.width;
+      if (next > 0) {
+        w.set(next);
+        setRowWidth(next);
+      }
+    },
+    [w],
+  );
   const reduced = useReducedMotion();
   const x = useSharedValue(0);
   const start = useSharedValue(0);
@@ -104,8 +118,8 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
       "worklet";
       x.set(
         reduced
-          ? withTiming(to, { duration: 150, easing: EASE_OUT, reduceMotion: ReduceMotion.Never })
-          : withSpring(to, { duration: 400, dampingRatio: 1, velocity, reduceMotion: ReduceMotion.Never }),
+          ? withTiming(to, { duration: motion.fast, easing: EASE_OUT, reduceMotion: ReduceMotion.Never })
+          : withSpring(to, { ...motion.spring, velocity, reduceMotion: ReduceMotion.Never }),
       );
     },
     [x, reduced],
@@ -128,9 +142,13 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
       setOpen(false);
       action?.onPress();
       // A removed row usually leaves the list; if it stays (a filter that still shows it), it comes back.
-      if (action?.removes) setTimeout(() => settle(0), 350);
+      if (action?.removes)
+        setTimeout(() => {
+          progress.set(0);
+          settle(0);
+        }, 350);
     },
-    [leading, trailing, settle],
+    [leading, trailing, settle, progress],
   );
 
   const pan = usePanGesture({
@@ -146,6 +164,7 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
     },
     onUpdate: (e) => {
       "worklet";
+      const width = w.get();
       let next = start.get() + e.translationX;
       // A side without actions resists (rubber band) instead of stopping dead.
       if (next > 0 && L === 0) next = rubberband(next, width, 0.12);
@@ -155,16 +174,21 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
       const arm = side > 0 && Math.abs(next) >= width * FULL_SWIPE;
       if (arm !== armed.get()) {
         armed.set(arm);
-        progress.set(withTiming(arm ? 1 : 0, { duration: 150, easing: EASE_OUT }));
+        progress.set(withTiming(arm ? 1 : 0, { duration: motion.fast, easing: EASE_OUT }));
+        // Same frame as the edge button growing over the others (and shrinking back).
         scheduleOnRN(haptics.selection);
       }
     },
     onDeactivate: (e) => {
       "worklet";
+      const width = w.get();
       const r = e.canceled ? { to: "close" as const, side: null } : settleSwipe(x.get(), e.velocityX, width, L, T);
+      const wasArmed = armed.get();
       armed.set(false);
       if (r.to === "commit" && r.side) {
         const removes = r.side === "leading" ? leadRemoves : trailRemoves;
+        // A flick commits without passing the arming point: its haptic is here, with the row leaving.
+        if (!wasArmed) scheduleOnRN(haptics.light);
         progress.set(1);
         if (removes) {
           const to = r.side === "leading" ? width : -width;
@@ -172,11 +196,11 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
         } else {
           settle(0, e.velocityX);
           scheduleOnRN(run, r.side);
+          progress.set(withTiming(0, { duration: motion.base, easing: EASE_OUT }));
         }
-        progress.set(withTiming(0, { duration: 300 }));
         return;
       }
-      progress.set(withTiming(0, { duration: 150 }));
+      progress.set(withTiming(0, { duration: motion.fast, easing: EASE_OUT }));
       if (r.to === "open" && r.side) {
         settle(r.side === "leading" ? L * SWIPE_BUTTON : -T * SWIPE_BUTTON, e.velocityX);
         scheduleOnRN(setOpen, true);
@@ -188,8 +212,9 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
   });
 
   const content = useAnimatedStyle(() => ({ transform: [{ translateX: x.get() }] }));
-  const leadPanel = useAnimatedStyle(() => ({ width: Math.max(0, x.get()) }));
-  const trailPanel = useAnimatedStyle(() => ({ width: Math.max(0, -x.get()) }));
+  // Row-wide layers whose inner edge rides the row's edge: the leading one ends at x, the trailing one starts at width + x.
+  const leadPanel = useAnimatedStyle(() => ({ transform: [{ translateX: Math.max(0, x.get()) - w.get() }] }));
+  const trailPanel = useAnimatedStyle(() => ({ transform: [{ translateX: w.get() + Math.min(0, x.get()) }] }));
 
   const tap = (a: SwipeAction) => () => {
     close();
@@ -198,19 +223,19 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
 
   return (
     <GestureDetector gesture={pan}>
-      <View style={styles.clip}>
+      <View style={styles.clip} onLayout={onLayout}>
         {leading ? (
-          <Animated.View style={[styles.panel, styles.left, { backgroundColor: leading.color }, leadPanel]}>
+          <Animated.View style={[styles.panel, { width: rowWidth, backgroundColor: leading.color }, leadPanel]}>
             <Pressable style={styles.leadButton} onPress={tap(leading)} accessible={false} importantForAccessibility="no">
               <ActionFace action={leading} />
             </Pressable>
           </Animated.View>
         ) : null}
         {T ? (
-          <Animated.View style={[styles.panel, styles.right, trailPanel]}>
+          <Animated.View style={[styles.panel, { width: rowWidth }, trailPanel]}>
             {/* The edge action last, drawn on top: armed, it grows over the others. */}
             {[...trailing.keys()].reverse().map((i) => (
-              <TrailButton key={trailing[i]!.key} action={trailing[i]!} index={i} count={T} x={x} progress={progress} onPress={tap(trailing[i]!)} />
+              <TrailButton key={trailing[i]!.key} action={trailing[i]!} index={i} count={T} width={rowWidth} x={x} progress={progress} onPress={tap(trailing[i]!)} />
             ))}
           </Animated.View>
         ) : null}
@@ -226,15 +251,20 @@ export function SwipeRow({ leading, trailing, enabled = true, children }: { lead
   );
 }
 
-function TrailButton({ action, index, count, x, progress, onPress }: { action: SwipeAction; index: number; count: number; x: SharedValue<number>; progress: SharedValue<number>; onPress(): void }) {
+/**
+ * One trailing action: a row-wide layer in the trailing panel whose leading edge sits where its share of the revealed
+ * width starts (Mail's spread: each button takes 1/count of what the finger revealed). The one nearer the edge is drawn
+ * over it, so each shows only its share. Armed, the edge button's leading edge slides to the panel's start.
+ */
+function TrailButton({ action, index, count, width, x, progress, onPress }: { action: SwipeAction; index: number; count: number; width: number; x: SharedValue<number>; progress: SharedValue<number>; onPress(): void }) {
   const style = useAnimatedStyle(() => {
-    const w = Math.max(0, -x.get());
-    const share = w / count;
-    if (index === 0) return { right: 0, width: interpolate(progress.get(), [0, 1], [share, w]) };
-    return { right: share * index, width: share, opacity: 1 - progress.get() };
+    const revealed = Math.max(0, -x.get());
+    const start = (revealed * (count - 1 - index)) / count;
+    if (index === 0) return { transform: [{ translateX: interpolate(progress.get(), [0, 1], [start, 0]) }] };
+    return { transform: [{ translateX: start }], opacity: 1 - progress.get() };
   });
   return (
-    <Animated.View style={[styles.trailButton, { backgroundColor: action.color }, style]}>
+    <Animated.View style={[styles.trailButton, { width, backgroundColor: action.color }, style]}>
       <Pressable style={styles.fill} onPress={onPress} accessible={false} importantForAccessibility="no">
         <ActionFace action={action} />
       </Pressable>
@@ -255,12 +285,10 @@ function ActionFace({ action }: { action: SwipeAction }) {
 
 const styles = StyleSheet.create({
   clip: { overflow: "hidden" },
-  panel: { position: "absolute", top: 0, bottom: 0, overflow: "hidden" },
-  left: { left: 0 },
-  right: { right: 0 },
+  panel: { position: "absolute", top: 0, bottom: 0, left: 0, overflow: "hidden" },
   // The leading glyph rides the row's edge (it follows the finger).
   leadButton: { position: "absolute", top: 0, bottom: 0, right: 0, width: SWIPE_BUTTON, justifyContent: "center" },
-  trailButton: { position: "absolute", top: 0, bottom: 0, overflow: "hidden" },
+  trailButton: { position: "absolute", top: 0, bottom: 0, left: 0, overflow: "hidden" },
   fill: { flex: 1, justifyContent: "center" },
   face: { alignItems: "center", gap: spacing.xxs, width: SWIPE_BUTTON, alignSelf: "flex-start" },
   faceText: { fontWeight: "600" },

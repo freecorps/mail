@@ -12,7 +12,7 @@ import { router, Stack, useIsFocused, useLocalSearchParams, useNavigation } from
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, FlatList, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View, type ListViewToken } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
-import Animated, { LinearTransition } from "react-native-reanimated";
+import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { api, INBOX_VIEWS, type InboxView, type Tag } from "../api";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
 import { SwipeGroupProvider, SwipeRow, useSwipeGroup, type SwipeAction } from "../components/swipe-row";
@@ -33,10 +33,10 @@ import { formatLater, type LaterChoice } from "../lib/when";
 import { setThreadOrder } from "../model/thread-order";
 import { offerUndoArchive } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
-import { useShortcuts } from "../keys";
+import { useKeyStill, useShortcuts } from "../keys";
 import { afterListChange, leaveFrom, paneLayout, stepFrom } from "../model/split";
 import { ThreadPane, type ThreadHost } from "./ThreadScreen";
-import { screenEdge, spacing, useColors, type Palette } from "../theme";
+import { EASE_IN_OUT, EASE_OUT, motion, screenEdge, spacing, useColors, type Palette } from "../theme";
 
 /** Route: `/mailbox/[mailbox]` (one mailbox). */
 export function MailboxThreadsScreen() {
@@ -87,7 +87,14 @@ interface RowOps {
   assign(rows: ThreadRow[]): void;
 }
 
-const ROW_LAYOUT = LinearTransition.duration(200);
+/** Rows closing an archived row's gap (or making room): on-screen movement, ease-in-out. Off with Reduce Motion. */
+const ROW_LAYOUT = LinearTransition.duration(motion.base).easing(EASE_IN_OUT);
+/**
+ * The first answer replacing the skeleton: the placeholder fades out over the rows, an empty or error state fades in
+ * (opacity only, so it holds with Reduce Motion), so the first load does not cut.
+ */
+const SKELETON_OUT = FadeOut.duration(motion.fast).easing(EASE_OUT);
+const STATE_IN = FadeIn.duration(motion.base).easing(EASE_OUT);
 
 export function ThreadsScreen({ source, title, searchOnly = false }: { source: ListSource; title: string; searchOnly?: boolean }) {
   const c = useColors();
@@ -259,6 +266,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   );
 
   // ---- Pull to refresh -------------------------------------------------------------------------------------------
+  // Right after a hardware shortcut (E archives the open conversation), rows close the gap in place.
+  const still = useKeyStill();
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -302,17 +311,24 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
     searchOnly && !vm.searching ? (
       <EmptyState icon={Icons.search} title={t("search.title")} body={t("search.hint")} />
     ) : vm.status === "loading" ? (
-      <SkeletonRows avatars={prefs.avatars} previewLines={prefs.previewLines} />
+      <Animated.View exiting={SKELETON_OUT}>
+        <SkeletonRows avatars={prefs.avatars} previewLines={prefs.previewLines} />
+      </Animated.View>
     ) : vm.status === "error" ? (
-      <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
+      <Animated.View entering={STATE_IN} style={styles.state}>
+        <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
+      </Animated.View>
     ) : vm.searching ? (
+      // Typed: the answer to a query appears as it is, without a fade per keystroke.
       <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
     ) : (
-      <EmptyState
-        icon={source.view === "snoozed" ? Icons.snooze : Icons.empty}
-        title={source.view === "assigned" ? t("mine.empty") : source.view === "snoozed" ? t("snooze.empty") : t("threads.empty")}
-        body={source.view === "snoozed" ? t("snooze.emptyBody") : undefined}
-      />
+      <Animated.View entering={STATE_IN} style={styles.state}>
+        <EmptyState
+          icon={source.view === "snoozed" ? Icons.snooze : Icons.empty}
+          title={source.view === "assigned" ? t("mine.empty") : source.view === "snoozed" ? t("snooze.empty") : t("threads.empty")}
+          body={source.view === "snoozed" ? t("snooze.emptyBody") : undefined}
+        />
+      </Animated.View>
     );
 
   const inset = textInset(prefs.avatars, editing);
@@ -348,7 +364,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         data={showRows ? vm.rows : []}
         keyExtractor={(r) => r.key}
         extraData={editing}
-        itemLayoutAnimation={ROW_LAYOUT}
+        itemLayoutAnimation={still ? undefined : ROW_LAYOUT}
         ListHeaderComponent={header}
         ItemSeparatorComponent={RowSeparator}
         renderItem={({ item }) => (
@@ -663,6 +679,7 @@ const ThreadItem = memo(function ThreadItem({
 
 const styles = StyleSheet.create({
   pressable: {},
+  state: { flex: 1 },
   note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
   more: { alignItems: "center", paddingVertical: spacing.md },
 });
