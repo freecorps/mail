@@ -1,7 +1,7 @@
 // The open conversation: a header with status and assignee as menus and previous/next, the messages as one column
 // of email "paper" separated by hairlines (older ones collapsed to a line, the latest open, quoted text behind
 // "•••"), internal notes as tinted blocks, the composer under them, and the context panel (`i`) at the side.
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { createContext, Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -110,27 +110,33 @@ export function ThreadView({
   const prefs = usePrefs();
   const loaded = vm.thread !== null;
   const pane = useRef<HTMLDivElement>(null);
-  const [roomy, setRoomy] = useState(true);
+  // Null until the pane is measured (the skeleton and "not found" have none): no panel shows and `i` does nothing, so
+  // it never flips the remembered side panel on a pane that may turn out narrow.
+  const [roomy, setRoomy] = useState<boolean | null>(null);
   const [overlay, setOverlay] = useState(false);
   // Measured before the first paint (a layout effect), so a narrow pane never shows the side panel for a frame.
   useLayoutEffect(() => {
     const el = pane.current;
-    if (!el) return;
+    if (!el) {
+      setRoomy(null);
+      return;
+    }
     setRoomy(el.clientWidth >= SIDE_PANEL_MIN);
     const ro = new ResizeObserver(() => setRoomy(el.clientWidth >= SIDE_PANEL_MIN));
     ro.observe(el);
     return () => ro.disconnect();
     // The pane exists once the thread has loaded (the skeleton has none).
   }, [loaded]);
-  const contextShown = roomy ? prefs.contextPanel : overlay;
+  const contextShown = roomy === null ? false : roomy ? prefs.contextPanel : overlay;
   const { contextPanel, setContextPanel } = prefs;
   const toggleContext = useCallback(() => {
+    if (roomy === null) return;
     if (roomy) setContextPanel(!contextPanel);
     else setOverlay((o) => !o);
   }, [roomy, contextPanel, setContextPanel]);
-  useEffect(() => onContextToggle(toggleContext), [toggleContext]);
+  useEffect(() => (roomy === null ? undefined : onContextToggle(toggleContext)), [roomy, toggleContext]);
   // Over the messages, the panel is the top layer: Escape hides it before it closes the conversation.
-  useEscapeCloses(!roomy && overlay, toggleContext);
+  useEscapeCloses(roomy === false && overlay, toggleContext);
 
   // The message being forwarded stays while the dialog is closed, so a failed send can reopen it with its draft.
   const [forwarding, setForwarding] = useState<ForwardSource | null>(null);
@@ -157,6 +163,18 @@ export function ThreadView({
     });
   };
 
+  // Opens at the top of the latest message (a long email starts where it starts), and keeps it there while frames
+  // above load and grow, until the reader scrolls. After that, new messages follow only while the reader is at the
+  // bottom; the reader's own reply or note (pending) always scrolls into view.
+  const scroller = useRef<HTMLOListElement>(null);
+  const anchored = useRef(true);
+  const stick = useRef(false);
+  // The reader opened something (a message, the older ones, a quote): the pane stays where they are, neither on the
+  // latest message nor at the bottom (what they opened would scroll away). Reaching the bottom again sticks again.
+  const readerGrows = () => {
+    anchored.current = false;
+    stick.current = false;
+  };
   // Which messages are open: the latest by default, any the reader toggled, and the one that was latest before the
   // reader's own reply arrived (so answering does not fold what they were answering).
   const count = vm.items.length;
@@ -169,16 +187,13 @@ export function ThreadView({
     if (prevLast && !toggled.has(prevLast) && vm.items.at(-1)?.pending) setToggled(new Map(toggled).set(prevLast, true));
   }
   const isOpen = (id: string) => toggled.get(id) ?? id === lastId;
-  const toggle = (id: string) => setToggled((m) => new Map(m).set(id, !isOpen(id)));
+  const toggle = (id: string) => {
+    readerGrows();
+    setToggled((m) => new Map(m).set(id, !isOpen(id)));
+  };
   const [showAll, setShowAll] = useState(false);
   const folds = foldMessages(count, showAll);
 
-  // Opens at the top of the latest message (a long email starts where it starts), and keeps it there while frames
-  // above load and grow, until the reader scrolls. After that, new messages follow only while the reader is at the
-  // bottom; the reader's own reply or note (pending) always scrolls into view.
-  const scroller = useRef<HTMLOListElement>(null);
-  const anchored = useRef(true);
-  const stick = useRef(false);
   const ownNew = vm.items.at(-1)?.pending === true;
   useEffect(() => {
     const el = scroller.current;
@@ -305,59 +320,64 @@ export function ThreadView({
             }}
           />
 
-          <ol
-            ref={scroller}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-              // Dragging the scrollbar fires none of the input events above: a scroll away from where the anchoring
-              // put it is the reader's.
-              // (Compared with where the anchor is now, not where it was: the browser's own scroll anchoring may have
-              // moved it while frames above grew.)
-              if (anchored.current) {
-                const last = el.lastElementChild as HTMLElement | null;
-                const target = last ? Math.min(Math.max(0, last.offsetTop - 8), el.scrollHeight - el.clientHeight) : 0;
-                if (Math.abs(el.scrollTop - target) > 2) anchored.current = false;
-              }
-            }}
-            className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4"
-            aria-label={th.subject}
-          >
-            {folds.map((f) => {
-              if (f.kind === "fold")
+          <ReaderGrows value={readerGrows}>
+            <ol
+              ref={scroller}
+              onScroll={(e) => {
+                const el = e.currentTarget;
+                stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+                // Dragging the scrollbar fires none of the input events above: a scroll away from where the anchoring
+                // put it is the reader's.
+                // (Compared with where the anchor is now, not where it was: the browser's own scroll anchoring may have
+                // moved it while frames above grew.)
+                if (anchored.current) {
+                  const last = el.lastElementChild as HTMLElement | null;
+                  const target = last ? Math.min(Math.max(0, last.offsetTop - 8), el.scrollHeight - el.clientHeight) : 0;
+                  if (Math.abs(el.scrollTop - target) > 2) anchored.current = false;
+                }
+              }}
+              className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-4"
+              aria-label={th.subject}
+            >
+              {folds.map((f) => {
+                if (f.kind === "fold")
+                  return (
+                    <li key="fold" className="border-b">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          readerGrows();
+                          setShowAll(true);
+                        }}
+                        className="flex w-full items-center gap-3 px-4 py-2 text-left text-ui text-muted-foreground hover:bg-accent/50 sm:px-6"
+                      >
+                        <span className="grid size-6 place-items-center text-muted-foreground">
+                          <ChevronsUpDown className="size-4" aria-hidden="true" />
+                        </span>
+                        {t(plural(locale, "thread.older", f.count), { count: f.count })}
+                      </button>
+                    </li>
+                  );
+                const item = vm.items[f.index]!;
+                const m = item.message;
+                const open = isOpen(m._id);
                 return (
-                  <li key="fold" className="border-b">
-                    <button
-                      type="button"
-                      onClick={() => setShowAll(true)}
-                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-ui text-muted-foreground hover:bg-accent/50 sm:px-6"
-                    >
-                      <span className="grid size-6 place-items-center text-muted-foreground">
-                        <ChevronsUpDown className="size-4" aria-hidden="true" />
-                      </span>
-                      {t(plural(locale, "thread.older", f.count), { count: f.count })}
-                    </button>
+                  <li key={m._id} className={cn(m.direction !== "note" && "border-b last:border-b-0")}>
+                    {open ? (
+                      <MessageBlock
+                        item={item}
+                        urls={vm.attachmentUrls}
+                        onCollapse={m._id === lastId && count === 1 ? undefined : () => toggle(m._id)}
+                        onForward={item.pending || m.direction === "note" ? undefined : () => forward(m)}
+                      />
+                    ) : (
+                      <CollapsedMessage item={item} onExpand={() => toggle(m._id)} />
+                    )}
                   </li>
                 );
-              const item = vm.items[f.index]!;
-              const m = item.message;
-              const open = isOpen(m._id);
-              return (
-                <li key={m._id} className={cn(m.direction !== "note" && "border-b last:border-b-0")}>
-                  {open ? (
-                    <MessageBlock
-                      item={item}
-                      urls={vm.attachmentUrls}
-                      onCollapse={m._id === lastId && count === 1 ? undefined : () => toggle(m._id)}
-                      onForward={item.pending || m.direction === "note" ? undefined : () => forward(m)}
-                    />
-                  ) : (
-                    <CollapsedMessage item={item} onExpand={() => toggle(m._id)} />
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+              })}
+            </ol>
+          </ReaderGrows>
 
           <Composer
             ref={composerRef}
@@ -681,9 +701,18 @@ function MessageBlock({
   );
 }
 
+/** Tells the conversation the reader opened something inside a message (a quote): see `readerGrows`. */
+const ReaderGrowsContext = createContext<() => void>(() => {});
+const ReaderGrows = ReaderGrowsContext.Provider;
+
 /** "•••": shows or hides the quoted part of a message. */
-function QuoteToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+function QuoteToggle({ open, onToggle: flip }: { open: boolean; onToggle: () => void }) {
   const { t } = useI18n();
+  const grows = useContext(ReaderGrowsContext);
+  const onToggle = () => {
+    grows();
+    flip();
+  };
   return (
     <Tooltip>
       <TooltipTrigger asChild>
