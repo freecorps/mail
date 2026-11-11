@@ -77,6 +77,38 @@ The server needs `APNS_KEY`, `APNS_KEY_ID`, `APNS_TEAM_ID`, `FCM_SERVICE_ACCOUNT
 id, a plain var), set with `ember env` (`packages/push` README in Ember). Android direct push also needs the Firebase
 app's `google-services.json` at build time (`GOOGLE_SERVICES_JSON`, a path outside the repo, or an EAS file variable).
 
+## Notifications, badge and quick actions
+
+- **Actions** (`src/push/actions.ts`, rules in `src/push/mail-push.ts`). The server sends each push under the category
+  `mail` (`apps/api/ember/notifications.ts`):
+  - **Responder**: a text field; sends `inbox:reply` with the member's default signature and the quote line in the
+    app's language, then marks the conversation read.
+  - **Arquivar**: closes the conversation.
+  - **Marcar como lida**.
+  - They run in the background. On iOS they ask to unlock first. Their mutations go through the app's client, so they
+    queue on the device and are retried if the system suspends the app before the server answers.
+  - Responses are handled from `index.ts`, so the one that launched or woke the app is not missed. On Android the
+    push task (headless JS) handles them when the app is in the background or killed.
+- **Badge**: the unread total of the member's mailboxes. The server sends it with each push. The app sets it in the
+  foreground and after a background action. Sign-out clears it, with the notifications on screen.
+- **Grouping**:
+  - iOS stacks a conversation's notifications (`thread-id`).
+  - Android shows one notification per conversation (a new message replaces it), grouped by mailbox. Each mailbox
+    has its own channel, named after it, in a "Caixas" group. The channel is chosen on the device from the sealed
+    data, so Google never learns the mailbox.
+- **Ajustes › Notificações**:
+  - this device's permission and a link to the system settings;
+  - **Mostrar prévia**: off leaves the subject and snippet out, on all the member's devices;
+  - a switch per mailbox. A mailbox turned off is not pushed at all (`inbox:setNotifications`, filtered by the server).
+- **Quick actions** on the icon (`src/quick-actions.ts`, `expo-quick-actions`): Nova mensagem, Atribuídas a mim,
+  Buscar. They are set only for a member and cleared at sign-out. Android icons are vector drawables written by
+  `plugins/shortcut-icons.js`.
+- **Testing on a simulator**:
+  - iOS: `xcrun simctl push <udid> app.freecorps.mail payload.apns` with an `aps.category` of `mail` and the data
+    under `body`. That is the shape the Notification Service Extension leaves after decrypting; no APNs needed.
+  - Android: real FCM is needed for remote pushes. To check the presentation and the actions, schedule a local
+    notification with the same content.
+
 ## Builds (EAS)
 
 `eas.json` has three profiles: `development` (dev client, simulator), `preview` (internal distribution) and

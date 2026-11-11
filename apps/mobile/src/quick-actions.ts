@@ -3,12 +3,14 @@
 // already has: Nova mensagem (the composer), Atribuídas a mim (the Minhas tab), Buscar (the search tab). Set only for a
 // member (the tabs layout mounts them), in the app's language; cleared at sign-out.
 import * as QuickActions from "expo-quick-actions";
-import { useQuickActionRouting, type RouterAction } from "expo-quick-actions/router";
+import { router, type Href } from "expo-router";
 import { useEffect } from "react";
 import { translate, type Locale } from "./i18n";
 
+export type QuickAction = QuickActions.Action & { params: { href: Href & string } };
+
 /** The actions, pure (tested): SF Symbols on iOS, the drawables `plugins/shortcut-icons.js` writes on Android. */
-export function quickActionItems(locale: Locale, os: "ios" | "android" | string): RouterAction[] {
+export function quickActionItems(locale: Locale, os: "ios" | "android" | string): QuickAction[] {
   const ios = os === "ios";
   return [
     { id: "compose", title: translate(locale, "quick.compose"), icon: ios ? "symbol:square.and.pencil" : "shortcut_compose", params: { href: "/compose" } },
@@ -17,9 +19,32 @@ export function quickActionItems(locale: Locale, os: "ios" | "android" | string)
   ];
 }
 
-/** Sets the actions and follows them (also the one that launched the app); inside the tabs, so routes exist. */
+const hrefOf = (a: QuickActions.Action): Href | null => {
+  const href = a.params?.href;
+  return typeof href === "string" && href.startsWith("/") ? (href as Href) : null;
+};
+
+/** The action that launched the app is followed once (the tabs mount again after a sign-in). */
+let initialFollowed = false;
+
+/**
+ * Sets the actions and follows them, also the one that launched the app. Mounted in the tabs layout (a member's
+ * routes exist there). The package's own router hook imports an expo-router internal path, so this is the same thing
+ * through the public `router`.
+ */
 export function useQuickActions(locale: Locale) {
-  useQuickActionRouting();
+  useEffect(() => {
+    const go = (a: QuickActions.Action) => {
+      const href = hrefOf(a);
+      if (href) setTimeout(() => router.navigate(href, { withAnchor: true }));
+    };
+    if (QuickActions.initial && !initialFollowed) {
+      initialFollowed = true;
+      go(QuickActions.initial);
+    }
+    const sub = QuickActions.addListener(go);
+    return () => sub.remove();
+  }, []);
   useEffect(() => {
     QuickActions.setItems(quickActionItems(locale, process.env.EXPO_OS ?? "ios")).catch((e: unknown) => console.warn("[quick actions]", e));
   }, [locale]);

@@ -12,8 +12,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { extractEncryptedPush, loadPushKeys, openPushEnvelope, parsePushEnvelope } from "@freecorps/ember-expo-push";
 import * as Notifications from "expo-notifications";
-import { api } from "../api";
+import { api, SHARD } from "../api";
 import { translate, type Locale } from "../i18n";
+import { withBackgroundTime } from "../lib/background-time";
 import { deviceClock24, storedLocale } from "../prefs";
 import {
   actionCalls,
@@ -62,28 +63,73 @@ const running = new Set<string>();
 async function firstTime(key: string): Promise<boolean> {
   if (running.has(key)) return false;
   running.add(key);
-  if (!handled) handled = await AsyncStorage.getItem(HANDLED_KEY).then((raw) => (raw ? (JSON.parse(raw) as string[]) : []), () => []);
+  if (!handled) {
+    const raw = await AsyncStorage.getItem(HANDLED_KEY).catch(() => null);
+    try {
+      const v: unknown = raw ? JSON.parse(raw) : [];
+      handled = Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : [];
+    } catch {
+      handled = [];
+    }
+  }
   if (handled.includes(key)) return false;
   handled = remember(handled, key);
   await AsyncStorage.setItem(HANDLED_KEY, JSON.stringify(handled)).catch(() => {});
   return true;
 }
 
-const ACTION_TIMEOUT_MS = 20_000;
+const HTTP_TIMEOUT_MS = 8000;
+const QUEUE_WAIT_MS = 20_000;
 
 /** The client, loaded on first use (the Android task for a plain push never needs it). */
-const client = async () => (await import("../ember")).emberClient;
+const ember = () => import("../ember");
+
+/**
+ * One mutation in one HTTPS request (`POST /api/mutation`). On iOS, expo-notifications ends the action's background
+ * time at once, so the app may be suspended before the client's socket reconnects; a single request fits in that
+ * window. "sent": the server answered (applied, or refused for good: a retry would be refused too). "failed": no
+ * answer (offline, timeout): the caller queues it on the client instead.
+ */
+async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed"> {
+  const [{ authClient }, { EMBER_URL }] = await Promise.all([ember(), import("../config")]);
+  const token = await authClient.fetchToken().catch(() => null);
+  if (!token) return "failed";
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), HTTP_TIMEOUT_MS);
+  try {
+    const r = await fetch(`${EMBER_URL.replace(/\/$/, "")}/api/mutation`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      body: JSON.stringify({ fn: `inbox:${call.fn}`, args: call.args, shard: SHARD }),
+      signal: abort.signal,
+    });
+    const body = (await r.json().catch(() => null)) as { error?: { message?: string } } | null;
+    if (body?.error) console.warn(`[push] ${call.fn} refused`, body.error.message);
+    // Auth, rate limit and server trouble: the client's queue retries it (and re-authenticates).
+    return r.status >= 500 || [401, 403, 408, 429].includes(r.status) ? "failed" : "sent";
+  } catch {
+    return "failed";
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function run(kind: PushAction, calls: ActionCall[]): Promise<void> {
-  const c = await client();
-  const sent = calls.map((x) => {
+  // In order (a reply, then read): each over HTTP, or else through the client's queue (SQLite, sent on reconnect;
+  // optimistic in the lists meanwhile).
+  const queued: Promise<unknown>[] = [];
+  for (const x of calls) {
+    if (!queued.length && (await sendOverHttp(x)) === "sent") continue;
+    const c = (await ember()).emberClient;
     const p =
       x.fn === "reply" ? c.mutation(api.inbox.reply, x.args) : x.fn === "setStatus" ? c.mutation(api.inbox.setStatus, x.args) : c.mutation(api.inbox.markRead, x.args);
-    return p.catch((e: unknown) => console.warn(`[push] ${kind}`, e instanceof Error ? e.message : e));
-  });
-  // Queued on the device first: the system may suspend us before the server answers.
-  await c.flushStorage().catch(() => {});
-  await Promise.race([Promise.all(sent), new Promise((r) => setTimeout(r, ACTION_TIMEOUT_MS))]);
+    queued.push(p.catch((e: unknown) => console.warn(`[push] ${kind}`, e instanceof Error ? e.message : e)));
+  }
+  if (queued.length) {
+    const c = (await ember()).emberClient;
+    await c.flushStorage().catch(() => {});
+    await Promise.race([Promise.all(queued), new Promise((r) => setTimeout(r, QUEUE_WAIT_MS))]);
+  }
   await refreshBadge();
 }
 
@@ -95,8 +141,16 @@ export async function dismissThread(threadId: string): Promise<void> {
   );
 }
 
-/** One response to a notification: a tap opens the conversation; an action runs in the background. */
-export async function handleResponse(r: Notifications.NotificationResponse): Promise<void> {
+/**
+ * One response to a notification: a tap opens the conversation; an action runs in the background, with the background
+ * time iOS gives on request (asked for first thing: the app is otherwise suspended within milliseconds).
+ */
+export function handleResponse(r: Notifications.NotificationResponse): Promise<void> {
+  const kind = actionOf(r.actionIdentifier);
+  return kind && kind !== "open" ? withBackgroundTime("ember-mail.notification-action", () => respond(r)) : respond(r);
+}
+
+async function respond(r: Notifications.NotificationResponse): Promise<void> {
   const kind = actionOf(r.actionIdentifier);
   const raw = r.notification.request.content.data;
   const data = kind === "open" ? targetOf(raw) : mailDataOf(raw);
@@ -168,7 +222,7 @@ export function setBadge(n: number): void {
 
 /** Reads the unread total again (after a background action) and sets the badge; nothing when offline. */
 async function refreshBadge(): Promise<void> {
-  const c = await client();
+  const c = (await ember()).emberClient;
   const boxes = await c.query(api.inbox.mailboxes, {}).catch(() => null);
   if (boxes) setBadge(badgeOf(boxes));
 }
@@ -186,7 +240,6 @@ export async function syncMailboxChannels(boxes: ReadonlyArray<{ name: string; a
         description: ch.description,
         groupId: MAILBOX_CHANNEL_GROUP,
         importance: Notifications.AndroidImportance.HIGH,
-        sound: "default",
         showBadge: true,
       });
     }

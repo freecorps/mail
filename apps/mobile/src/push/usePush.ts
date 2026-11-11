@@ -33,6 +33,9 @@ export function usePushRegistration(userId: string | null, transport: PushTransp
     void (async () => {
       const r = await transport.register();
       setResult(r);
+      // No push token (a simulator, no network for the token): the badge and local notifications still need the
+      // permission, which the transport asks for only on its way to a token.
+      if (r.status === "unsupported") await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowBadge: true, allowSound: true } }).catch(() => {});
       if (r.status === "granted") await register(registrationArgs(r, { direct: transport.name === "direct" })).catch((e: unknown) => console.warn("[push] register failed", e));
     })();
   }, [userId, transport, register]);
