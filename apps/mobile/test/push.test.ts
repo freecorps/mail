@@ -203,6 +203,14 @@ describe("response order: handled only once the action is sent or queued on disk
     return { fx, log, sent, handled, mounted };
   }
 
+  it("refused by the server: marked (it would be refused again) but not dismissed as done; the member is told", async () => {
+    const { fx, log } = effects(async () => ({ durable: true, settled: Promise.resolve(), refused: true }));
+    const told: string[] = [];
+    await processResponse(response(), { ...fx, refused: async (kind: string) => void told.push(kind) } as never);
+    expect(log).toEqual(["deliver", "markHandled", "clearLast"]);
+    expect(told).toEqual(["reply"]);
+  });
+
   it("sent: delivered first, then marked, cleared and dismissed", async () => {
     const { fx, log } = effects(async () => ({ durable: true, settled: Promise.resolve() }));
     await processResponse(response(), fx);

@@ -87,7 +87,7 @@ const ember = () => import("../ember");
  * window. "sent": the server answered (applied, or refused for good: a retry would be refused too). "failed": no
  * answer (offline, timeout): the caller queues it on the client instead.
  */
-async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed"> {
+async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed" | "refused"> {
   const [{ authClient }, { EMBER_URL }] = await Promise.all([ember(), import("../config")]);
   const token = await authClient.fetchToken().catch(() => null);
   if (!token) return "failed";
@@ -101,9 +101,14 @@ async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed"> {
       signal: abort.signal,
     });
     const body = (await r.json().catch(() => null)) as { error?: { message?: string } } | null;
-    if (body?.error) console.warn(`[push] ${call.fn} refused`, body.error.message);
     // Auth, rate limit and server trouble: the client's queue retries it (and re-authenticates).
-    return r.status >= 500 || [401, 403, 408, 429].includes(r.status) ? "failed" : "sent";
+    if (r.status >= 500 || [401, 403, 408, 429].includes(r.status)) return "failed";
+    // Any other refusal (an error in the answer, another 4xx) would be refused again: not sent, and not retried.
+    if (body?.error || r.status >= 400) {
+      console.warn(`[push] ${call.fn} refused`, body?.error?.message ?? r.status);
+      return "refused";
+    }
+    return "sent";
   } catch {
     return "failed";
   } finally {
@@ -119,7 +124,12 @@ async function sendOverHttp(call: ActionCall): Promise<"sent" | "failed"> {
 async function deliver(kind: PushAction, calls: ActionCall[]): Promise<Delivery> {
   const queued: Promise<unknown>[] = [];
   for (const x of calls) {
-    if (!queued.length && (await sendOverHttp(x)) === "sent") continue;
+    if (!queued.length) {
+      const r = await sendOverHttp(x);
+      if (r === "sent") continue;
+      // Refused: nothing after it goes either (a refused reply does not mark the conversation read).
+      if (r === "refused") return { durable: true, settled: refreshBadge(), refused: true };
+    }
     const c = (await ember()).emberClient;
     const p =
       x.fn === "reply" ? c.mutation(api.inbox.reply, x.args) : x.fn === "setStatus" ? c.mutation(api.inbox.setStatus, x.args) : c.mutation(api.inbox.markRead, x.args);
@@ -160,7 +170,22 @@ const effects: ResponseEffects = {
   deliver,
   locale: storedLocale,
   clock24: deviceClock24,
+  refused: notifyRefused,
 };
+
+/** The action did not go through: its notification goes, and one in its place says so (a tap opens the conversation). */
+async function notifyRefused(kind: PushAction, threadId: string): Promise<void> {
+  await dismissThread(threadId);
+  const locale = await storedLocale();
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: translate(locale, kind === "reply" ? "push.refused.reply" : "push.refused.other"),
+      body: translate(locale, "push.refused.body"),
+      data: { threadId },
+    },
+    trigger: process.env.EXPO_OS === "android" ? { channelId: FALLBACK_CHANNEL } : null,
+  }).catch(() => {});
+}
 
 /** The order (respond.ts): marked handled, cleared and dismissed only once the action is sent or queued on disk. */
 function respond(r: Notifications.NotificationResponse): Promise<void> {

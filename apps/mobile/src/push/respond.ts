@@ -16,7 +16,7 @@ export interface ResponseLike {
 export type Target = { threadId: string; mailbox?: string };
 
 /** What delivering an action's mutations gave: `durable` once they are sent or queued on disk; `settled` when done. */
-export type Delivery = { durable: boolean; settled: Promise<void> };
+export type Delivery = { durable: boolean; settled: Promise<void>; refused?: boolean };
 
 export interface ResponseEffects {
   isHandled(key: string): Promise<boolean>;
@@ -29,6 +29,8 @@ export interface ResponseEffects {
   deliver(kind: PushAction, calls: ActionCall[]): Promise<Delivery>;
   locale(): Promise<Locale>;
   clock24(): boolean;
+  /** The server refused the action (a validation error, a 4xx): say so on a notification of its own. */
+  refused?(kind: PushAction, threadId: string): Promise<void>;
 }
 
 /** Responses being handled in this process (the listener and `getLastNotificationResponse` can both bring one). */
@@ -69,6 +71,15 @@ export async function processResponse(r: ResponseLike, fx: ResponseEffects): Pro
     const delivery = calls.length ? await fx.deliver(kind, calls).catch((): Delivery => ({ durable: false, settled: Promise.resolve() })) : null;
     // Not sent and not on disk: leave it for the next launch (handled again then, sent once by its requestId).
     if (delivery && !delivery.durable) return;
+    // Refused by the server: trying again would be refused too. Handled, but never as done: the conversation is not
+    // marked read and the member is told the action did not go through.
+    if (delivery?.refused) {
+      await fx.markHandled(key);
+      fx.clearLast();
+      await fx.refused?.(kind, data.threadId);
+      await delivery.settled;
+      return;
+    }
     await fx.markHandled(key);
     fx.clearLast();
     // Android 15+ keeps a notification answered by direct reply on screen, with the reply under it, until the user
