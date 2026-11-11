@@ -154,6 +154,31 @@ describe("snooze: optimistic rules", () => {
     expect(ids(s.get("inbox:view", { view: "snoozed" })).at(-1)).toBe(b._id);
   });
 
+  it("in an unfinished list, a row whose sort key did not change stays, the last one too; only one moved past the loaded page leaves", () => {
+    const a = thread({ _id: "email$threads_a", lastMessageAt: 30, unreadCount: 1, tags: [] });
+    const b = thread({ _id: "email$threads_b", lastMessageAt: 20, unreadCount: 1, tags: [] });
+    const c = thread({ _id: "email$threads_c", lastMessageAt: 10, unreadCount: 1, tags: [] });
+    const z = (id: string, until: number) => thread({ _id: `email$threads_${id}`, snoozed: true, snoozedUntil: until });
+    const s = fakeStore([
+      ["inbox:view", { view: "all", limit: 3 }, { page: [a, b, c], isDone: false, partial: false }],
+      ["inbox:threads", { mailbox: "support", paginationOpts: { numItems: 3, cursor: null } }, { page: [a, b, c], isDone: false, continueCursor: "x" }],
+      ["inbox:view", { view: "snoozed", limit: 2 }, { page: [z("x", 100), z("y", 200)], isDone: false, partial: false }],
+    ]);
+    const upd = inboxOptimisticUpdates(() => 50);
+    // A read and a tag on the last row: same key, it stays (in place).
+    upd["inbox:markRead"]!(s.store, { threadId: c._id }, rec);
+    upd["inbox:addTag"]!(s.store, { threadId: c._id, tag: "t1" }, rec);
+    expect(ids(s.get("inbox:view", { view: "all", limit: 3 }))).toEqual([a._id, b._id, c._id]);
+    expect(ids(s.get("inbox:threads", { mailbox: "support", paginationOpts: { numItems: 3, cursor: null } }))).toEqual([a._id, b._id, c._id]);
+    expect(s.get("inbox:view", { view: "all", limit: 3 }).page[2]).toMatchObject({ unreadCount: 0, tags: ["t1"] });
+    // Re-snoozed to the same time: stays. Earlier but still last: stays. Later than it was: past the page, it leaves.
+    upd["inbox:snooze"]!(s.store, { threadId: "email$threads_y", until: 200 }, rec);
+    upd["inbox:snooze"]!(s.store, { threadId: "email$threads_y", until: 150 }, rec);
+    expect(ids(s.get("inbox:view", { view: "snoozed", limit: 2 }))).toEqual(["email$threads_x", "email$threads_y"]);
+    upd["inbox:snooze"]!(s.store, { threadId: "email$threads_y", until: 900 }, rec);
+    expect(ids(s.get("inbox:view", { view: "snoozed", limit: 2 }))).toEqual(["email$threads_x"]);
+  });
+
   it("the local twins' rules: snoozed only in its view and in inbox:threads with snoozed=true", () => {
     const z = thread({ snoozed: true, snoozedUntil: 5 });
     for (const v of ["all", "unread", "waiting", "assigned"] as const) expect(viewKeeps(v, undefined)(z)).toBe(false);

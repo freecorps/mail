@@ -137,13 +137,17 @@ function rejoin(store: Store, t: Thread) {
  * or out of the page when that place is past the last loaded row of an unfinished list (the server's next page has it).
  */
 function place(v: { page: Thread[]; isDone: boolean }, i: number, next: Thread, order: (a: Thread, b: Thread) => number): Thread[] {
+  const was = v.page[i]!;
+  const last = i === v.page.length - 1;
+  // Where it is still sorts (stable: rows that sort the same keep their order). The last row of an unfinished list
+  // stays only if it did not move later than it was: past its old place is past what is loaded.
+  const fits = (i === 0 || order(v.page[i - 1]!, next) <= 0) && (last || order(next, v.page[i + 1]!) <= 0) && (!last || v.isDone || order(next, was) <= 0);
+  if (fits) return v.page.map((t, j) => (j === i ? next : t));
   const rest = v.page.filter((_, j) => j !== i);
   if (!inLoadedRange({ isDone: v.isDone, page: rest }, next, order)) {
     remember(next);
     return rest;
   }
-  // Stable: rows that sort the same keep their order, and an unchanged row stays where it was.
-  if ((i === 0 || order(v.page[i - 1]!, next) <= 0) && (i === v.page.length - 1 || order(next, v.page[i + 1]!) <= 0)) return v.page.map((t, j) => (j === i ? next : t));
   const at = rest.findIndex((t) => order(next, t) < 0);
   return at < 0 ? [...rest, next] : [...rest.slice(0, at), next, ...rest.slice(at)];
 }
