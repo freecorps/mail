@@ -27,7 +27,7 @@ const counts = (assigned: Partial<ViewCounts["assigned"]> = {}): ViewCounts => (
 const inputs = (o: Partial<WidgetInputs> = {}): WidgetInputs => ({ locale: "pt-BR", mailboxes: [], counts: counts(), assigned: [], preview: true, ...o });
 
 /** Every link a snapshot carries, the widget's own and its rows'. */
-const linksOf = (s: { url: string; rows: { url: string }[]; top?: { url: string } | null }) => [s.url, ...s.rows.map((r) => r.url), ...(s.top ? [s.top.url] : [])];
+const linksOf = (s: { url: string; rows: { url: string }[]; top?: { url: string } }) => [s.url, ...s.rows.map((r) => r.url), ...(s.top ? [s.top.url] : [])];
 
 describe("widget snapshots", () => {
   it("Não lidas: the total, the mailbox with the most, and up to four mailboxes, most unread first", () => {
@@ -45,7 +45,7 @@ describe("widget snapshots", () => {
 
   it("Não lidas: nothing unread opens the mailbox list; a display name labels its row; counts cap at 99+", () => {
     const s = buildWidgetSnapshots(inputs({ mailboxes: [box("support", 0), box("privacy", 0, { displayName: "Privacidade" })] })).unread;
-    expect(s.top).toBeNull();
+    expect(s.top).toBeUndefined();
     expect(s.message).toBe("Tudo lido");
     expect(s.url).toBe(widgetUrls.home);
     expect(s.rows.map((r) => r.label)).toEqual(["support", "Privacidade"]);
@@ -120,9 +120,23 @@ describe("widget snapshots", () => {
     }
   });
 
+  it("holds no null anywhere: the iOS widget bridge refuses props with one (the write throws)", () => {
+    const hasNull = (v: unknown): boolean => v === null || (typeof v === "object" && Object.values(v as object).some(hasNull));
+    const cases = [
+      buildWidgetSnapshots(inputs()),
+      buildWidgetSnapshots(inputs({ mailboxes: [box("support", 0)], counts: null, assigned: null, preview: null })),
+      buildWidgetSnapshots(inputs({ mailboxes: [box("support", 2, { displayName: null })], counts: counts({ threads: 1 }), assigned: [thread("t1", { contactName: undefined })] })),
+      signedOutSnapshots("pt-BR"),
+    ];
+    for (const s of cases) {
+      expect(hasNull(s.unread)).toBe(false);
+      expect(hasNull(s.mine)).toBe(false);
+    }
+  });
+
   it("signed out: no count, mailbox, sender or subject, only 'sign in' in the app's language", () => {
     const s = signedOutSnapshots("en");
-    expect(s.unread).toMatchObject({ state: "signedOut", total: 0, top: null, rows: [], message: "Sign in to Ember Mail", url: widgetUrls.home });
+    expect(s.unread).toMatchObject({ state: "signedOut", total: 0, rows: [], message: "Sign in to Ember Mail", url: widgetUrls.home });
     expect(s.mine).toMatchObject({ state: "signedOut", count: 0, rows: [], message: "Sign in to Ember Mail", url: widgetUrls.home });
     expect(signedOutSnapshots("pt-BR").mine.title).toBe("Minhas");
   });

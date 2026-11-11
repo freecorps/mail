@@ -56,8 +56,11 @@ export interface UnreadSnapshot {
   totalText: string;
   /** "12 não lidas" (lock screen inline, accessibility). */
   caption: string;
-  /** The mailbox with the most unread (small size); null when nothing is unread. */
-  top: UnreadRow | null;
+  /**
+   * The mailbox with the most unread (small size); absent when nothing is unread. Never null: expo-widgets' iOS bridge
+   * refuses props holding a null (the native call throws and the widget keeps its previous state).
+   */
+  top?: UnreadRow;
   /** Medium size: mailboxes with unread first (most first), then the rest in the app's order. */
   rows: UnreadRow[];
   /** "Tudo lido" / "Entre no Ember Mail". */
@@ -118,7 +121,7 @@ export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
   const rowOf = (b: Mailbox): UnreadRow => ({ label: b.displayName || b.name, count: badge(b.unread), unread: b.unread, url: widgetUrls.mailbox(b.name) });
   const ranked = [...boxes].sort((x, y) => y.b.unread - x.b.unread || x.order - y.order).map((x) => x.b);
   const total = boxes.reduce((n, x) => n + x.b.unread, 0);
-  const top = ranked[0] && ranked[0].unread > 0 ? rowOf(ranked[0]) : null;
+  const top = ranked[0] && ranked[0].unread > 0 ? rowOf(ranked[0]) : undefined;
 
   const assigned = i.counts?.assigned;
   const count = assigned?.threads ?? i.assigned?.length ?? 0;
@@ -136,7 +139,7 @@ export function buildWidgetSnapshots(i: WidgetInputs): WidgetSnapshots {
       total,
       totalText: badge(total),
       caption: total > 0 ? t("widget.unread.caption", { count: total }) : t("widget.unread.none"),
-      top,
+      ...(top ? { top } : {}),
       rows: ranked.slice(0, UNREAD_ROWS).map(rowOf),
       message: boxes.length === 0 ? t("widget.unread.noMailboxes") : t("widget.unread.none"),
       url: total > 0 ? widgetUrls.unread : widgetUrls.home,
@@ -173,7 +176,7 @@ export function widgetInputsReady(s: { mailboxes: QueryStatus; counts: ViewCount
 export function signedOutSnapshots(locale: Locale): WidgetSnapshots {
   const signIn = translate(locale, "widget.signIn");
   return {
-    unread: { v: WIDGET_SNAPSHOT_VERSION, state: "signedOut", title: translate(locale, "widget.unread.title"), total: 0, totalText: "", caption: signIn, top: null, rows: [], message: signIn, url: widgetUrls.home },
+    unread: { v: WIDGET_SNAPSHOT_VERSION, state: "signedOut", title: translate(locale, "widget.unread.title"), total: 0, totalText: "", caption: signIn, rows: [], message: signIn, url: widgetUrls.home },
     mine: { v: WIDGET_SNAPSHOT_VERSION, state: "signedOut", title: translate(locale, "widget.mine.title"), count: 0, countText: "", caption: signIn, label: "", rows: [], hidden: false, message: signIn, url: widgetUrls.home },
   };
 }
