@@ -478,8 +478,12 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
 
   // ---- Chrome -------------------------------------------------------------------------------------------------------
   const title = note ? t("compose.noteTitle") : isReply ? t("compose.replyTitle") : kind === "forward" ? t("forward.title") : t("compose.title");
-  const closeIcon = useMaterialSource(ios ? null : Icons.close, 24, c.labelText);
-  const sendIcon = useMaterialSource(ios ? null : Icons.sendMail, 24, c.tint);
+  const closeMaterial = useMaterialSource(ios ? null : Icons.close, 24, c.labelText);
+  const sendMaterial = useMaterialSource(ios ? null : Icons.sendMail, 24, c.tint);
+  // iOS: glyphs like Mail's sheet (✕, a filled ↑), so "Nova mensagem" keeps its room between them; the words stay the
+  // accessibility labels.
+  const closeIcon = ios ? ("xmark" as const) : closeMaterial;
+  const sendIcon = ios ? ("arrow.up" as const) : sendMaterial;
   const laterIcon = useToolbarIcon(Icons.sendLater, ios ? c.tint : c.labelText);
   const laterItemIcon = useToolbarIcon(Icons.sendLater, c.labelText);
   const pickIcon = useToolbarIcon(Icons.calendar, c.labelText);
@@ -526,7 +530,7 @@ function Composer({ init, thread, messages, composeDrafts, onEdit }: { init: Ini
                     ]}
               </Stack.Toolbar.Menu>
             )}
-            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready || scheduling} onPress={() => send()}>
+            <Stack.Toolbar.Button {...(sendIcon ? { icon: sendIcon } : {})} accessibilityLabel={note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")} variant="done" tintColor={c.tint} disabled={!ready || scheduling} onPress={() => send()}>
               {note ? t("thread.addNote") : scheduling ? t("compose.scheduling") : t("compose.send")}
             </Stack.Toolbar.Button>
           </Stack.Toolbar>

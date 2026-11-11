@@ -203,30 +203,53 @@ async function fn(kind: "query" | "mutation", name: string, args: unknown, token
   return r.body?.value ?? r.body;
 }
 
-async function worstTags() {
-  const token = await jwt();
-  // The mailbox's existing tags (a second run reuses them: names are unique per mailbox).
-  const existing = ((await fn("query", "tags", {}, token)) as Array<{ _id: string; name: string; mailbox: string }>).filter((x) => x.mailbox === "support");
-  const ids: string[] = [];
-  for (const [name, color] of WORST_TAGS) {
+/** The demo's tags (always): two on the invoice, one on the LGPD request. */
+const DEMO_TAGS: Record<string, ReadonlyArray<readonly [string, string]>> = {
+  support: [
+    ["Urgente", "red"],
+    ["Cobrança", "orange"],
+  ],
+  privacy: [["LGPD", "indigo"]],
+};
+const DEMO_PLAN: Record<string, Array<[string, string[]]>> = {
+  support: [["marina@cliente.test", ["Urgente", "Cobrança"]]],
+  privacy: [["joao@pessoa.test", ["LGPD"]]],
+};
+
+/** Creates a mailbox's tags (reusing those a previous run made: names are unique per mailbox) and sets them on threads by contact. */
+async function tagMailbox(token: string, mailbox: string, tags: ReadonlyArray<readonly [string, string]>, plan: Array<[string, string[]]>) {
+  const existing = ((await fn("query", "tags", {}, token)) as Array<{ _id: string; name: string; mailbox: string }>).filter((x) => x.mailbox === mailbox);
+  const ids = new Map<string, string>();
+  for (const [name, color] of tags) {
     const found = existing.find((x) => x.name.toLowerCase() === name.toLowerCase());
-    ids.push(found ? found._id : ((await fn("mutation", "createTag", { mailbox: "support", name, color }, token)) as string));
+    ids.set(name, found ? found._id : ((await fn("mutation", "createTag", { mailbox, name, color }, token)) as string));
   }
-  const page = (await fn("query", "threads", { mailbox: "support", paginationOpts: { numItems: 100, cursor: null } }, token)) as { page: Array<{ _id: string; contact: string }> };
-  const byContact = (email: string) => page.page.find((th) => th.contact === email)?._id;
-  const plan: Array<[string, number[]]> = [
-    ["max@worst.test", WORST_TAGS.map((_, i) => i)],
-    ["bartholomew.fitzgerald+billing-notifications@northwind-industries-holdings.worst.test", [2, 3]],
-    ["fogo@worst.test", [4]],
-    ["m@worst.test", [8, 9]],
-    ["marina@cliente.test", [0, 1]],
-  ];
-  for (const [contact, tags] of plan) {
-    const threadId = byContact(contact);
+  const page = (await fn("query", "threads", { mailbox, paginationOpts: { numItems: 100, cursor: null } }, token)) as { page: Array<{ _id: string; contact: string }> };
+  let set = 0;
+  for (const [contact, names] of plan) {
+    const threadId = page.page.find((th) => th.contact === contact)?._id;
     if (!threadId) continue;
-    await fn("mutation", "setTags", { threadId, tags: tags.map((i) => ids[i]!) }, token);
+    await fn("mutation", "setTags", { threadId, tags: names.map((n) => ids.get(n)!).filter(Boolean) }, token);
+    set++;
   }
-  console.log(`  tags: ${ids.length} in support@, set on ${plan.length} conversations`);
+  console.log(`  tags: ${ids.size} in ${mailbox}@, set on ${set} conversations`);
+}
+
+async function seedTags(worstOn: boolean) {
+  const token = await jwt();
+  const names = WORST_TAGS.map(([n]) => n);
+  await tagMailbox(token, "support", worstOn ? [...DEMO_TAGS.support!, ...WORST_TAGS.filter(([n]) => !DEMO_TAGS.support!.some(([d]) => d === n))] : DEMO_TAGS.support!, [
+    ...DEMO_PLAN.support!,
+    ...(worstOn
+      ? ([
+          ["max@worst.test", names],
+          ["bartholomew.fitzgerald+billing-notifications@northwind-industries-holdings.worst.test", [names[2]!, names[3]!]],
+          ["fogo@worst.test", [names[4]!]],
+          ["m@worst.test", [names[8]!, names[9]!]],
+        ] as Array<[string, string[]]>)
+      : []),
+  ]);
+  await tagMailbox(token, "privacy", DEMO_TAGS.privacy!, DEMO_PLAN.privacy!);
 }
 
 /** n short unread messages from distinct senders (each its own conversation). */
@@ -262,7 +285,7 @@ async function main() {
     const r = await fetch(`${URL_}/cdn-cgi/local/email?from=${encodeURIComponent(mail.envelope)}&to=${encodeURIComponent(mail.rcpt)}`, { method: "POST", body: raw });
     console.log(`  ${mail.rcpt} ← ${mail.envelope}: ${r.status} ${r.status >= 300 ? await r.text() : ""}`);
   }
-  if (worstOn) await worstTags();
+  await seedTags(worstOn);
   console.log(`member: ${EMAIL} / ${PASSWORD} (user id ${userId})`);
 }
 
