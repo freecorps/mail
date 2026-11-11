@@ -968,13 +968,16 @@ describe("mail app", () => {
     const d1 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá", cc: ["fin@user.test"], attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "cia");
     expect(d1.error ?? null).toBeNull();
     // Saving again without the id (another device) replaces the same reply draft.
-    const d2 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] }, "cia");
+    // The files are sent back as read (with their size), which the server ignores: sizes come from storage.
+    const d2 = await mu("inbox:saveDraft", { kind: "reply", threadId: t._id, text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain", size: 1 }] }, "cia");
     expect(d2.value.id).toBe(d1.value.id);
     const note = await mu("inbox:saveDraft", { kind: "note", threadId: t._id, text: "nota" }, "cia");
     expect(note.value.id).not.toBe(d1.value.id);
     const list = (await q("inbox:drafts", {}, "cia")).value as any[];
     expect(list.map((d) => d.kind)).toEqual(["note", "reply"]);
     expect(list[1]).toMatchObject({ _id: d1.value.id, userId: "cia", kind: "reply", threadId: t._id, mailbox: "cs", to: [], cc: [], bcc: [], subject: "", text: "Olá, Marina", bodyHtml: "<p>Olá, <b>Marina</b></p>", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }] });
+    // Each file carries its stored size, so a reopened draft knows whether a scheduled send would need links.
+    expect(list[1].attachments[0].size).toBe(8);
     expect((await q("inbox:drafts", { threadId: t._id }, "cia")).value).toHaveLength(2);
 
     // Another member of the mailbox sees none of them and cannot touch them; nor can an admin.
@@ -1004,7 +1007,7 @@ describe("mail app", () => {
     // A failed send keeps the draft; a sent reply deletes it in the same transaction (and only it).
     expect((await mu("inbox:reply", { threadId: t._id, text: "x", cc: many, draftId: d1.value.id }, "cia")).error.message).toMatch(/at most 50/);
     expect(((await q("inbox:drafts", {}, "cia")).value as any[]).some((d) => d._id === d1.value.id)).toBe(true);
-    const sent = await mu("inbox:reply", { threadId: t._id, text: "Olá, Marina", attachments: [{ file, filename: "r.txt", contentType: "text/plain" }], draftId: d1.value.id }, "cia");
+    const sent = await mu("inbox:reply", { threadId: t._id, text: "Olá, Marina", attachments: list[1].attachments, draftId: d1.value.id }, "cia");
     expect(sent.error ?? null).toBeNull();
     expect(((await q("inbox:drafts", {}, "cia")).value as any[]).map((d) => d._id)).toEqual([note.value.id]);
     // A draft already gone (sent on another device) does not stop the send.

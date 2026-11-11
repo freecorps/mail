@@ -72,7 +72,9 @@ export const LINK_TTL_S = 7 * 24 * 3600;
 /** The longest a signed URL of Ember's lives (`ctx.storage.getUrl`: `expiresIn` at most 7 days, clamped above). */
 export const MAX_URL_TTL_S = 7 * 24 * 3600;
 
-const attachmentsArg = v.optional(v.array(v.object({ file: v.string(), filename: v.string(), contentType: v.string() })));
+// `size` is accepted so a client may send back a draft's files as it read them; the server never trusts it (sizes
+// come from storage).
+const attachmentsArg = v.optional(v.array(v.object({ file: v.string(), filename: v.string(), contentType: v.string(), size: v.optional(v.number()) })));
 type AttachmentArg = { file: string; filename: string; contentType: string };
 
 const mib = (n: number) => (n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(n >= 100 * 1024 * 1024 ? 0 : 1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
@@ -842,7 +844,11 @@ export const saveDraft = mutation({
         if (!msg || msg.direction === "note") throw new Error("message not found in this thread");
       } else if (a.messageId !== undefined) throw new Error(`a ${a.kind} draft has no messageId`);
     }
-    const attachments = (a.attachments ?? []) as DraftAttachment[];
+    // Each file's size is the stored one (the client's, if sent, is ignored); unknown while still uploading.
+    const attachments: DraftAttachment[] = (a.attachments ?? []).map(({ file, filename, contentType }) => {
+      const meta = ctx.storage.getMetadata(file) as { size: number | null } | null;
+      return { file, filename, contentType, ...(meta?.size ? { size: meta.size } : {}) };
+    });
     const doc = {
       userId: m.userId,
       kind: a.kind,
