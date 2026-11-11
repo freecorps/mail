@@ -128,7 +128,7 @@ export function Composer({
     setMode(u.mode);
     setAll(u.all);
     setSignature(u.signature);
-    uploads.restore(u.files);
+    if (u.mode === "reply") uploads.restore(u.files);
     if (editor.current) {
       restoring.current = true;
       editor.current.setContent(u.html);
@@ -305,7 +305,8 @@ export function Composer({
       setMode(m);
       setAll(!!cc);
       setSignature(sig);
-      uploads.restore(files);
+      // A note had no files: the reply's uploads, left alone by the send, stay as they are (restore replaces the list).
+      if (m === "reply") uploads.restore(files);
       editor.current?.setContent(html);
     };
     const quoteHeader = p.quoteHeader;
