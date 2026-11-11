@@ -2,7 +2,8 @@
 // restored after a restart is still shown: the reply appears in the thread with a "sending" mark, the thread moves to
 // "waiting", unread counters drop, and the server's answer replaces all of it when the queue drains.
 import type { OptimisticLocalStore, OptimisticUpdate } from "@freecorps/ember-react-native";
-import type { Mailbox, Message, Page, SentArgs, SentThread, Thread, ThreadDetail, ThreadStatus, ThreadsArgs } from "../api";
+import type { Mailbox, Message, Page, SentArgs, SentThread, Thread, ThreadDetail, ThreadStatus, ThreadsArgs, ViewArgs, ViewPage } from "../api";
+import { viewKeeps } from "./replica";
 
 /** Ids of optimistic rows start with this (the UI shows them as pending). */
 export const OPTIMISTIC_PREFIX = "optimistic:";
@@ -30,6 +31,16 @@ function patchThread(store: Store, threadId: string, patch: (t: Thread) => Threa
     // A status filter the thread no longer matches drops it from that list.
     const page = args.status !== undefined && args.status !== next.status ? value.page.filter((_, j) => j !== i) : value.page.map((t, j) => (j === i ? next : t));
     store.setQuery<any>("inbox:threads", args, { ...value, page });
+  }
+  // The cross-mailbox views: patched in place, or dropped when it no longer belongs (read in "unread", archived in
+  // "waiting"); one it now joins comes with the server's answer.
+  for (const { args, value } of store.getAllQueries<any>("inbox:view") as Array<{ args: ViewArgs; value: ViewPage | undefined }>) {
+    const i = value ? value.page.findIndex((t) => t._id === threadId) : -1;
+    if (!value || i < 0) continue;
+    const next = patch(value.page[i]!);
+    found ??= next;
+    const page = viewKeeps(args.view, args.status)(next) ? value.page.map((t, j) => (j === i ? next : t)) : value.page.filter((_, j) => j !== i);
+    store.setQuery<any>("inbox:view", args, { ...value, page });
   }
   // The Sent view lists it too, whatever its status: patched in place (its place is when the mailbox last wrote).
   for (const { args, value } of store.getAllQueries<any>("inbox:sent") as Array<{ args: SentArgs; value: SentPage | undefined }>) {

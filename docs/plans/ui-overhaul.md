@@ -121,7 +121,7 @@ Status: `todo` / `doing` / `review` / `done (#PR)`.
 | api: visões (`inbox:view`, `inbox:views`) | review |
 | E1 email liso + assinatura + HTML (Ember) | todo |
 | M1 fundação mobile | review (#32) |
-| M2 navegação mobile | todo |
+| M2 navegação mobile | review (#33) |
 
 ### Onda 2 (paralelo): Mobile M3 + Web W1/W2/W3
 

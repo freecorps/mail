@@ -1,5 +1,6 @@
-// Root: providers (keyboard frame tracking, theme, i18n, Ember, session), then one native stack whose reachable screens follow the session (Stack.Protected): sign-in,
-// "not a member yet", or the inbox tabs with compose (modal) and assign (form sheet) on top.
+// Root: providers (keyboard frame tracking, theme, i18n, Ember, session), then one native stack whose reachable
+// screens follow the session (Stack.Protected): sign-in, "not a member yet", or the tabs with a conversation (pushed
+// over the tabs: no tab bar, like Mail.app), compose (modal) and assign (form sheet) on top.
 import { EmberProvider } from "@freecorps/ember-react-native";
 import { Stack } from "expo-router";
 import { DarkTheme, DefaultTheme, ThemeProvider } from "expo-router/react-navigation";
@@ -10,7 +11,7 @@ import { emberClient } from "../ember";
 import { I18nProvider } from "../i18n";
 import { useLanguagePref } from "../prefs";
 import { SessionProvider, useSession } from "../session";
-import { useColors, useHeaderColors } from "../theme";
+import { useColors, useHeaderColors, useListStackOptions } from "../theme";
 
 export default function RootLayout() {
   const lang = useLanguagePref();
@@ -36,11 +37,13 @@ export default function RootLayout() {
 function RootStack() {
   const { phase } = useSession();
   const header = useHeaderColors();
+  const list = useListStackOptions();
   if (phase === "loading") return <Loading />;
   return (
     <Stack screenOptions={{ headerShown: false, ...header }}>
       <Stack.Protected guard={phase === "member"}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="thread/[threadId]" options={{ ...list, headerShown: true, headerLargeTitleEnabled: false, title: "" }} />
         <Stack.Screen name="compose" options={{ presentation: "modal", headerShown: true }} />
         <Stack.Screen
           name="assign"

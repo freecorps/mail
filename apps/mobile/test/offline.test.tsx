@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { api, type Message } from "../src/api";
 import { createMailClient } from "../src/client";
 import { useThreadList } from "../src/model/threads";
+import { setReplicaUser } from "../src/offline/replica";
 import { useThread } from "../src/model/thread";
 import { mailServer, tempDir } from "./mailServer";
 
@@ -60,6 +61,11 @@ function ThreadView({ threadId, onVm }: { threadId: string; onVm?: (vm: ReturnTy
 }
 
 const text = (id: string) => screen.getByTestId(id).textContent ?? "";
+
+function ViewList({ view }: { view: "all" | "assigned" | "unread" | "waiting" }) {
+  const vm = useThreadList({ view, filter: "all", query: "" });
+  return <div data-testid={`view-${view}`}>{vm.status === "ready" ? `${vm.source}|${vm.rows.map((r) => r.title).join(",")}` : vm.status}</div>;
+}
 
 describe("offline inbox (expo-sqlite + FTS5, real mail service)", () => {
   it("lists, opens and searches offline; a reply queued offline survives a restart and is sent once online", async () => {
@@ -126,5 +132,43 @@ describe("offline inbox (expo-sqlite + FTS5, real mail service)", () => {
     const server = srv.q("inbox:thread", { threadId: a.threadId }, "agent-1");
     expect(server.messages.map((m: Message) => m.direction)).toEqual(["inbound", "outbound"]);
     expect(server.thread.status).toBe("waiting");
+  });
+
+  it("views offline: the cross-mailbox lists come from the replica, assigned to the signed-in member", async () => {
+    const srv = mailServer();
+    srv.seed();
+    const a = srv.inbound({ from: "ana@user.test", name: "Ana", subject: "Fatura errada", text: "O valor está errado." });
+    srv.inbound({ from: "eve@privacy.test", name: "Eve", subject: "LGPD", text: "Quero meus dados.", mailbox: "privacy" });
+    srv.m("admin:upsertMember", { userId: "agent-1", name: "Bia", mailboxes: ["support", "privacy"] });
+    srv.m("@email/lib:assign", { threadId: a.threadId, assignee: "agent-1", assigneeName: "Agent One" });
+    const db = tempDir();
+    cleanups.push(db.cleanup, () => setReplicaUser(null));
+
+    // Online: the views from the server; inbox:recent replicates the threads.
+    const c1 = makeClient(srv, db, true);
+    render(
+      <EmberProvider client={c1.client}>
+        <ViewList view="all" />
+      </EmberProvider>,
+    );
+    await waitFor(() => expect(text("view-all")).toBe("server|Eve,Ana"));
+    await waitFor(async () => expect((await c1.client.query(api.inbox.recent, { threads: 50 })).threads).toHaveLength(2));
+    await c1.client.flushStorage();
+    cleanup();
+    c1.client.close();
+
+    // Cold start offline: the same views from the device; "assigned" knows who is signed in from the session.
+    setReplicaUser("agent-1");
+    const c2 = makeClient(srv, db, false);
+    render(
+      <EmberProvider client={c2.client}>
+        <ViewList view="all" />
+        <ViewList view="assigned" />
+        <ViewList view="unread" />
+      </EmberProvider>,
+    );
+    await waitFor(() => expect(text("view-all")).toBe("local|Eve,Ana"));
+    await waitFor(() => expect(text("view-assigned")).toBe("local|Ana"));
+    await waitFor(() => expect(text("view-unread")).toBe("local|Eve,Ana"));
   });
 });

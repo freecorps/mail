@@ -1,30 +1,58 @@
-// A mailbox's conversations: native search bar in the header, native segmented filter, a virtualized list (FlatList)
-// whose rows open the thread on tap and show the system context menu (iOS) / a Material menu (Android) on long-press.
+// A list of conversations: one mailbox, a view across the member's mailboxes, or search across all of them. A
+// virtualized list (FlatList) whose rows open the thread (on the root stack, without the tab bar) on tap and show the
+// system context menu (iOS) / a Material menu (Android) on long-press. The chrome follows the platform: on iOS a filter
+// menu and compose in the navigation bar, and the header search bar; on Android FilterChips and a compose FAB.
 import { useMutation } from "@freecorps/ember-react-native";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { memo, useCallback, useState } from "react";
 import { FlatList, Pressable, StyleSheet, View } from "react-native";
-import { api } from "../api";
-import { Icons, Symbol, useToolbarIcon } from "../components/icons";
-import { Avatar, Chip, ConnectionBanner, EmptyState, Loading, NativeButton, RowMenu, Segmented, Separator, StatusPill, ThemedText, UnreadDot } from "../components/ui";
+import { api, INBOX_VIEWS, type InboxView } from "../api";
+import { Icons, Symbol } from "../components/icons";
+import { Avatar, Chip, ConnectionBanner, EmptyState, ListActions, ListFilters, Loading, NativeButton, RowMenu, Separator, StatusPill, ThemedText, UnreadDot } from "../components/ui";
 import type { RowMenuAction } from "../components/native";
 import { useI18n } from "../i18n";
 import { formatWhen } from "../lib/format";
-import { THREAD_FILTERS, useDebounced, useThreadList, type ThreadFilter, type ThreadRow } from "../model/threads";
+import { filterLabelKey, filtersFor, useDebounced, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
 import { screenEdge, spacing, tabular, useColors } from "../theme";
 
-export function ThreadsScreen() {
+/** Route: `/mailbox/[mailbox]` (one mailbox). */
+export function MailboxThreadsScreen() {
   const { mailbox, title } = useLocalSearchParams<{ mailbox: string; title?: string }>();
+  return <ThreadsScreen source={{ mailbox }} title={title ?? mailbox} />;
+}
+
+/** Route: `/view/[view]` (a view across the member's mailboxes). */
+export function ViewThreadsScreen() {
+  const { view } = useLocalSearchParams<{ view: string }>();
+  const { t } = useI18n();
+  const v: InboxView = (INBOX_VIEWS as string[]).includes(view) ? (view as InboxView) : "all";
+  return <ThreadsScreen source={{ view: v }} title={t(`views.${v}`)} />;
+}
+
+/** The "Minhas" tab: assigned to me. */
+export function MineScreen() {
+  const { t } = useI18n();
+  return <ThreadsScreen source={{ view: "assigned" }} title={t("tabs.mine")} />;
+}
+
+/** The search tab: every mailbox, search only (its search bar joins the tab bar on iOS 26). */
+export function SearchScreen() {
+  const { t } = useI18n();
+  return <ThreadsScreen source={{ view: "all" }} title={t("search.title")} searchOnly />;
+}
+
+export function ThreadsScreen({ source, title, searchOnly = false }: { source: ListSource; title: string; searchOnly?: boolean }) {
   const c = useColors();
   const { t, locale, clock24 } = useI18n();
-  const [filter, setFilter] = useState<ThreadFilter>("all");
+  const filters = searchOnly ? [] : filtersFor(source);
+  const [picked, setFilter] = useState<ThreadFilter>("all");
+  const filter = filters.includes(picked) ? picked : "all";
   const [query, setQuery] = useState("");
   const debounced = useDebounced(query, 250);
-  const vm = useThreadList({ mailbox, filter, query: debounced });
+  const vm = useThreadList({ ...source, filter, query: debounced } as ListSource & { filter: ThreadFilter; query: string });
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
   const setStatus = useMutation(api.inbox.setStatus);
-  const composeIcon = useToolbarIcon(Icons.compose, c.tint);
 
   const actionsFor = useCallback(
     (row: ThreadRow): RowMenuAction[] => {
@@ -42,56 +70,73 @@ export function ThreadsScreen() {
     [t, markRead, markUnread, setStatus],
   );
 
+  const filterProps = {
+    filters: filters.map((f) => ({ value: f, label: t(filterLabelKey(source, f)) })),
+    value: filter,
+    onChange: setFilter,
+    label: t("threads.filterMenu"),
+  };
+  const compose = () => router.push({ pathname: "/compose", params: source.mailbox ? { mailbox: source.mailbox } : {} });
+  const showRows = !searchOnly || vm.searching;
+
   const now = Date.now();
   const header = (
     <View>
       <ConnectionBanner />
-      {!vm.searching && (
-        <Segmented<ThreadFilter> label={t("threads.filterLabel")} value={filter} onChange={setFilter} options={THREAD_FILTERS.map((f) => ({ value: f, label: t(`threads.filter.${f}`) }))} />
-      )}
+      {!vm.searching ? <ListFilters<ThreadFilter> {...filterProps} /> : null}
       {vm.searching && vm.source !== "server" && (
-        <View style={styles.offlineNote}>
+        <View style={styles.note}>
           <Symbol icon={Icons.device} size={14} color={c.secondaryLabel} />
           <ThemedText variant="footnote" tone="secondary">
             {t("threads.offlineResults")}
           </ThemedText>
         </View>
       )}
+      {vm.partial ? (
+        <View style={styles.note}>
+          <ThemedText variant="footnote" tone="secondary">
+            {t("threads.partial")}
+          </ThemedText>
+        </View>
+      ) : null}
     </View>
+  );
+
+  const empty = searchOnly && !vm.searching ? (
+    <EmptyState icon={Icons.search} title={t("search.title")} body={t("search.hint")} />
+  ) : vm.status === "loading" ? (
+    <View style={styles.loading}>
+      <Loading />
+    </View>
+  ) : vm.status === "error" ? (
+    <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
+  ) : vm.searching ? (
+    <EmptyState icon={Icons.search} title={t("threads.emptySearch", { query: debounced })} />
+  ) : (
+    <EmptyState icon={Icons.empty} title={source.view === "assigned" ? t("mine.empty") : t("threads.empty")} />
   );
 
   return (
     <>
-      <Stack.Screen options={{ title: title ?? mailbox }} />
-      <Stack.SearchBar placeholder={t("threads.search")} hideWhenScrolling={false} autoCapitalize="none" onChangeText={(e) => setQuery(e.nativeEvent.text)} onCancelButtonPress={() => setQuery("")} />
-      {composeIcon ? (
-        <Stack.Toolbar placement="right">
-          <Stack.Toolbar.Button icon={composeIcon} accessibilityLabel={t("threads.compose")} onPress={() => router.push({ pathname: "/compose", params: { mailbox } })}>
-            {t("threads.compose")}
-          </Stack.Toolbar.Button>
-        </Stack.Toolbar>
-      ) : null}
+      <Stack.Screen options={{ title }} />
+      <Stack.SearchBar
+        placeholder={searchOnly || source.view ? t("search.placeholder") : t("threads.search")}
+        hideWhenScrolling={false}
+        autoCapitalize="none"
+        onChangeText={(e) => setQuery(e.nativeEvent.text)}
+        onCancelButtonPress={() => setQuery("")}
+      />
       <FlatList
         style={{ backgroundColor: c.background }}
         contentInsetAdjustmentBehavior="automatic"
         keyboardDismissMode="on-drag"
         keyboardShouldPersistTaps="handled"
-        data={vm.rows}
+        data={showRows ? vm.rows : []}
         keyExtractor={(r) => r.key}
         ListHeaderComponent={header}
         ItemSeparatorComponent={RowSeparator}
         renderItem={({ item }) => <ThreadItem row={item} when={formatWhen(item.at, now, locale, clock24)} actions={actionsFor(item)} />}
-        ListEmptyComponent={
-          vm.status === "loading" ? (
-            <View style={styles.loading}>
-              <Loading />
-            </View>
-          ) : vm.status === "error" ? (
-            <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />
-          ) : (
-            <EmptyState icon={vm.searching ? Icons.search : Icons.empty} title={vm.searching ? t("threads.emptySearch", { query: debounced }) : t("threads.empty")} />
-          )
-        }
+        ListEmptyComponent={empty}
         ListFooterComponent={
           vm.canLoadMore ? (
             <View style={styles.more}>
@@ -102,6 +147,10 @@ export function ThreadsScreen() {
         onEndReached={vm.canLoadMore ? vm.loadMore : undefined}
         onEndReachedThreshold={0.5}
       />
+      {/* After the list: on Android the compose FAB floats over it. */}
+      {searchOnly ? null : (
+        <ListActions<ThreadFilter> filter={filters.length ? filterProps : undefined} compose={{ label: t("threads.compose"), onPress: compose }} />
+      )}
     </>
   );
 }
@@ -172,7 +221,7 @@ const styles = StyleSheet.create({
   line: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   from: { flex: 1 },
   chips: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs },
-  offlineNote: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
+  note: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: screenEdge, paddingVertical: spacing.sm },
   loading: { height: 240 },
   more: { alignItems: "center", paddingVertical: spacing.md },
 });

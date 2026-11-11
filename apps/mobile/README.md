@@ -9,8 +9,9 @@ The UI is in Portuguese (pt-BR) by default, with English as the alternative, and
 | | How |
 |---|---|
 | Sign-in | Better Auth of the mail service (`apps/api/ember/auth.config.ts`). The session lives in SecureStore and short JWTs go to Ember (`createEmberAuthClient`). A signed-in user without mailboxes sees their user id to hand to an admin (`POST /inbox/members`). |
-| Mailboxes | `inbox:mailboxes`: the member's mailboxes, with unread and thread counts from the email component's aggregate. |
-| Threads | `inbox:threads`, with filters (all / open / waiting / archived) and pages that grow as you scroll. |
+| Home (Caixas tab) | Like Mail.app: a **Views** section (all mailboxes, assigned to me, unread, waiting: `inbox:view`, counts from `inbox:views`) and a **Mailboxes** section (`inbox:mailboxes`: name, address, unread count from the email component's aggregate). |
+| Threads | `inbox:threads` (one mailbox) or `inbox:view` (across mailboxes), with filters (a native menu in the navigation bar on iOS, FilterChips on Android) and pages that grow as you scroll. **Minhas** is the assigned-to-me view as a tab. |
+| Search | The search tab (`role="search"`; on iOS 26 its field joins the tab bar) searches every mailbox; each list has its own header search bar too. |
 | Search | `inbox:search`. It runs on the server when online and on the device (expo-sqlite FTS5, accents folded) when offline. |
 | Thread view | Text messages render natively. HTML mail renders in a locked-down WebView: CSP with no scripts, frames, forms or network, plus a sanitizer, and links open outside the app. Remote images are blocked until you tap **Carregar imagens**. Inline `cid:` images come from the attachments. |
 | Reply, note, compose | `inbox:reply` / `inbox:note` / `inbox:compose`. These are optimistic and queued in SQLite while offline; the queue survives restarts and is sent once when you are back online. |
@@ -20,8 +21,11 @@ The UI is in Portuguese (pt-BR) by default, with English as the alternative, and
 
 ## Native UI
 
-Routes live in `src/app` (expo-router): native tabs (Inbox, Settings), a native stack per tab with large titles and
-the header search bar, compose as a modal and assign as a form sheet. Controls are native: `@expo/ui` (SwiftUI on
+Routes live in `src/app` (expo-router): native tabs (Caixas, Minhas, Ajustes, and search), a native stack per tab
+with large titles and the header search bar. A conversation opens on the root stack, over the tabs (no tab bar, like
+Mail.app); compose is a modal and assign a form sheet. Compose is a navigation bar button on iOS and a FAB on Android.
+Colors, type, spacing, radius and motion come from `src/theme/` (semantic platform colors, the ember accent as one
+light/dark pair, Apple text styles on iOS and the Material 3 type scale on Android). Controls are native: `@expo/ui` (SwiftUI on
 iOS, Jetpack Compose on Android) for forms, lists, text fields, pickers, segmented controls and buttons; SF Symbols /
 Material Symbols through `expo-symbols`; the system context menu on thread rows. See `AGENTS.md` for the mapping.
 

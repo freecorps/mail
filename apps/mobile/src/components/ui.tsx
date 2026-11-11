@@ -14,7 +14,7 @@ import { ThemedText } from "./themed-text";
 
 export { ThemedText, type TextTone } from "./themed-text";
 
-export { EmptyState, IconButton, NativeIcon, RowMenu, Segmented } from "./native";
+export { EmptyState, IconButton, ListActions, ListFilters, NativeIcon, RowMenu, Segmented } from "./native";
 
 /** Initials on a stable hue, like Contacts/Mail (no platform avatar control exists). */
 export function Avatar({ name, size = 40 }: { name: string; size?: number }) {
@@ -79,8 +79,9 @@ export function Loading() {
 
 /** A native button (SwiftUI `Button` / Material 3 button) placed in a React Native layout. */
 export function NativeButton({ label, onPress, variant = "text", disabled }: { label: string; onPress(): void; variant?: ButtonVariant; disabled?: boolean }) {
+  const c = useColors();
   return (
-    <Host matchContents>
+    <Host matchContents seedColor={c.tint}>
       <Button label={label} variant={variant} onPress={onPress} disabled={!!disabled} />
     </Host>
   );

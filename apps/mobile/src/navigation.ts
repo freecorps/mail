@@ -1,5 +1,6 @@
 // Navigation from outside React (notification taps). Routes and deep links are file-based (src/app, expo-router):
-// `embermail://thread/<id>`, `embermail://mailbox/<name>`, `embermail://compose`, `embermail://settings`.
+// `embermail://thread/<id>` (root stack, over the tabs), `embermail://mailbox/<name>`, `embermail://view/<all|assigned|
+// unread|waiting>`, `embermail://mine`, `embermail://search`, `embermail://compose`, `embermail://settings`.
 import { router } from "expo-router";
 
 let inboxMounted = false;
@@ -9,7 +10,7 @@ export function setInboxMounted(mounted: boolean) {
   inboxMounted = mounted;
 }
 
-/** Opens a thread on top of the Inbox stack, once the inbox is mounted. */
+/** Opens a thread on the root stack (over the tabs), once the tabs are mounted. */
 export function openThread(threadId: string, mailbox?: string): boolean {
   if (!inboxMounted) return false;
   router.push({ pathname: "/thread/[threadId]", params: { threadId, ...(mailbox ? { mailbox } : {}) } });

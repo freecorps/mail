@@ -38,3 +38,17 @@ export interface IconButtonProps {
   onPress(): void;
   disabled?: boolean;
 }
+
+export interface ListFilterProps<T extends string> {
+  filters: Array<{ value: T; label: string }>;
+  value: T;
+  onChange(v: T): void;
+  /** Spoken name of the filter control (and the iOS menu's title). */
+  label: string;
+}
+
+export interface ListActionsProps<T extends string> {
+  /** Filters for the iOS navigation bar menu (Android shows them as chips in the list header instead). */
+  filter?: ListFilterProps<T> | undefined;
+  compose: { label: string; onPress(): void };
+}
