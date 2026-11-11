@@ -17,6 +17,7 @@ export function RecipientInput({
   invalid = false,
   focusOnMount = false,
   trailing,
+  onPending,
 }: {
   id?: string;
   label: string;
@@ -29,12 +30,17 @@ export function RecipientInput({
   focusOnMount?: boolean;
   /** Controls at the end of the row ("Cc"). */
   trailing?: React.ReactNode;
+  /** What is typed and not a chip yet, as it changes (a send takes it along, as leaving the field would). */
+  onPending?: (text: string) => void;
 }) {
   const { t } = useI18n();
   const fallbackId = useId();
   const inputId = id ?? fallbackId;
   const listId = `${inputId}-list`;
   const [text, setText] = useState("");
+  const pendingCb = useRef(onPending);
+  pendingCb.current = onPending;
+  useEffect(() => pendingCb.current?.(text), [text]);
   const [open, setOpen] = useState(false);
   const [picked, setActive] = useState(0);
   const input = useRef<HTMLInputElement>(null);

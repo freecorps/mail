@@ -138,6 +138,8 @@ export function Composer({
   }, [p.disabled, p.threadId]);
   useEffect(() => {
     if (restored.current) return;
+    // Turned off (spam): the box has no editor to take the draft; it is restored when the box turns back on.
+    if (p.disabled) return;
     // The drafts cannot be read: nothing to restore, and the box saves as usual.
     if (drafts.status === "error") restored.current = true;
     if (drafts.status !== "success" || !drafts.value) return;
@@ -155,9 +157,13 @@ export function Composer({
     setMode(kind.current);
     if (d.cc.length) setAll(true);
     uploads.restore(d.attachments);
-    restoring.current = true;
-    editor.current?.setContent(d.bodyHtml && !htmlIsEmpty(d.bodyHtml) ? d.bodyHtml : textToHtml(d.text));
-  }, [drafts.status, drafts.value, held, autosave, uploads, p.notes]);
+    const html = d.bodyHtml && !htmlIsEmpty(d.bodyHtml) ? d.bodyHtml : textToHtml(d.text);
+    // The editor loads lazily: not there yet, it starts from the body (its initial HTML) instead.
+    if (editor.current) {
+      restoring.current = true;
+      editor.current.setContent(html);
+    } else setBody({ html, text: d.text, empty: !d.text.trim() });
+  }, [drafts.status, drafts.value, held, autosave, uploads, p.notes, p.disabled]);
 
   // Autosave: what the box holds now, a second after the last change (an empty box removes the draft).
   const ready = uploads.ready;

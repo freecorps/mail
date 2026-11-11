@@ -27,7 +27,7 @@ import { holdForSend, useAutosave } from "@/model/drafts";
 import { forwardedFiles } from "@/model/forward";
 import { useMeName } from "@/model/me";
 import { schedule, undoSend } from "@/model/outbox";
-import { chipOf, contactsFrom, type Contact } from "@/model/recipients";
+import { chipEmail, chipOf, contactsFrom, toChips, type Contact } from "@/model/recipients";
 import { useUploads } from "@/model/uploads";
 import { LazyEditor, type RichEditorHandle } from "./editor/LazyEditor";
 import { savedReplyHtml, useSavedReplies } from "@/model/savedReplies";
@@ -205,10 +205,22 @@ function ComposeWindow({
     uploads.add(files, (name) => t("composer.tooLarge", { name }), t("composer.tooMany"));
   };
 
+  // What is still typed in each recipients row (not a chip yet): a send takes it along, as leaving the field would.
+  const pending = useRef({ to: "", cc: "", bcc: "" });
+  const withPending = (chips: string[], typed: string) => {
+    const have = new Set(chips.map(chipEmail));
+    const more = toChips(typed)
+      .map((c) => c.value)
+      .filter((v) => !have.has(chipEmail(v)) && (have.add(chipEmail(v)), true));
+    return more.length ? [...chips, ...more] : chips;
+  };
+
   const send = () => {
+    const toList = withPending(fields.to, pending.current.to);
+    const ccList = withPending(fields.cc, pending.current.cc);
     // Each chip is one recipient already (joining and splitting again would cut a name with a comma).
-    const to = fields.to.map(chipOf);
-    const cc = fields.cc.map(chipOf);
+    const to = toList.map(chipOf);
+    const cc = ccList.map(chipOf);
     const bad = [...to, ...cc].filter((c) => !c.valid).map((c) => c.value);
     if (bad.length) return setError({ message: t("compose.invalidList", { list: bad.join(", ") }), field: "to" });
     if (!to.length) return setError({ message: t("compose.invalidTo"), field: "to" });
@@ -230,8 +242,8 @@ function ComposeWindow({
         hold.release();
         const restore: Restore = {
           mailbox: fields.mailbox,
-          to: fields.to,
-          cc: fields.cc,
+          to: toList,
+          cc: ccList,
           bcc,
           subject: fields.subject,
           html: fields.html,
@@ -245,7 +257,7 @@ function ComposeWindow({
       });
     closeWindow(w.key);
     const extras = {
-      ...(fields.cc.length ? { cc: fields.cc } : {}),
+      ...(ccList.length ? { cc: ccList } : {}),
       subject: fields.subject.trim(),
       text: fields.text,
       bodyHtml: fields.html,
@@ -256,8 +268,8 @@ function ComposeWindow({
       void draft
         .then((draftId) =>
           fwd
-            ? forward({ threadId: fwd.threadId, messageId: fwd.messageId, to: fields.to, ...extras, ...(draftId ? { draftId } : {}) })
-            : compose({ mailbox: fields.mailbox, to: fields.to, ...extras, ...(draftId ? { draftId } : {}) }),
+            ? forward({ threadId: fwd.threadId, messageId: fwd.messageId, to: toList, ...extras, ...(draftId ? { draftId } : {}) })
+            : compose({ mailbox: fields.mailbox, to: toList, ...extras, ...(draftId ? { draftId } : {}) }),
         )
         .then((r) => {
           // Confirmed: the server deleted the draft with the send, so the hold goes.
@@ -382,6 +394,7 @@ function ComposeWindow({
               label={t("compose.to")}
               value={fields.to}
               onChange={(to) => set({ to })}
+              onPending={(v) => void (pending.current.to = v)}
               contacts={contacts}
               invalid={error?.field === "to"}
               focusOnMount={!start.to.length}
@@ -400,7 +413,14 @@ function ComposeWindow({
           </Row>
           {showCc && (
             <Row label={t("compose.cc")} htmlFor={ids.cc}>
-              <RecipientInput id={ids.cc} label={t("compose.cc")} value={fields.cc} onChange={(cc) => set({ cc })} contacts={contacts} />
+              <RecipientInput
+                id={ids.cc}
+                label={t("compose.cc")}
+                value={fields.cc}
+                onChange={(cc) => set({ cc })}
+                onPending={(v) => void (pending.current.cc = v)}
+                contacts={contacts}
+              />
             </Row>
           )}
           {BCC_ENABLED && (
