@@ -201,10 +201,13 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
             {closed ? t("thread.unarchive") : t("thread.archive")}
           </Stack.Toolbar.Button>
           <Stack.Toolbar.Spacer />
-          <Stack.Toolbar.Button icon={assignIcon} hidden={personal} accessibilityLabel={t("thread.assign")} onPress={assignSheet}>
-            {t("thread.assign")}
-          </Stack.Toolbar.Button>
-          <Stack.Toolbar.Spacer />
+          {/* No assignment in a personal mailbox: the button and its spacer go, so the toolbar keeps no gap. */}
+          {personal ? null : (
+            <Stack.Toolbar.Button icon={assignIcon} accessibilityLabel={t("thread.assign")} onPress={assignSheet}>
+              {t("thread.assign")}
+            </Stack.Toolbar.Button>
+          )}
+          {personal ? null : <Stack.Toolbar.Spacer />}
           {/* iOS: the primary action as a prominent capsule with its label; Android has the reply FAB beside the toolbar. */}
           {ios ? (
             <Stack.Toolbar.Button variant="prominent" tintColor={c.tint} disabled={!vm.canReply} accessibilityLabel={t("thread.reply")} onPress={startReply}>
@@ -355,7 +358,8 @@ function ThreadView({ threadId, fromList }: { threadId: string; fromList: boolea
       {preview ? null : composing && vm.canReply ? (
         <Composer onReply={vm.reply} onNote={vm.note} notes={!personal} others={others} onClose={() => setComposing(false)} />
       ) : !vm.canReply ? (
-        <ThemedText variant="subheadline" tone="secondary" style={styles.spam}>
+        // Android: above the floating toolbar, which covers the bottom of the screen.
+        <ThemedText variant="subheadline" tone="secondary" style={[styles.spam, !ios && thread && icons ? { paddingBottom: 96 } : null]}>
           {t("thread.spamNoReply")}
         </ThemedText>
       ) : !ios && icons ? (
