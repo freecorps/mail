@@ -17,7 +17,9 @@ export type PickerRequest =
   /** A date and time for "Enviar mais tarde". */
   | { kind: "sendAt"; onPick: (at: number) => void }
   /** Settings → Etiquetas (`mailbox`: the one to show first). */
-  | { kind: "manageTags"; mailbox?: string | null };
+  | { kind: "manageTags"; mailbox?: string | null }
+  /** Settings → Remetentes bloqueados (`mailbox`: the one to show first). */
+  | { kind: "manageSenders"; mailbox?: string | null };
 
 let current: PickerRequest | null = null;
 const listeners = new Set<() => void>();

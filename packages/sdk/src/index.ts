@@ -573,7 +573,37 @@ export class EmberMail {
     markRead: (id: string) => this.request<{ ok: boolean }>("POST", `/inbox/threads/${encodeURIComponent(id)}/read`, {}),
     search: (q: string, mailbox?: string) => this.request<{ data: Array<{ threadId: string; subject: string; snippet: string; mailbox: string }> }>("GET", `/inbox/search?${new URLSearchParams({ q, ...(mailbox ? { mailbox } : {}) })}`),
     addMember: (o: { user_id: string; mailboxes?: string[]; name?: string | null; admin?: boolean }) => this.request<{ id: string }>("POST", "/inbox/members", o),
+    /**
+     * Sender rules: `reject` (refused at SMTP), `spam` (filed in Spam) or `allow` (never spam, beats a broader rule),
+     * on an address or a domain (covers its subdomains). `mailbox`: that mailbox's; absent: the rules for every
+     * mailbox (full_access keys).
+     */
+    senderRules: {
+      list: (o: { mailbox?: string; action?: SenderRule["action"]; limit?: number; cursor?: string } = {}) => {
+        const q = new URLSearchParams({ ...(o.mailbox ? { mailbox: o.mailbox } : {}), ...(o.action ? { action: o.action } : {}), ...(o.limit ? { limit: String(o.limit) } : {}), ...(o.cursor ? { cursor: o.cursor } : {}) });
+        return this.request<{ object: "list"; data: SenderRule[]; has_more: boolean; cursor?: string }>("GET", `/inbox/sender-rules${q.size ? `?${q}` : ""}`);
+      },
+      /** Adds the rule, or changes the one on the same pattern and mailbox. */
+      set: (o: { pattern: string; action: SenderRule["action"]; mailbox?: string | null; note?: string | null }) => this.request<SenderRule>("POST", "/inbox/sender-rules", o),
+      remove: (o: { pattern: string; mailbox?: string }) =>
+        this.request<{ object: "sender_rule"; pattern: string; mailbox: string | null; deleted: boolean }>("DELETE", `/inbox/sender-rules?${new URLSearchParams({ pattern: o.pattern, ...(o.mailbox ? { mailbox: o.mailbox } : {}) })}`),
+    },
   };
 }
+
+/** A sender rule of the inbox (`GET /inbox/sender-rules`). `mailbox: null`: every mailbox. */
+export type SenderRule = {
+  object: "sender_rule";
+  id: string;
+  mailbox: string | null;
+  pattern: string;
+  kind: "address" | "domain";
+  action: "reject" | "spam" | "allow";
+  note: string | null;
+  hits: number;
+  last_hit_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
 
 export default EmberMail;

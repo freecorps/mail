@@ -8,8 +8,9 @@ import { isOptimisticId } from "../offline/optimistic";
 import { tagIndex } from "./tags";
 
 /** A status, or `sent`: the conversations the mailbox wrote in, by its latest send (not a status). */
-export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent";
-export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed", "sent"];
+export type ThreadFilter = "all" | "open" | "waiting" | "closed" | "sent" | "spam";
+/** A mailbox's filters; Spam last (its conversations also show in Todas, with their mark). */
+export const THREAD_FILTERS: ThreadFilter[] = ["all", "open", "waiting", "closed", "sent", "spam"];
 export const PAGE = 30;
 
 /** What a list shows: one mailbox, or a view across the member's mailboxes (apps/api `inbox:view`). */

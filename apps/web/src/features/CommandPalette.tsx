@@ -28,11 +28,13 @@ import {
   Send,
   Settings,
   ShieldAlert,
+  ShieldBan,
   Sun,
   Tag,
   Tags,
   UserRound,
   UserRoundX,
+  UserX,
   type LucideIcon,
 } from "lucide-react";
 import { useMutation, useQuerySnapshot } from "@freecorps/ember-react";
@@ -60,6 +62,8 @@ import { isPersonal, MIN_QUERY, useDebounced } from "@/model/threads";
 import { mailboxIcon, VIEW_ICON, type Folder } from "@/lib/nav";
 import { formatAt, snoozePresets } from "@/lib/when";
 import { openPicker } from "@/model/picker";
+import { useThreadActions } from "@/model/actions";
+import { useSenderActions } from "@/model/senders";
 import { snoozeTargetOf, useSnooze } from "@/model/snooze";
 import { TAG_LIMITS, tagsOf, tagToggle, useAllTags, useTagActions } from "@/model/tags";
 
@@ -120,6 +124,8 @@ function Body(p: PaletteProps & { close: () => void }) {
   const personal = isPersonal(p.mailboxes, th?.mailbox);
   const members = useMembers(th && !personal ? th.mailbox : null).members;
   const setStatus = useMutation(api.inbox.setStatus);
+  const actions = useThreadActions();
+  const senders = useSenderActions();
   const assign = useMutation(api.inbox.assign);
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
@@ -193,6 +199,19 @@ function Body(p: PaletteProps & { close: () => void }) {
               keys={["u"]}
               onSelect={run(() => swallow(th.unreadCount > 0 ? markRead({ threadId: th._id }) : markUnread({ threadId: th._id })))}
             />
+            <Item
+              icon={ShieldAlert}
+              label={th.status === "spam" ? t("spam.notSpam") : t("spam.mark")}
+              keys={["!"]}
+              onSelect={run(() => actions.spam([{ threadId: th._id, status: th.status, unread: th.unreadCount > 0 }]))}
+            />
+            {th.status !== "spam" && (
+              <Item
+                icon={UserX}
+                label={t("palette.blockSender")}
+                onSelect={run(() => senders.block({ threadId: th._id, mailbox: th.mailbox, status: th.status }, "address"))}
+              />
+            )}
             {STATUSES.filter((s) => s !== th.status).map((s) => (
               <Item
                 key={s}
@@ -388,6 +407,11 @@ function Body(p: PaletteProps & { close: () => void }) {
             icon={Tags}
             label={t("palette.manageTags")}
             onSelect={run(() => openPicker({ kind: "manageTags", mailbox: th?.mailbox ?? p.mailbox }))}
+          />
+          <Item
+            icon={ShieldBan}
+            label={t("palette.manageSenders")}
+            onSelect={run(() => openPicker({ kind: "manageSenders", mailbox: th?.mailbox ?? p.mailbox }))}
           />
           <Item icon={Keyboard} label={t("account.shortcuts")} keys={["?"]} onSelect={run(p.onShortcuts)} />
         </CommandGroup>

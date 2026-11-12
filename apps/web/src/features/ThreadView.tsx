@@ -69,6 +69,7 @@ import { EmailFrame } from "./EmailFrame";
 import { Confirm } from "@/components/Confirm";
 import { Pane, ThreadSkeleton } from "./ThreadPane";
 import { SnoozeItems } from "./SnoozeMenu";
+import { SpamBanner, SpamMenu } from "./SpamMenu";
 import { TagMenu } from "./TagMenu";
 import { ActivityLine, PresenceBadge, ScheduledBar, SnoozedBanner } from "./ThreadState";
 import { TagChip } from "@/components/TagChip";
@@ -409,6 +410,7 @@ export function ThreadView({
                 <Action label={unread ? t("thread.markRead") : t("thread.markUnread")} kbd="u" onClick={vm.toggleRead}>
                   {unread ? <MailOpen /> : <Mail />}
                 </Action>
+                <SpamMenu thread={{ threadId, mailbox: th.mailbox, status: th.status }} onSpam={() => actions.spam(target)} />
                 {canDelete && (
                   <Action label={t("thread.delete")} onClick={() => setConfirmDelete(true)}>
                     <Trash2 />
@@ -458,6 +460,7 @@ export function ThreadView({
             </div>
           </header>
           {snoozedUntil && <SnoozedBanner until={snoozedUntil} onResume={() => snoozer.unsnooze(threadId, snoozedUntil)} />}
+          {th.status === "spam" && <SpamBanner threadId={threadId} lastInbound={lastInbound} />}
           <Confirm
             open={confirmDelete}
             onOpenChange={setConfirmDelete}

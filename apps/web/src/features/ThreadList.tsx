@@ -15,6 +15,7 @@ import {
   Search,
   SearchX,
   ShieldAlert,
+  ShieldCheck,
   Tags,
   UserRound,
   X,
@@ -629,6 +630,17 @@ function BulkBar({
       </BarAction>
       <BarAction label={unread ? t("thread.markRead") : t("thread.markUnread")} onClick={() => actions.toggleRead(targets)}>
         {unread ? <MailOpen /> : <Mail />}
+      </BarAction>
+      <BarAction
+        label={rows.every((r) => r.status === "spam") ? t("spam.notSpam") : t("spam.mark")}
+        kbd="!"
+        onClick={() => {
+          // Like `!`: they leave the selection (and most lists).
+          actions.spam(confirmed.map(toTarget));
+          onSelectAll(false);
+        }}
+      >
+        {rows.every((r) => r.status === "spam") ? <ShieldCheck /> : <ShieldAlert />}
       </BarAction>
       <DropdownMenu>
         <Tooltip>

@@ -16,6 +16,7 @@ import { useSnooze } from "@/model/snooze";
 import { TagCommand } from "./TagMenu";
 
 const TagsSettings = lazy(() => import("./TagsSettings").then((m) => ({ default: m.TagsSettings })));
+const SendersSettings = lazy(() => import("./SendersSettings").then((m) => ({ default: m.SendersSettings })));
 
 export function PickerHost() {
   const { t } = useI18n();
@@ -60,6 +61,11 @@ export function PickerHost() {
       {r?.kind === "manageTags" && (
         <Suspense fallback={null}>
           <TagsSettings open mailbox={r.mailbox ?? null} onOpenChange={close} />
+        </Suspense>
+      )}
+      {r?.kind === "manageSenders" && (
+        <Suspense fallback={null}>
+          <SendersSettings open mailbox={r.mailbox ?? null} onOpenChange={close} />
         </Suspense>
       )}
     </>

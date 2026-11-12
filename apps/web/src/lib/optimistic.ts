@@ -402,6 +402,13 @@ export function inboxOptimisticUpdates(now: () => number = Date.now): Record<str
     "inbox:setStatus": (store, { threadId, status }: { threadId: string; status: ThreadStatus }) => {
       patchThread(store, threadId, (t) => ({ ...t, status }));
     },
+    // Spam and back: the status moves at once; the sender rules (if any) are the server's.
+    "inbox:reportSpam": (store, { threadId }: { threadId: string }) => {
+      patchThread(store, threadId, (t) => ({ ...t, status: "spam" as ThreadStatus }));
+    },
+    "inbox:notSpam": (store, { threadId }: { threadId: string }) => {
+      patchThread(store, threadId, (t) => (t.status === "spam" ? { ...t, status: "open" as ThreadStatus } : t));
+    },
     "inbox:assign": (store, { threadId, userId }: { threadId: string; userId: string | null }) => {
       patchThread(store, threadId, (t) => {
         if (userId === null) {

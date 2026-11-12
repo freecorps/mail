@@ -41,6 +41,8 @@ function semantic() {
     onSwipeSnooze: pick("#FFFFFF", Color.android.dynamic.onTertiary, "#FFFFFF"),
     swipeAssign: pick(Color.ios.systemGray, Color.android.dynamic.secondaryContainer, "#8e8e93"),
     onSwipeAssign: pick("#FFFFFF", Color.android.dynamic.onSecondaryContainer, "#FFFFFF"),
+    swipeSpam: pick(Color.ios.systemOrange, Color.android.dynamic.errorContainer, "#ff9500"),
+    onSwipeSpam: pick("#FFFFFF", Color.android.dynamic.onErrorContainer, "#FFFFFF"),
     /** A selected row in Edit mode (on Android not secondaryContainer: the monogram is that color). */
     selectedRow: pick(Color.ios.systemGray5, Color.android.dynamic.surfaceContainerHighest, "#e5e5ea"),
   };

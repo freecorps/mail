@@ -35,7 +35,8 @@ import { useShortcuts } from "../keys";
 import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, senderKey, STATUS_CHOICES, writtenText } from "../model/thread-view";
 import { useOutbox, type OutboxEntry } from "../model/outbox";
 import { isPersonal, useMailboxes } from "../model/threads";
-import { notify, offerUndoArchive } from "../model/undo";
+import { notify, offerUndoArchive, undoStore } from "../model/undo";
+import { senderEntries, type SenderEntry } from "../model/senders";
 import { allowImagesFrom, deviceTimeZone, useImageSenders } from "../prefs";
 import { ActivityLine } from "../components/activity-line";
 import { TagChips } from "../components/tag-chips";
@@ -119,6 +120,12 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
   const snoozer = useSnooze();
   const unsnoozeM = useMutation(api.inbox.unsnooze);
   const cancelM = useMutation(api.inbox.cancelScheduled);
+  // Spam and the sender's rules (their address or domain, in this mailbox).
+  const sender = useQuery(api.inbox.sender, preview ? "skip" : { threadId });
+  const reportSpamM = useMutation(api.inbox.reportSpam);
+  const notSpamM = useMutation(api.inbox.notSpam);
+  const setRuleM = useMutation(api.inbox.setSenderRule);
+  const removeRuleM = useMutation(api.inbox.removeSenderRule);
   const { online } = useConnectionState();
   const me = useQuery(api.inbox.me, {});
   const boxes = useMailboxes().mailboxes;
@@ -248,6 +255,70 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
         },
       },
     ]);
+  // To Spam, the conversation closes like an archive ("Desfazer" brings it back); out of Spam ("Não é spam") it stays,
+  // and the sender's blocking rules in this mailbox go with it.
+  const spam = () => {
+    if (!thread) return;
+    haptics.light();
+    if (thread.status === "spam") {
+      notSpamM({ threadId, unblock: true })
+        .then((r) => notify(r.removed ? t("undo.notSpamUnblocked") : t("undo.notSpam.one", { count: 1 })))
+        .catch(() => notify(t("common.error")));
+      return;
+    }
+    const before = thread.status;
+    void reportSpamM({ threadId }).catch(() => {});
+    offerUndoArchive(t("undo.spam.one", { count: 1 }), [{ threadId, before }], vm.restoreStatus);
+    host.leave();
+  };
+  const runSender = (e: SenderEntry) => {
+    if (!thread || !sender) return;
+    const before = thread.status;
+    const mailbox = thread.mailbox;
+    haptics.light();
+    if (e.key === "block") {
+      reportSpamM({ threadId, block: e.how, action: e.action })
+        .then((r) => {
+          const pattern = r.rule?.pattern;
+          if (!pattern) return;
+          undoStore.show(t(e.action === "reject" ? "spam.rejected" : "spam.blocked", { pattern }), () => {
+            void removeRuleM({ mailbox, pattern }).catch(() => {});
+            if (before !== "spam") vm.restoreStatus(threadId, before);
+          });
+        })
+        .catch(() => notify(t("common.error")));
+      host.leave();
+    } else if (e.key === "allow") {
+      setRuleM({ mailbox, pattern: sender.email, action: "allow" })
+        .then((r) => {
+          if (before === "spam") void notSpamM({ threadId }).catch(() => {});
+          undoStore.show(t("spam.allowed", { pattern: r.pattern }), () => void removeRuleM({ mailbox: r.mailbox, pattern: r.pattern }).catch(() => {}));
+        })
+        .catch(() => notify(t("common.error")));
+    } else if (e.key === "unrule") {
+      const r = e.rule;
+      removeRuleM({ mailbox: r.mailbox, pattern: r.pattern })
+        .then(() => undoStore.show(t(r.action === "allow" ? "spam.ruleRemoved" : "spam.unblocked", { pattern: r.pattern }), () => void setRuleM({ mailbox: r.mailbox, pattern: r.pattern, action: r.action }).catch(() => {})))
+        .catch(() => notify(t("common.error")));
+    }
+  };
+  const senderItems: Array<{ key: string; label: string; icon: IconSpec; destructive?: boolean; disabled?: boolean; entry: SenderEntry }> = sender
+    ? senderEntries(sender).map((e, i) => {
+        const k = `${e.key}:${i}`;
+        switch (e.key) {
+          case "block":
+            return e.action === "reject"
+              ? { key: k, label: t("thread.rejectAddress", { email: sender.email }), icon: Icons.reject, destructive: true, entry: e }
+              : { key: k, label: e.how === "domain" ? t("thread.blockDomain", { domain: sender.domain }) : t("thread.blockAddress", { email: sender.email }), icon: Icons.block, entry: e };
+          case "allow":
+            return { key: k, label: t("thread.allowAddress", { email: sender.email }), icon: Icons.allowSender, entry: e };
+          case "unrule":
+            return { key: k, label: e.rule.action === "allow" ? t("thread.unallow", { pattern: e.rule.pattern }) : t("thread.unblock", { pattern: e.rule.pattern }), icon: e.rule.action === "allow" ? Icons.allowSender : Icons.unblock, entry: e };
+          case "global":
+            return { key: k, label: t("thread.blockedGlobal"), icon: Icons.block, disabled: true, entry: e };
+        }
+      })
+    : [];
   const openTags = () => thread && router.push({ pathname: "/tags", params: { threadId, mailbox: thread.mailbox } });
   const openActivity = () => router.push({ pathname: "/activity", params: { threadId } });
   // Snoozed from here, the conversation closes like an archive ("Desfazer" brings it back).
@@ -349,6 +420,13 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
   const wakeIcon = useToolbarIcon(Icons.wake, tint);
   const pickIcon = useToolbarIcon(Icons.calendar, tint);
   const activityIcon = useToolbarIcon(Icons.activity, tint);
+  const spamIcon = useToolbarIcon(thread?.status === "spam" ? Icons.notSpam : Icons.spam, tint);
+  const blockIcon = useToolbarIcon(Icons.block, tint);
+  const unblockIcon = useToolbarIcon(Icons.unblock, tint);
+  const rejectIcon = useToolbarIcon(Icons.reject, tint);
+  const allowIcon = useToolbarIcon(Icons.allowSender, tint);
+  const toolbarIconOf = (i: IconSpec) => (i === Icons.unblock ? unblockIcon : i === Icons.reject ? rejectIcon : i === Icons.allowSender ? allowIcon : blockIcon);
+  const isSpam = thread?.status === "spam";
   const icons = !!(prevIcon && nextIcon && archiveIcon && assignIcon && replyIcon && moreIcon);
 
   // The More menu of the pane's bar (a native menu button; the route has it in its toolbar).
@@ -369,6 +447,10 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
                 { key: "pick", label: t("when.pick"), icon: Icons.calendar, onPress: snoozeCustom },
               ],
             },
+        { key: "spam", label: isSpam ? t("thread.notSpam") : t("thread.spam"), icon: isSpam ? Icons.notSpam : Icons.spam, onPress: spam },
+        ...(senderItems.length
+          ? [{ key: "sender", label: t("thread.sender"), icon: Icons.block, onPress: () => {}, submenu: senderItems.map((x) => ({ key: x.key, label: x.label, icon: x.icon, ...(x.destructive ? { destructive: true } : {}), ...(x.disabled ? { disabled: true } : {}), onPress: () => runSender(x.entry) })) }]
+          : []),
         { key: "activity", label: t("thread.activity"), icon: Icons.activity, onPress: openActivity },
         { key: "link", label: t("thread.copyLink"), icon: Icons.link, onPress: copyLink },
         ...(canDelete ? [{ key: "delete", label: t("thread.delete"), icon: Icons.trash, destructive: true, onPress: confirmDelete }] : []),
@@ -446,6 +528,18 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
                 </Stack.Toolbar.MenuAction>
               </Stack.Toolbar.Menu>
             )}
+            <Stack.Toolbar.MenuAction icon={spamIcon} onPress={spam}>
+              {isSpam ? t("thread.notSpam") : t("thread.spam")}
+            </Stack.Toolbar.MenuAction>
+            {senderItems.length ? (
+              <Stack.Toolbar.Menu icon={blockIcon} title={t("thread.sender")} {...(ios && sender ? { subtitle: sender.email } : {})}>
+                {senderItems.map((x) => (
+                  <Stack.Toolbar.MenuAction key={x.key} icon={toolbarIconOf(x.icon)} destructive={x.destructive} disabled={x.disabled} onPress={() => runSender(x.entry)}>
+                    {x.label}
+                  </Stack.Toolbar.MenuAction>
+                ))}
+              </Stack.Toolbar.Menu>
+            ) : null}
             <Stack.Toolbar.MenuAction icon={activityIcon} onPress={openActivity}>
               {t("thread.activity")}
             </Stack.Toolbar.MenuAction>
@@ -488,6 +582,8 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
       [{ key: "sheet", label: t("thread.assignEllipsis"), icon: Icons.assign, onPress: assignSheet }];
 
   const chips = threadTags(thread.tags, tagIndex);
+  // Why it is in Spam: what filed its latest inbound message (a sender rule, or the per-hour limit).
+  const spamReason = [...vm.items].reverse().find((i) => i.message.direction === "inbound")?.message.spam ?? null;
   const here = presenceLine(present, t);
   const header = (
     <View style={styles.header}>
@@ -531,6 +627,15 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
             {t("thread.snoozedUntil", { when: formatLater(thread.snoozedUntil, Date.now(), locale, clock24, zone) })}
           </ThemedText>
           <NativeButton variant="outlined" label={t("thread.unsnooze")} onPress={unsnooze} />
+        </View>
+      ) : null}
+      {thread.status === "spam" && !preview ? (
+        <View style={[styles.images, { backgroundColor: c.fill }]} accessibilityRole="summary">
+          <Symbol icon={Icons.spam} size={17} color={c.secondaryLabel} />
+          <ThemedText variant="footnote" tone="secondary" style={styles.grow} numberOfLines={3}>
+            {spamReason ? (spamReason.reason === "rule" && spamReason.pattern ? t("thread.spamBannerRule", { pattern: spamReason.pattern }) : t("thread.spamBannerRate")) : t("thread.spamBanner")}
+          </ThemedText>
+          <NativeButton variant="outlined" label={t("thread.notSpam")} onPress={spam} />
         </View>
       ) : null}
       {!preview && !loadAll && blockedSenders.length ? (
