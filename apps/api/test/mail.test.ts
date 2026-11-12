@@ -23,6 +23,12 @@ async function until<T>(get: () => Promise<T>, ok: (v: T) => boolean, ms = 8000)
   }
 }
 
+/** The HTTP API with the admin token: status and JSON body. */
+const fetch_ = async (path: string, method: string, body?: unknown) => {
+  const r = await SELF.fetch(`${BASE}${path}`, { method, headers: { authorization: "Bearer admin-secret", ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+  return { status: r.status, body: (await r.json()) as any };
+};
+
 const call = async (kind: "query" | "mutation" | "action", fn: string, args: unknown, token?: string) => {
   const r = await SELF.fetch(`${BASE}/api/${kind}`, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ fn, args, shard: "global:main" }) });
   return (await r.json()) as any;
@@ -1536,6 +1542,64 @@ describe("mail app", () => {
     const fw = await mu("inbox:forward", { threadId: t, messageId: msgId, to: ["fin@user.test"], bcc: ["arquivo@user.test"], subject: "Fwd: agendado", text: "Veja.", sendAt: at }, "eva");
     expect(fw.status).toBe("scheduled");
     expect((await call("query", "testing:email", { id: fw.emailId })).value).toMatchObject({ bcc: [{ email: "arquivo@user.test" }] });
+  });
+
+  it("senders: report spam and block an address or domain, not spam and unblock, rules per mailbox and for all (admins), over HTTP too", async () => {
+    await stateSetup();
+    const mail = async (to: string, from: string, subject: string) => {
+      const m = inbound(from, `${to}@acme.test`, mime({ from, to: `${to}@acme.test`, subject, text: "Oi.", id: `${subject.replace(/\W/g, "-")}-${Math.random()}@x.test` }));
+      await worker.email(m.msg as never, env as never, createExecutionContext());
+      return m.out.rejected;
+    };
+    const find = async (mailbox: string, subject: string, status?: string) =>
+      ((await q("inbox:threads", { mailbox, ...(status ? { status } : {}) }, "eva")).page as any[]).find((x) => x.subject === subject);
+    await mail("ea", "promo@ofertas.test", "spam um");
+    const t = (await find("ea", "spam um"))._id as string;
+    expect(await q("inbox:sender", { threadId: t }, "edu")).toMatchObject({ email: "promo@ofertas.test", domain: "ofertas.test", domainBlockable: true, effective: null, rules: [] });
+
+    // Edu marks it as spam and blocks the domain: the rule is ea's, and the next message lands in Spam.
+    const r = await mu("inbox:reportSpam", { threadId: t, block: "domain" }, "edu");
+    expect(r).toMatchObject({ status: "spam", rule: { mailbox: "ea", pattern: "ofertas.test", action: "spam", author: "edu" } });
+    expect((await q("inbox:sender", { threadId: t }, "edu")).effective).toMatchObject({ pattern: "ofertas.test" });
+    await mail("ea", "news@mail.ofertas.test", "spam dois");
+    expect(await find("ea", "spam dois", "spam")).toBeTruthy();
+    // Another mailbox is not affected; Eli cannot see ea's rules or change them.
+    await mail("eb", "news@ofertas.test", "eb ok");
+    expect(await find("eb", "eb ok", "open")).toBeTruthy();
+    expect(await refused("query", "inbox:senderRules", { mailbox: "ea" }, "eli")).toMatch(/no access/);
+    expect(await refused("mutation", "inbox:setSenderRule", { mailbox: "ea", pattern: "x.test", action: "spam" }, "eli")).toMatch(/no access/);
+    // Free mail (and our own domain) is blocked by address only, from a conversation.
+    await mail("ea", "fulano@gmail.com", "gmail");
+    const g = (await find("ea", "gmail"))._id;
+    expect((await q("inbox:sender", { threadId: g }, "edu")).domainBlockable).toBe(false);
+    expect(await refused("mutation", "inbox:reportSpam", { threadId: g, block: "domain" }, "edu")).toMatch(/shared by many people/);
+    expect((await q("inbox:thread", { threadId: g }, "edu")).thread.status).toBe("open");
+    expect((await mu("inbox:reportSpam", { threadId: g, block: "address", action: "reject" }, "edu")).rule).toMatchObject({ pattern: "fulano@gmail.com", action: "reject" });
+    expect(await mail("ea", "fulano@gmail.com", "gmail de novo")).toBe("Message rejected");
+
+    // Not spam + unblock removes the mailbox's rules for the sender.
+    expect(await mu("inbox:notSpam", { threadId: t, unblock: true }, "edu")).toEqual({ status: "open", removed: 1, rules: [{ mailbox: "ea", pattern: "ofertas.test", action: "spam" }] });
+    await mail("ea", "promo@ofertas.test", "spam tres");
+    expect(await find("ea", "spam tres", "open")).toBeTruthy();
+
+    // Rules for every mailbox: admins only (Eva is not an admin here); members see them read-only.
+    expect(await refused("mutation", "inbox:setSenderRule", { mailbox: null, pattern: "golpe.test", action: "reject" }, "eva")).toMatch(/only an admin/);
+    const key = await fetch_(`/inbox/sender-rules`, "POST", { pattern: "@golpe.test", action: "reject" });
+    expect(key.status).toBe(201);
+    expect(key.body).toMatchObject({ object: "sender_rule", mailbox: null, pattern: "golpe.test", kind: "domain", action: "reject", hits: 0 });
+    expect(await mail("eb", "x@golpe.test", "golpe")).toBe("Message rejected");
+    const listed = await q("inbox:senderRules", { mailbox: "eb" }, "eli");
+    expect(listed).toMatchObject({ rules: [], canEditGlobal: false });
+    expect(listed.global.map((x: any) => [x.pattern, x.hits])).toEqual([["golpe.test", 1]]);
+    expect((await fetch_(`/inbox/sender-rules?mailbox=ea`, "GET")).body.data.map((x: any) => x.pattern)).toEqual(["fulano@gmail.com"]);
+    expect((await fetch_(`/inbox/sender-rules?mailbox=eia`, "GET")).status).toBe(403);
+    expect((await fetch_(`/inbox/sender-rules`, "POST", { pattern: "not a domain", action: "spam", mailbox: "ea" })).status).toBe(422);
+    expect((await fetch_(`/inbox/sender-rules?pattern=golpe.test`, "DELETE")).body).toMatchObject({ deleted: true });
+    expect(await mail("eb", "x@golpe.test", "golpe ok")).toBeNull();
+    // The owner manages their personal mailbox's rules.
+    expect((await mu("inbox:setSenderRule", { mailbox: "eia", pattern: "chato@user.test", action: "spam" }, "eva")).mailbox).toBe("eia");
+    expect(await refused("mutation", "inbox:setSenderRule", { mailbox: "eia", pattern: "x@user.test", action: "spam" }, "edu")).toMatch(/no access/);
+    expect(await mu("inbox:removeSenderRule", { mailbox: "eia", pattern: "chato@user.test" }, "eva")).toBe(true);
   });
 
   it("presence: who else is viewing or replying on a thread, for who sees it; never oneself", async () => {

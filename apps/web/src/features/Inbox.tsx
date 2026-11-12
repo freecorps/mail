@@ -322,6 +322,20 @@ export function Inbox({ me }: { me: Extract<Me, { member: true }> }) {
           actions.archive([row ? toTarget(row) : { threadId: target, status: cachedStatus(client, target), unread: false }]);
           return;
         }
+        case "spam": {
+          // Like `e`: the selection, else the open thread (or the cursor's).
+          const picked = visibleSelection(s.selected, s.rows);
+          if (picked.length) {
+            actions.spam(picked.map(toTarget));
+            setSelected(EMPTY_SET);
+            return;
+          }
+          if (!target) return;
+          const row = s.rows.find((r) => r.threadId === target);
+          if (row?.pending) return;
+          actions.spam([row ? toTarget(row) : { threadId: target, status: cachedStatus(client, target), unread: false }]);
+          return;
+        }
         case "select": {
           const id = s.cursor ?? s.thread;
           if (!id) return;

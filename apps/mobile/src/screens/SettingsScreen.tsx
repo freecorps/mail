@@ -52,7 +52,7 @@ export function SettingsScreen() {
   );
   const ios = process.env.EXPO_OS === "ios";
   const lineOptions = ([1, 2, 3] as const).map((n) => ({ value: n, label: t("settings.previewLines.n", { count: n }) }));
-  const swipeOptions = (["read", "archive", "snooze", "assign", "none"] as SwipeKind[]).map((k) => ({ value: k, label: t(`settings.swipe.${k}`) }));
+  const swipeOptions = (["read", "archive", "snooze", "assign", "spam", "none"] as SwipeKind[]).map((k) => ({ value: k, label: t(`settings.swipe.${k}`) }));
   const pickers = {
     lines: { label: t("settings.previewLines"), value: list.previewLines, options: lineOptions, onChange: (v: number) => setListPrefs({ previewLines: v as 1 | 2 | 3 }) },
     leading: { label: t("settings.swipeLeading"), value: list.swipeLeading, options: swipeOptions, onChange: (v: SwipeKind) => setListPrefs({ swipeLeading: v }) },
@@ -139,6 +139,18 @@ export function SettingsScreen() {
             testID="settings-tags"
           >
             <Text>{t("tags.title")}</Text>
+          </ListItem>
+        </FieldGroup.Section>
+
+        {/* Remetentes bloqueados: each mailbox's sender rules (spam, refuse, always accept). */}
+        <FieldGroup.Section>
+          <ListItem
+            leading={<NativeIcon icon={Icons.senders} color={colors.tint} />}
+            trailing={disclosure(colors.tertiaryText)}
+            onPress={() => router.push("/senders")}
+            testID="settings-senders"
+          >
+            <Text>{t("settings.senders")}</Text>
           </ListItem>
         </FieldGroup.Section>
 

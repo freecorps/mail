@@ -5,8 +5,8 @@ import type { ThreadStatus } from "../api";
 import type { ListSource, ThreadFilter, ThreadRow } from "./threads";
 
 /** What a swipe side does (Settings › Swipe actions, like Mail.app). */
-export type SwipeKind = "read" | "archive" | "snooze" | "assign" | "none";
-export const SWIPE_KINDS: SwipeKind[] = ["read", "archive", "snooze", "assign", "none"];
+export type SwipeKind = "read" | "archive" | "snooze" | "assign" | "spam" | "none";
+export const SWIPE_KINDS: SwipeKind[] = ["read", "archive", "snooze", "assign", "spam", "none"];
 
 export interface ListPrefs {
   /** Show the monogram avatar (off: a compact list, dot and text only). */
@@ -131,6 +131,16 @@ export function archivable(rows: readonly Pick<ThreadRow, "threadId" | "status" 
   return rows.filter((r) => actionable(r) && r.status !== "closed").map((r) => ({ threadId: r.threadId, before: r.status as ThreadStatus }));
 }
 
+/** What Spam does to a selection: take them out when every one is spam already, else move the others in. */
+export function spamTarget(rows: readonly Pick<ThreadRow, "status">[]): "spam" | "notSpam" {
+  return rows.length > 0 && rows.every((r) => r.status === "spam") ? "notSpam" : "spam";
+}
+
+/** The rows a move to Spam applies to (not spam already), with their status before (for Desfazer). */
+export function spammable(rows: readonly Pick<ThreadRow, "threadId" | "status" | "pending">[]): ArchiveRecord[] {
+  return rows.filter((r) => actionable(r) && r.status !== "spam").map((r) => ({ threadId: r.threadId, before: r.status as ThreadStatus }));
+}
+
 /**
  * Whether the list still shows a thread once archived (then a swipe-archive springs back instead of sliding out):
  * a mailbox's All / Archived / Sent lists and the All view do; open, waiting, unread and assigned lists drop it.
@@ -139,6 +149,17 @@ export function keepsArchived(source: ListSource, filter: ThreadFilter): boolean
   if (source.view === "snoozed") return true;
   if (source.mailbox !== undefined) return filter === "all" || filter === "closed" || filter === "sent";
   return source.view === "all" && (filter === "all" || filter === "closed");
+}
+
+/**
+ * Whether the list still shows a thread once it is moved to Spam (or out of it): lists of every status ("Todas" and "Enviadas" of a
+ * mailbox, the "Todas" view, "Adiadas") keep it, with its spam mark; a status filter, Spam's own, and the views of
+ * open work (assigned, unread, waiting) drop it.
+ */
+export function keepsSpam(source: ListSource, filter: ThreadFilter): boolean {
+  // A mailbox's Sent lists every conversation it wrote in, whatever its status.
+  if (source.mailbox !== undefined) return filter === "all" || filter === "sent";
+  return filter === "all" && (source.view === "all" || source.view === "snoozed");
 }
 
 /** Whether the list still shows a thread once snoozed: only "Adiadas" (a re-snooze moves it there). */

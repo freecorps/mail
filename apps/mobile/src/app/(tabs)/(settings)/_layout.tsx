@@ -13,6 +13,8 @@ export default function SettingsStack() {
       <Stack.Screen name="notifications" options={{ title: t("notifications.title"), headerLargeTitleEnabled: false }} />
       <Stack.Screen name="tag-list" options={{ title: t("tags.title"), headerLargeTitleEnabled: false }} />
       <Stack.Screen name="tag/[tagId]" options={{ headerLargeTitleEnabled: false }} />
+      <Stack.Screen name="senders" options={{ title: t("senders.title"), headerLargeTitleEnabled: false }} />
+      <Stack.Screen name="sender-rule" options={{ headerLargeTitleEnabled: false }} />
     </Stack>
   );
 }

@@ -13,7 +13,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, FlatList, Pressable, RefreshControl, StyleSheet, useWindowDimensions, View, type ListViewToken } from "react-native";
 import type { SearchBarCommands } from "react-native-screens";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { api, INBOX_VIEWS, type InboxView, type Tag } from "../api";
+import { api, INBOX_VIEWS, type InboxView, type Tag, type ThreadStatus } from "../api";
 import { Icons, Symbol, useToolbarIcon } from "../components/icons";
 import { SwipeGroupProvider, SwipeRow, useSwipeGroup, type SwipeAction } from "../components/swipe-row";
 import { SplitLayout } from "../components/split-layout";
@@ -25,13 +25,13 @@ import { useI18n, type I18n } from "../i18n";
 import { displaySubject, formatWhen } from "../lib/format";
 import { haptics } from "../lib/haptics";
 import { hideTabBar } from "../model/chrome";
-import { actionable, archivable, bulkReadTarget, keepsArchived, keepsSnoozed, pruneSelection, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
+import { actionable, archivable, bulkReadTarget, keepsArchived, keepsSnoozed, keepsSpam, pruneSelection, spammable, spamTarget, swipeKinds, toggleSelected, type ListPrefs, type SwipeKind } from "../model/list-actions";
 import { filterLabelKey, filtersFor, useDebounced, useMailboxes, useTagIndex, useThreadList, type ListSource, type ThreadFilter, type ThreadRow } from "../model/threads";
 import { useSnooze } from "../model/snooze";
 import { threadTags } from "../model/tags";
 import { formatLater, type LaterChoice } from "../lib/when";
 import { setThreadOrder } from "../model/thread-order";
-import { offerUndoArchive } from "../model/undo";
+import { notify, offerUndoArchive, undoStore } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
 import { useKeyStill, useShortcuts } from "../keys";
 import { afterListChange, leaveFrom, listEndInset, paneLayout, stepFrom } from "../model/split";
@@ -82,6 +82,8 @@ interface RowOps {
   canAssign(row: ThreadRow): boolean;
   /** The list still shows a thread after it is snoozed ("Adiadas"). */
   keepsSnoozed: boolean;
+  /** The list still shows a thread after it moves to Spam or out of it ("Todas"). */
+  keepsSpam: boolean;
   tagIndex: ReadonlyMap<string, Tag>;
   snoozeAt(row: ThreadRow, until: number): void;
   /** The snooze sheet (presets and the date picker; `custom`: straight to the picker). */
@@ -92,6 +94,10 @@ interface RowOps {
   archive(rows: ThreadRow[]): void;
   unarchive(row: ThreadRow): void;
   assign(rows: ThreadRow[]): void;
+  /** To Spam (Desfazer puts them back), or out of it when every one is spam already. */
+  spam(rows: ThreadRow[]): void;
+  /** To Spam and the sender's address blocked: their next mail goes to Spam too (Desfazer removes the rule). */
+  blockSender(row: ThreadRow): void;
 }
 
 /** Rows closing an archived row's gap (or making room): on-screen movement, ease-in-out. Off with Reduce Motion. */
@@ -116,6 +122,10 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
   const setStatus = useMutation(api.inbox.setStatus);
+  const reportSpam = useMutation(api.inbox.reportSpam);
+  const notSpam = useMutation(api.inbox.notSpam);
+  const removeRule = useMutation(api.inbox.removeSenderRule);
+  const setRule = useMutation(api.inbox.setSenderRule);
   const { mailboxes } = useMailboxes();
   const { index: tagIndex } = useTagIndex();
   const snoozer = useSnooze();
@@ -140,6 +150,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
       prefs,
       keepsArchived: keeps,
       keepsSnoozed: keepsSnoozed(source),
+      keepsSpam: keepsSpam(source, filter),
       tagIndex,
       canAssign: (row) => !personal.has(row.mailbox),
       snoozeAt: (row, until) => (mark([row.threadId]), snoozer.run([{ threadId: row.threadId, until: row.snoozedUntil }], until)),
@@ -156,6 +167,40 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         offerUndoArchive(t("undo.archived", { count: records.length }), records, (threadId, status) => quiet(setStatus({ threadId, status })));
       },
       unarchive: (row) => (mark([row.threadId]), quiet(setStatus({ threadId: row.threadId, status: "open" }))),
+      spam: (rows) => {
+        const ok = rows.filter(actionable);
+        if (spamTarget(ok) === "notSpam") {
+          mark(ok.map((r) => r.threadId));
+          const done = ok.map((r) => notSpam({ threadId: r.threadId, unblock: true }).catch(() => null));
+          // Desfazer: back to Spam, and the blocking rules "Não é spam" removed are set again.
+          undoStore.show(t("undo.notSpam", { count: ok.length }), () => {
+            for (const r of ok) quiet(setStatus({ threadId: r.threadId, status: "spam" }));
+            void Promise.all(done).then((rs) => {
+              for (const x of rs) for (const rule of x?.rules ?? []) quiet(setRule(rule));
+            });
+          });
+          return;
+        }
+        const records = spammable(ok);
+        mark(records.map((r) => r.threadId));
+        for (const r of records) quiet(reportSpam({ threadId: r.threadId }));
+        offerUndoArchive(t("undo.spam", { count: records.length }), records, (threadId, status) => quiet(setStatus({ threadId, status })));
+      },
+      blockSender: (row) => {
+        if (!actionable(row)) return;
+        const before = row.status as ThreadStatus;
+        mark([row.threadId]);
+        reportSpam({ threadId: row.threadId, block: "address" })
+          .then((r) => {
+            const pattern = r.rule?.pattern;
+            if (!pattern) return;
+            undoStore.show(t("spam.blocked", { pattern }), () => {
+              quiet(removeRule({ mailbox: row.mailbox, pattern }));
+              if (before !== "spam") quiet(setStatus({ threadId: row.threadId, status: before }));
+            });
+          })
+          .catch(() => notify(t("common.error")));
+      },
       assign: (rows) => {
         const first = rows[0];
         if (!first || rows.some((r) => r.mailbox !== first.mailbox)) return;
@@ -163,7 +208,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         router.push({ pathname: "/assign", params: { threadId: first.threadId, threadIds: rows.map((r) => r.threadId).join(","), mailbox: first.mailbox, current } });
       },
     };
-  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus, source, tagIndex, snoozer]);
+  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus, reportSpam, notSpam, removeRule, setRule, source, filter, tagIndex, snoozer]);
 
   // ---- Edit mode -------------------------------------------------------------------------------------------------
   const [editing, setEditing] = useState(false);
@@ -423,6 +468,8 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
             ops.assign(selectedRows);
             stopEditing();
           }}
+          spamTarget={spamTarget(selectedRows)}
+          onSpam={bulk(() => ops.spam(selectedRows))}
         />
       ) : (
         // After the list: on Android the compose FAB floats over it.
@@ -452,6 +499,8 @@ function EditChrome(p: {
   onArchive(): void;
   onRead(): void;
   onAssign(): void;
+  spamTarget: "spam" | "notSpam";
+  onSpam(): void;
 }) {
   const c = useColors();
   const { t } = useI18n();
@@ -460,12 +509,14 @@ function EditChrome(p: {
   const archive = useToolbarIcon(Icons.archive, color);
   const read = useToolbarIcon(p.readTarget === "read" ? Icons.markRead : Icons.markUnread, color);
   const assign = useToolbarIcon(Icons.assign, color);
+  const spam = useToolbarIcon(p.spamTarget === "notSpam" ? Icons.notSpam : Icons.spam, color);
+  const spamLabel = p.spamTarget === "notSpam" ? t("thread.notSpam") : t("thread.spam");
   const close = useToolbarIcon(Icons.close, c.secondaryText);
   const all = useToolbarIcon(Icons.selectAll, c.secondaryText);
   const none = p.count === 0;
   const selectAllLabel = p.allSelected ? t("threads.deselectAll") : t("threads.selectAll");
   // Android: header items need a Material Symbol image, which loads asynchronously; mount them once it has.
-  if (!archive || !read || !assign || (!ios && (!close || !all))) return null;
+  if (!archive || !read || !assign || !spam || (!ios && (!close || !all))) return null;
   if (!ios)
     // Material 3: a contextual top app bar while selecting (close, the count as title, then the actions), no bottom bar.
     return (
@@ -484,6 +535,9 @@ function EditChrome(p: {
           </Stack.Toolbar.Button>
           <Stack.Toolbar.Button icon={assign} accessibilityLabel={t("thread.assign")} tintColor={disabledTint(c, none || !p.canAssign)} disabled={none || !p.canAssign} onPress={p.onAssign}>
             {t("thread.assign")}
+          </Stack.Toolbar.Button>
+          <Stack.Toolbar.Button icon={spam} accessibilityLabel={spamLabel} tintColor={disabledTint(c, none)} disabled={none} onPress={p.onSpam}>
+            {spamLabel}
           </Stack.Toolbar.Button>
           <Stack.Toolbar.Button icon={all} accessibilityLabel={selectAllLabel} onPress={p.onSelectAll}>
             {selectAllLabel}
@@ -512,6 +566,10 @@ function EditChrome(p: {
         <Stack.Toolbar.Spacer />
         <Stack.Toolbar.Button icon={assign} accessibilityLabel={t("thread.assign")} disabled={none || !p.canAssign} onPress={p.onAssign}>
           {t("thread.assign")}
+        </Stack.Toolbar.Button>
+        <Stack.Toolbar.Spacer />
+        <Stack.Toolbar.Button icon={spam} accessibilityLabel={spamLabel} disabled={none} onPress={p.onSpam}>
+          {spamLabel}
         </Stack.Toolbar.Button>
       </Stack.Toolbar>
     </>
@@ -552,6 +610,10 @@ function swipeAction(kind: SwipeKind, row: ThreadRow, ops: RowOps): SwipeAction 
       };
     case "assign":
       return { key: "assign", label: t("swipe.assign"), icon: Icons.assign, color: c.swipeAssign, onColor: c.onSwipeAssign, onPress: () => ops.assign([row]) };
+    case "spam":
+      return row.status === "spam"
+        ? { key: "spam", label: t("swipe.notSpam"), icon: Icons.notSpam, color: c.swipeSpam, onColor: c.onSwipeSpam, removes: !ops.keepsSpam, onPress: () => ops.spam([row]) }
+        : { key: "spam", label: t("swipe.spam"), icon: Icons.spam, color: c.swipeSpam, onColor: c.onSwipeSpam, removes: !ops.keepsSpam, onPress: () => ops.spam([row]) };
     case "none":
       return null;
   }
@@ -606,6 +668,12 @@ const ThreadItem = memo(function ThreadItem({
       ],
     });
     list.push({ label: t("thread.tags"), icon: Icons.tag, onPress: () => ops.tags(row) });
+    // Spam, and blocking the sender (their address: the conversation's menu offers the whole domain).
+    if (row.status === "spam") list.push({ label: t("thread.notSpam"), icon: Icons.notSpam, onPress: () => ops.spam([row]) });
+    else {
+      list.push({ label: t("thread.spam"), icon: Icons.spam, onPress: () => ops.spam([row]) });
+      list.push({ label: t("thread.blockSender"), icon: Icons.block, destructive: true, onPress: () => ops.blockSender(row) });
+    }
     return list;
   }, [row, t, ops, canAssign]);
   const swipes = useMemo(() => {

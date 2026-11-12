@@ -1292,3 +1292,132 @@ export const presence = query({
     return (ctx.runQuery(email.presence, a) as Array<{ userId: string; name: string; state: "viewing" | "replying"; since: number }>).filter((p) => p.userId !== m.userId);
   },
 });
+
+// ---------------------------------------------------------------------------------------------- senders
+// Blocking and spam: the email component's sender rules (Ember 0.7.3) on an address or a domain (its subdomains too),
+// for one mailbox or for every mailbox. `spam` files the sender's mail in Spam, `reject` refuses it at SMTP (nothing
+// is stored), `allow` keeps it out of Spam and beats a broader block. A member manages the rules of the mailboxes
+// they see (a personal one: its owner); the rules for every mailbox are the admins'.
+
+const ruleActionArg = v.union(v.literal("reject"), v.literal("spam"), v.literal("allow"));
+const RULE_PAGE = { numItems: 1000, cursor: null };
+
+/** A rule as the component returns it: `mailbox` null means every mailbox. */
+export type SenderRuleDoc = { _id: string; mailbox: string | null; pattern: string; kind: "address" | "domain"; action: "reject" | "spam" | "allow"; note?: string; author?: string; createdAt: number; updatedAt: number; hits: number; lastHitAt?: number };
+
+/**
+ * Domains shared by many people (free mail): blocking the whole domain from a conversation would block strangers, so
+ * the clients offer only the address there. The rules screen still takes any domain.
+ */
+export const SHARED_DOMAINS = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "yahoo.com.br", "ymail.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "mail.com",
+  "yandex.com", "yandex.ru", "zoho.com", "uol.com.br", "bol.com.br", "terra.com.br", "ig.com.br", "outlook.com.br", "hotmail.com.br",
+]);
+
+const domainOfAddress = (e: string) => e.slice(e.lastIndexOf("@") + 1).toLowerCase();
+
+/** Whether a conversation may block `domain` as a whole: not free mail, not a domain of one of this instance's mailboxes. */
+function blockableDomain(ctx: Ctx, domain: string): boolean {
+  if (SHARED_DOMAINS.has(domain)) return false;
+  const own = (ctx.runQuery(email.mailboxes, {}) as Array<{ address: string }>).map((b) => domainOfAddress(b.address));
+  return !own.some((d) => d === domain || d.endsWith(`.${domain}`) || domain.endsWith(`.${d}`));
+}
+
+/** Who may change rules of `mailbox` (null: every mailbox, admins only). */
+function canRule(ctx: Ctx, mailbox: string | null): Member {
+  const m = member(ctx);
+  if (mailbox === null) {
+    if (!m.admin) throw new Error("only an admin sets a rule for every mailbox");
+  } else if (!canSee(ctx.db, m, mailbox)) throw new Error(`no access to mailbox ${mailbox}`);
+  return m;
+}
+
+/**
+ * The sender rules of `mailbox` (`rules`), and the rules for every mailbox that apply to it too (`global`, read-only
+ * unless `canEditGlobal`), newest first. With no `mailbox` (admins): only the rules for every mailbox.
+ */
+export const senderRules = query({
+  args: { mailbox: v.optional(v.string()) },
+  handler: (ctx, a) => {
+    const m = a.mailbox === undefined ? canRule(ctx, null) : allowed(ctx, a.mailbox);
+    const page = (mailbox: string | null) => (ctx.runQuery(email.senderRules, { mailbox, paginationOpts: RULE_PAGE }) as { page: SenderRuleDoc[] }).page;
+    return { rules: a.mailbox === undefined ? [] : page(a.mailbox), global: page(null), canEditGlobal: !!m.admin };
+  },
+});
+
+/** Adds a rule, or changes the one on the same pattern and mailbox (`mailbox: null`: every mailbox, admins only). */
+export const setSenderRule = mutation({
+  args: { mailbox: v.union(v.string(), v.null()), pattern: v.string(), action: ruleActionArg, note: v.optional(v.union(v.string(), v.null())) },
+  handler: (ctx, a) => {
+    const m = canRule(ctx, a.mailbox);
+    return ctx.runMutation(email.setSenderRule, { ...a, author: m.userId }) as SenderRuleDoc;
+  },
+});
+
+/** Removes the rule on `pattern` for `mailbox` (`null`: the rule for every mailbox, admins only). */
+export const removeSenderRule = mutation({
+  args: { mailbox: v.union(v.string(), v.null()), pattern: v.string() },
+  handler: (ctx, a) => {
+    canRule(ctx, a.mailbox);
+    return ctx.runMutation(email.removeSenderRule, a) as boolean;
+  },
+});
+
+/**
+ * The conversation's sender (its contact) and the rules that apply to them in its mailbox, most specific first, for
+ * the thread's "Block sender" / "Unblock" actions. `domainBlockable`: whether the clients offer blocking the domain.
+ */
+export const sender = query({
+  args: { threadId: v.string() },
+  handler: (ctx, a) => {
+    const { t, m } = threadOf(ctx, a.threadId);
+    const contact = t.thread.contact as string;
+    const domain = domainOfAddress(contact);
+    const r = ctx.runQuery(email.matchSender, { mailbox: t.thread.mailbox, email: contact }) as { effective: SenderRuleDoc | null; rules: SenderRuleDoc[] };
+    return { email: contact, name: (t.thread.contactName as string | undefined) ?? null, domain, domainBlockable: blockableDomain(ctx, domain), canEditGlobal: !!m.admin, ...r };
+  },
+});
+
+/**
+ * Marks a conversation as spam. `block`: also files the sender's future mail in Spam (`action: "spam"`, default) or
+ * refuses it (`"reject"`), by their address or their whole domain (not a free-mail domain or one of ours). The rule
+ * is the mailbox's.
+ */
+export const reportSpam = mutation({
+  args: { threadId: v.string(), block: v.optional(v.union(v.literal("address"), v.literal("domain"))), action: v.optional(v.union(v.literal("spam"), v.literal("reject"))) },
+  handler: (ctx, a) => {
+    const { t, m } = threadOf(ctx, a.threadId);
+    const contact = t.thread.contact as string;
+    const domain = domainOfAddress(contact);
+    // Checked before anything is written: a refused domain block leaves the conversation as it was.
+    if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`);
+    ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "spam", author: m.userId });
+    if (!a.block) return { status: "spam", rule: null };
+    const rule = ctx.runMutation(email.setSenderRule, { mailbox: t.thread.mailbox, pattern: a.block === "domain" ? domain : contact, action: a.action ?? "spam", author: m.userId }) as SenderRuleDoc;
+    return { status: "spam", rule };
+  },
+});
+
+/**
+ * Takes a conversation out of Spam (back to open). `unblock`: also removes the rules that send its sender to Spam or
+ * refuse them in this mailbox (the ones for every mailbox too, for an admin). Returns how many rules went and what they
+ * were (`rules`: mailbox, pattern, action, note), so a client's Desfazer can set them again.
+ */
+export const notSpam = mutation({
+  args: { threadId: v.string(), unblock: v.optional(v.boolean()) },
+  handler: (ctx, a) => {
+    const { t, m } = threadOf(ctx, a.threadId);
+    if (t.thread.status === "spam") ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "open", author: m.userId });
+    const rules: Array<Pick<SenderRuleDoc, "mailbox" | "pattern" | "action"> & { note?: string }> = [];
+    if (a.unblock) {
+      const r = ctx.runQuery(email.matchSender, { mailbox: t.thread.mailbox, email: t.thread.contact }) as { rules: SenderRuleDoc[] };
+      for (const rule of r.rules) {
+        if (rule.action === "allow" || (rule.mailbox === null && !m.admin)) continue;
+        if (ctx.runMutation(email.removeSenderRule, { mailbox: rule.mailbox, pattern: rule.pattern }))
+          rules.push({ mailbox: rule.mailbox, pattern: rule.pattern, action: rule.action, ...(rule.note ? { note: rule.note } : {}) });
+      }
+    }
+    return { status: t.thread.status === "spam" ? "open" : t.thread.status, removed: rules.length, rules };
+  },
+});

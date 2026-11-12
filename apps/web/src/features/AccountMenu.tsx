@@ -9,6 +9,7 @@ import {
   Rows2,
   Rows3,
   Settings,
+  ShieldBan,
   Sun,
   Tags,
   Undo2,
@@ -137,6 +138,10 @@ export function AccountMenu({
         <DropdownMenuItem onSelect={() => openPicker({ kind: "manageTags" })}>
           <Tags aria-hidden="true" />
           {t("tags.settings.menu")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => openPicker({ kind: "manageSenders" })}>
+          <ShieldBan aria-hidden="true" />
+          {t("palette.manageSenders")}
         </DropdownMenuItem>
         {me.admin && onAdmin && (
           <DropdownMenuItem onSelect={onAdmin}>

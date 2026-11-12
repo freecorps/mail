@@ -15,19 +15,19 @@
       "name": "@freecorps/mail-api",
       "version": "0.0.0",
       "dependencies": {
-        "@freecorps/ember-auth": "^0.7.2",
-        "@freecorps/ember-email": "^0.7.2",
-        "@freecorps/ember-push": "^0.7.2",
-        "@freecorps/ember-rate-limit": "^0.7.2",
-        "@freecorps/ember-runtime": "^0.7.2",
-        "@freecorps/ember-server": "^0.7.2",
-        "@freecorps/ember-values": "^0.7.2",
+        "@freecorps/ember-auth": "^0.7.3",
+        "@freecorps/ember-email": "^0.7.3",
+        "@freecorps/ember-push": "^0.7.3",
+        "@freecorps/ember-rate-limit": "^0.7.3",
+        "@freecorps/ember-runtime": "^0.7.3",
+        "@freecorps/ember-server": "^0.7.3",
+        "@freecorps/ember-values": "^0.7.3",
         "@freecorps/mail-email-html": "workspace:*",
       },
       "devDependencies": {
         "@cloudflare/vitest-plugin": "^1.5.1",
         "@cloudflare/workers-types": "^5.20261104.1",
-        "@freecorps/ember-cli": "^0.7.2",
+        "@freecorps/ember-cli": "^0.7.3",
         "@freecorps/mail-sdk": "workspace:*",
         "wrangler": "^4.157.0",
       },
@@ -37,11 +37,11 @@
       "version": "1.0.0",
       "dependencies": {
         "@expo/ui": "~58.0.28",
-        "@freecorps/ember-email": "^0.7.2",
-        "@freecorps/ember-expo-push": "^0.7.2",
-        "@freecorps/ember-offline": "^0.7.2",
-        "@freecorps/ember-react-native": "^0.7.2",
-        "@freecorps/ember-server": "^0.7.2",
+        "@freecorps/ember-email": "^0.7.3",
+        "@freecorps/ember-expo-push": "^0.7.3",
+        "@freecorps/ember-offline": "^0.7.3",
+        "@freecorps/ember-react-native": "^0.7.3",
+        "@freecorps/ember-server": "^0.7.3",
         "@freecorps/mail-email-html": "workspace:*",
         "@react-native-async-storage/async-storage": "2.2.0",
         "@react-native-community/netinfo": "12.0.1",
@@ -77,7 +77,7 @@
         "react-native-worklets": "0.13.0",
       },
       "devDependencies": {
-        "@freecorps/ember-client": "^0.7.2",
+        "@freecorps/ember-client": "^0.7.3",
         "@testing-library/react": "^16.3.3",
         "@types/react": "19",
         "happy-dom": "^21.0.4",
@@ -91,8 +91,8 @@
       "dependencies": {
         "@fontsource-variable/geist": "^5.2.8",
         "@fontsource-variable/geist-mono": "^5.2.7",
-        "@freecorps/ember-client": "^0.7.2",
-        "@freecorps/ember-react": "^0.7.2",
+        "@freecorps/ember-client": "^0.7.3",
+        "@freecorps/ember-react": "^0.7.3",
         "@freecorps/mail-email-html": "workspace:*",
         "@tanstack/react-virtual": "^3.13.12",
         "@tiptap/extension-bubble-menu": "^3.33.1",
@@ -115,7 +115,7 @@
       },
       "devDependencies": {
         "@cloudflare/workers-types": "^5.20261104.1",
-        "@freecorps/ember-server": "^0.7.2",
+        "@freecorps/ember-server": "^0.7.3",
         "@tailwindcss/vite": "^4.1.16",
         "@testing-library/react": "^16.3.3",
         "@types/react": "19.3.0",
@@ -472,31 +472,31 @@
 
     "@fontsource-variable/geist-mono": ["@fontsource-variable/geist-mono@5.3.0", "", {}, "sha512-vBbuwDEo9AkrqADMXOrlAR3DFcJi4/JxeuU43FoiQERnNwsfXNnvxvReZG02cQKmyk4DZkZdBZX3oTDvy2zBAw=="],
 
-    "@freecorps/ember-auth": ["@freecorps/ember-auth@0.7.2", "", { "dependencies": { "@better-auth/api-key": "~1.7.17", "@better-auth/core": "~1.7.17", "@better-auth/utils": "0.5.1", "better-auth": "~1.7.17", "jose": "^6.2.3" } }, "sha512-Fhst7p5GciG0FyKlJOAg0XJZ/JnGEVGtKhDMEEFUvVcULArD0AQF2rRPos7B+NpFc+QTURv7PwRGSrD8hERJXQ=="],
+    "@freecorps/ember-auth": ["@freecorps/ember-auth@0.7.3", "", { "dependencies": { "@better-auth/api-key": "~1.7.17", "@better-auth/core": "~1.7.17", "@better-auth/utils": "0.5.1", "better-auth": "~1.7.17", "jose": "^6.2.3" } }, "sha512-XAWpuI5SEzQtVH7KUtfnPM+icp//HEyG6cuW1DmlAt7M5l3/Ceec+HPnyhhhi9xVowBNfhqMqWEz3dHWUN02Mg=="],
 
-    "@freecorps/ember-cli": ["@freecorps/ember-cli@0.7.2", "", { "dependencies": { "@freecorps/ember-auth": "0.7.2", "@freecorps/ember-client": "0.7.2", "@freecorps/ember-runtime": "0.7.2", "@freecorps/ember-server": "0.7.2", "@freecorps/ember-values": "0.7.2", "esbuild": "0.28.2", "miniflare": "5.20261103.0-beta", "typescript": "^5.9.3" }, "peerDependencies": { "wrangler": ">=4.40.0" }, "optionalPeers": ["wrangler"], "bin": { "ember": "bin/ember.js" } }, "sha512-wueeawXgor3Kdr7mcWOBTtgNryUfCKcbyE/beh18rOD0rFdAbww+K65KGOzz1n/ykpFWp9xgeGk1vvwRTr6KoA=="],
+    "@freecorps/ember-cli": ["@freecorps/ember-cli@0.7.3", "", { "dependencies": { "@freecorps/ember-auth": "0.7.3", "@freecorps/ember-client": "0.7.3", "@freecorps/ember-runtime": "0.7.3", "@freecorps/ember-server": "0.7.3", "@freecorps/ember-values": "0.7.3", "esbuild": "0.28.2", "miniflare": "5.20261103.0-beta", "typescript": "^5.9.3" }, "peerDependencies": { "wrangler": ">=4.40.0" }, "optionalPeers": ["wrangler"], "bin": { "ember": "bin/ember.js" } }, "sha512-lZXdAhJIjpShJ2SDNpYHQqAg3y2mDDlI/7StbsDSbyVK/pA7ojZ0lyPvMl9KknCLmbPmchrqvmZPg+9TSHf8ig=="],
 
-    "@freecorps/ember-client": ["@freecorps/ember-client@0.7.2", "", { "dependencies": { "@freecorps/ember-values": "0.7.2" } }, "sha512-sGUFIAQpCzbQ+WKmROqj0rHOoTxKQLYVx/7sx6gnnfJ9M78kvyYR6nsi5TUKFQmyMos5N+vOsQaCDKEx/0u+Gg=="],
+    "@freecorps/ember-client": ["@freecorps/ember-client@0.7.3", "", { "dependencies": { "@freecorps/ember-values": "0.7.3" } }, "sha512-VtShgSoWAsm8k6sQLyK6iUljVxUqKgjdUGTKMpYileWCDygJHm7Vzbjuhn3MogpqXj+Oo0SgjpWOCFy00dNjDg=="],
 
-    "@freecorps/ember-email": ["@freecorps/ember-email@0.7.2", "", { "dependencies": { "@freecorps/ember-rate-limit": "0.7.2", "@freecorps/ember-server": "0.7.2", "@freecorps/ember-values": "0.7.2", "postal-mime": "^4.1.4" } }, "sha512-XirqcbJVAHUiTUMkwVuDl3PWeM5gflCSKO9N7G/vFJySsb8HD2Z+TQ0OKqAQTVm1AQpj9HcqmlWNYfe3vJmJ1g=="],
+    "@freecorps/ember-email": ["@freecorps/ember-email@0.7.3", "", { "dependencies": { "@freecorps/ember-rate-limit": "0.7.3", "@freecorps/ember-server": "0.7.3", "@freecorps/ember-values": "0.7.3", "postal-mime": "^4.1.4" } }, "sha512-5QgeCTRAKMF6mAFJG6qMtYdkeMP/vomWoJX5LXxpf/31Wc6lRR6W00pS8+lma7IzgeZeDh7pUgX89GNskUwG6A=="],
 
-    "@freecorps/ember-expo-push": ["@freecorps/ember-expo-push@0.7.2", "", { "dependencies": { "@noble/ciphers": "^2.4.0", "@noble/curves": "^2.4.0", "@noble/hashes": "^2.4.0" }, "peerDependencies": { "expo": "*", "expo-constants": "*", "expo-crypto": "*", "expo-notifications": "*", "expo-secure-store": "*", "expo-task-manager": "*" }, "optionalPeers": ["expo", "expo-constants", "expo-crypto", "expo-notifications", "expo-secure-store", "expo-task-manager"] }, "sha512-BYJurUu+DNfa388lzLOJdmN6cN6x4Z8cXBbPK3XEMl9Kh67U9Ci0cRBbR/KdMf/BzB8MNi3zLzLd/IkMhCyvKw=="],
+    "@freecorps/ember-expo-push": ["@freecorps/ember-expo-push@0.7.3", "", { "dependencies": { "@noble/ciphers": "^2.4.0", "@noble/curves": "^2.4.0", "@noble/hashes": "^2.4.0" }, "peerDependencies": { "expo": "*", "expo-constants": "*", "expo-crypto": "*", "expo-notifications": "*", "expo-secure-store": "*", "expo-task-manager": "*" }, "optionalPeers": ["expo", "expo-constants", "expo-crypto", "expo-notifications", "expo-secure-store", "expo-task-manager"] }, "sha512-kvaDn5WZI8meLUIreXCwtc2kWEo0sEDLUg24RGTWsbgeKM4ei8bNP+AN3JmIuXe6kyUfmaxEBT6wQNY89DjPLQ=="],
 
-    "@freecorps/ember-offline": ["@freecorps/ember-offline@0.7.2", "", { "dependencies": { "@freecorps/ember-client": "0.7.2", "@freecorps/ember-server": "0.7.2", "@freecorps/ember-values": "0.7.2" }, "peerDependencies": { "@sqlite.org/sqlite-wasm": ">=3.50.0", "expo-sqlite": ">=15", "tinybase": ">=5" }, "optionalPeers": ["@sqlite.org/sqlite-wasm", "expo-sqlite", "tinybase"] }, "sha512-XaCioWhkRN1YVErYYw0HPUiCn42tgT+JcCnwohhLGRz69hyR05IWVpEelzwW9NLKAy/SFbJpWuc17ALikgDXGw=="],
+    "@freecorps/ember-offline": ["@freecorps/ember-offline@0.7.3", "", { "dependencies": { "@freecorps/ember-client": "0.7.3", "@freecorps/ember-server": "0.7.3", "@freecorps/ember-values": "0.7.3" }, "peerDependencies": { "@sqlite.org/sqlite-wasm": ">=3.50.0", "expo-sqlite": ">=15", "tinybase": ">=5" }, "optionalPeers": ["@sqlite.org/sqlite-wasm", "expo-sqlite", "tinybase"] }, "sha512-lTLXO7Pr47MsCmFgT6cLB1I/NoA/firx9ErOoJo7+Z5yFA6Q0jdxWc80aTbIPDHm6FyjWfAWI2Nooo/LVrAgaA=="],
 
-    "@freecorps/ember-push": ["@freecorps/ember-push@0.7.2", "", { "dependencies": { "@freecorps/ember-server": "0.7.2", "@freecorps/ember-values": "0.7.2" } }, "sha512-d1NB4HZIxlAF7zjdpnBsDTyDG09YjTQevasXXO5JMAOQBs/axgvVDLTQeKM1fk/vB8BcSIOAGffbndSy4J6fpQ=="],
+    "@freecorps/ember-push": ["@freecorps/ember-push@0.7.3", "", { "dependencies": { "@freecorps/ember-server": "0.7.3", "@freecorps/ember-values": "0.7.3" } }, "sha512-VgfFrdi2/W6LQ0bxRnAXZb7H+PwuUFVKzugLcg1e+jyZUargon6zDU45IMbF58ozETA4mWLQCpnGuHiQFpETmw=="],
 
-    "@freecorps/ember-rate-limit": ["@freecorps/ember-rate-limit@0.7.2", "", { "dependencies": { "@freecorps/ember-server": "0.7.2", "@freecorps/ember-values": "0.7.2" } }, "sha512-+eXena8crfSP2VU3E8/9Ug+wGqIyhhjgLEkLT+auFVtGVtVVjjt08JC1xWZD9BZ9F6gitM308vIUFY73sj1HYQ=="],
+    "@freecorps/ember-rate-limit": ["@freecorps/ember-rate-limit@0.7.3", "", { "dependencies": { "@freecorps/ember-server": "0.7.3", "@freecorps/ember-values": "0.7.3" } }, "sha512-mTPm3Zs/xIv+EjMB7/TpcCzhckjOQrt1oKNC58eM+z3q497C8kPb6BrEPT1u56R4+uru5th5hz2TmPf37KWFGw=="],
 
-    "@freecorps/ember-react": ["@freecorps/ember-react@0.7.2", "", { "dependencies": { "@freecorps/ember-client": "0.7.2" }, "peerDependencies": { "react": ">=18" } }, "sha512-8X/XNL6HgboBBXpLvWfsRDS09g6xa1T99NG+eJOdcsmRJ4D9H3Whf3FCnLwuyO+p0rpeElntsyXK8gB2aQBz3w=="],
+    "@freecorps/ember-react": ["@freecorps/ember-react@0.7.3", "", { "dependencies": { "@freecorps/ember-client": "0.7.3" }, "peerDependencies": { "react": ">=18" } }, "sha512-abLwJ4iLj1SmQpq/wWnyOpTO10Oy3x1kyxM8lRgZz5k7FPFXLgMoS0s0BmaD/Ocsm4sD7k80gfo0OpOLBAApJg=="],
 
-    "@freecorps/ember-react-native": ["@freecorps/ember-react-native@0.7.2", "", { "dependencies": { "@freecorps/ember-client": "0.7.2", "@freecorps/ember-react": "0.7.2" }, "peerDependencies": { "@react-native-async-storage/async-storage": ">=1.21", "@react-native-community/netinfo": ">=11", "expo-constants": "*", "expo-device": "*", "expo-notifications": "*", "expo-secure-store": "*", "react": ">=18", "react-native": "*" }, "optionalPeers": ["@react-native-async-storage/async-storage", "@react-native-community/netinfo", "expo-constants", "expo-device", "expo-notifications", "expo-secure-store", "react-native"] }, "sha512-zjyw5GFjObyisxL5Sv3fkwuHBz4jUsNlxln22oFt3GY/b5SAXtqPvYupnd3o0Ld+PQjrkbLdYlgaK4R9UwB4Zg=="],
+    "@freecorps/ember-react-native": ["@freecorps/ember-react-native@0.7.3", "", { "dependencies": { "@freecorps/ember-client": "0.7.3", "@freecorps/ember-react": "0.7.3" }, "peerDependencies": { "@react-native-async-storage/async-storage": ">=1.21", "@react-native-community/netinfo": ">=11", "expo-constants": "*", "expo-device": "*", "expo-notifications": "*", "expo-secure-store": "*", "react": ">=18", "react-native": "*" }, "optionalPeers": ["@react-native-async-storage/async-storage", "@react-native-community/netinfo", "expo-constants", "expo-device", "expo-notifications", "expo-secure-store", "react-native"] }, "sha512-X1c7SNIPIR4pvdC7PURD8c+9h4dCKkFFIyJX52eWs4fiip+UIgPtbb2dQzvLVj/a+NYdMdIotNS1KROgP+gRNA=="],
 
-    "@freecorps/ember-runtime": ["@freecorps/ember-runtime@0.7.2", "", { "dependencies": { "@freecorps/ember-server": "0.7.2", "@freecorps/ember-values": "0.7.2" } }, "sha512-GswB4rArGSiZRDClwzpK/fblFRiH+wJJ4eoDDnnJ2r5ogMh3c03kHG8wyzFGRIovH/lACEQj/XcKyLH2LPZM/Q=="],
+    "@freecorps/ember-runtime": ["@freecorps/ember-runtime@0.7.3", "", { "dependencies": { "@freecorps/ember-server": "0.7.3", "@freecorps/ember-values": "0.7.3" } }, "sha512-h5DhFpQ30x7KD4apfV+O8GLNGMwFmXQbc5homNwAb+Zflvxt9Lu+aNZ0IKrONFLdyD0eED6vHpdt5SVAyyK4QQ=="],
 
-    "@freecorps/ember-server": ["@freecorps/ember-server@0.7.2", "", { "dependencies": { "@freecorps/ember-values": "0.7.2" } }, "sha512-qJ7/JsKB6t/fxFhMuQbrdrcoEyoUVEAdZvUdrLQmFym1V55psyTMdjELObiX3Vh7kp4JeRqd/AfgkMp4lNXIkw=="],
+    "@freecorps/ember-server": ["@freecorps/ember-server@0.7.3", "", { "dependencies": { "@freecorps/ember-values": "0.7.3" } }, "sha512-YSekdjaLePQhEsv44mbx13gH9uT1OFjJX/D5IjlRWv0V1EINLKW9D3PM/wP5gSoEIeOapo2mruQX5UG/H+MVQQ=="],
 
-    "@freecorps/ember-values": ["@freecorps/ember-values@0.7.2", "", {}, "sha512-lIHDJt+jxCrd7l6bB1wk60rqN//2JFazpNKdM6LMasrL72xmK43h1rGmdbs+e0b8ctotKRK2UnXJ/l3PqSThSw=="],
+    "@freecorps/ember-values": ["@freecorps/ember-values@0.7.3", "", {}, "sha512-Z+Fo33+CtNL2YE3tO2Z7HlL2hZezD1n4SI5tEffbtn31l+6aQCCuG6wv/yz8rBRA/+tLGspDLJG0OoVfRsA6QA=="],
 
     "@freecorps/mail-api": ["@freecorps/mail-api@workspace:apps/api"],
 

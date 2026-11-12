@@ -87,6 +87,46 @@ export interface Message {
   scheduledFor?: number;
   /** Canceled or suppressed before it went out. */
   unsent?: true;
+  /** Inbound filed as spam by a filter: a sender rule (its pattern then), or too many messages in an hour. */
+  spam?: { reason: "rule" | "rate"; rule?: string; pattern?: string; action?: SenderAction };
+}
+
+/** What a sender rule does: file in Spam, refuse at SMTP (nothing kept), or keep out of Spam. */
+export type SenderAction = "spam" | "reject" | "allow";
+export const SENDER_ACTIONS: SenderAction[] = ["spam", "reject", "allow"];
+
+/** A sender rule (`inbox:senderRules`): on an address or a domain (its subdomains too). `mailbox` null: every mailbox. */
+export interface SenderRule {
+  _id: string;
+  mailbox: string | null;
+  pattern: string;
+  kind: "address" | "domain";
+  action: SenderAction;
+  note?: string;
+  author?: string;
+  createdAt: number;
+  updatedAt: number;
+  hits: number;
+  lastHitAt?: number;
+}
+
+/** `inbox:notSpam`: the rules it removed (`unblock`), to set again on Desfazer. */
+export interface NotSpamResult {
+  status: ThreadStatus;
+  removed: number;
+  rules: Array<{ mailbox: string | null; pattern: string; action: SenderAction; note?: string }>;
+}
+
+/** A conversation's sender and the rules that apply to them in its mailbox (`inbox:sender`), most specific first. */
+export interface SenderInfo {
+  email: string;
+  name: string | null;
+  domain: string;
+  /** Whether a conversation offers blocking the whole domain (not free mail, not ours). */
+  domainBlockable: boolean;
+  canEditGlobal: boolean;
+  effective: SenderRule | null;
+  rules: SenderRule[];
 }
 
 export interface Mailbox {
@@ -324,6 +364,14 @@ export const api = {
     assign: q<"mutation", { threadId: string; userId: string | null }, string | null>("inbox:assign"),
     /** For good (messages, notes, files): admins in a shared mailbox, the owner in a personal one. */
     deleteThread: q<"mutation", { threadId: string }, { deleted: boolean; canceled?: number }>("inbox:deleteThread"),
+    /** To Spam; `block`: the sender's address or whole domain too (their next mail goes to Spam, or bounces with `reject`). */
+    reportSpam: q<"mutation", { threadId: string; block?: "address" | "domain"; action?: "spam" | "reject" }, { status: "spam"; rule: SenderRule | null }>("inbox:reportSpam"),
+    /** Out of Spam (open); `unblock`: the sender's blocking rules in this mailbox go too. */
+    notSpam: q<"mutation", { threadId: string; unblock?: boolean }, NotSpamResult>("inbox:notSpam"),
+    sender: q<"query", { threadId: string }, SenderInfo>("inbox:sender"),
+    senderRules: q<"query", { mailbox?: string }, { rules: SenderRule[]; global: SenderRule[]; canEditGlobal: boolean }>("inbox:senderRules"),
+    setSenderRule: q<"mutation", { mailbox: string | null; pattern: string; action: SenderAction; note?: string | null }, SenderRule>("inbox:setSenderRule"),
+    removeSenderRule: q<"mutation", { mailbox: string | null; pattern: string }, boolean>("inbox:removeSenderRule"),
     compose: q<
       "mutation",
       { mailbox: string; to: string[]; cc?: string[]; subject: string; text: string; attachments?: AttachmentArg[] } & ComposerArgs,

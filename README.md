@@ -85,6 +85,12 @@ entrega; o SDK tem `verifyWebhook`). Erros no formato do Resend: `{ statusCode, 
 `threads` e `unread` (mensagens não lidas) de cada caixa compartilhada contam sem as adiadas, e `snoozed` conta as
 adiadas. As caixas pessoais vêm sem contagens.
 
+Remetentes bloqueados (Ember 0.7.3): `GET/POST/DELETE /inbox/sender-rules` bloqueiam um endereço ou um domínio inteiro
+(com subdomínios) numa caixa (`mailbox`) ou em todas (sem `mailbox`, só chaves `full_access`). `action`: `spam` (as
+mensagens vão para o Spam), `reject` (voltam ao remetente, nada é guardado) ou `allow` (nunca vão para o Spam e vencem
+um bloqueio mais amplo). No web e no app: "Marcar como spam" (`!` no web, swipe e menu no app), "Bloquear remetente"
+na conversa, "Não é spam" no aviso de uma conversa no Spam e Ajustes › Remetentes bloqueados.
+
 ```ts
 import { EmberMail } from "@freecorps/mail-sdk";
 const mail = new EmberMail(process.env.MAIL_API_KEY!, { baseUrl: "https://mail.example.com" });
@@ -180,6 +186,12 @@ Since Ember 0.7, snoozed conversations (snoozed in the app) are left out of that
 `snoozed=true` lists only the snoozed ones, soonest to wake first. `GET /inbox/mailboxes` follows the same rule: each
 shared mailbox's `threads` and `unread` (unread messages) leave the snoozed conversations out, and `snoozed` counts
 them. Personal mailboxes come without counts.
+
+Blocked senders (Ember 0.7.3): `GET/POST/DELETE /inbox/sender-rules` block an address or a whole domain (subdomains
+included) in one mailbox (`mailbox`) or in all of them (no `mailbox`, `full_access` keys only). `action`: `spam` (their
+mail goes to Spam), `reject` (it bounces, nothing is kept) or `allow` (never Spam, and it beats a broader block). On the
+web and in the app: "Mark as spam" (`!` on the web, a swipe and the menu in the app), "Block sender" in a conversation,
+"Not spam" on a spam conversation's banner, and Settings › Blocked senders.
 
 ### For agents
 

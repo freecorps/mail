@@ -18,7 +18,8 @@ export type ShortcutAction =
   | "extendPrev"
   | "info"
   | "snooze"
-  | "tags";
+  | "tags"
+  | "spam";
 
 export interface KeyLike {
   key: string;
@@ -48,6 +49,7 @@ const KEYS: Record<string, ShortcutAction> = {
   i: "info",
   h: "snooze",
   l: "tags",
+  "!": "spam",
   J: "extendNext",
   K: "extendPrev",
 };
@@ -106,6 +108,7 @@ export const SHORTCUTS: Array<{ keys: string[]; action: ShortcutAction }> = [
   { keys: ["u"], action: "unread" },
   { keys: ["h"], action: "snooze" },
   { keys: ["l"], action: "tags" },
+  { keys: ["!"], action: "spam" },
   { keys: ["r"], action: "reply" },
   { keys: ["n"], action: "note" },
   { keys: ["c"], action: "compose" },

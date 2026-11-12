@@ -16,6 +16,8 @@
 //   GET    /inbox/search?q=&mailbox=                  POST /inbox/members { user_id, mailboxes, admin? }
 //   DELETE /inbox/threads/:id (full_access: the conversation, its messages and files, for good)
 //   GET    /inbox/sent?mailbox=&before=&limit=     GET /inbox/members (members + access requests)
+//   GET    /inbox/sender-rules?mailbox=            POST /inbox/sender-rules { pattern, action, mailbox?, note? }
+//   DELETE /inbox/sender-rules?pattern=&mailbox=   (no mailbox: the rules for every mailbox, full_access keys only)
 //   GET    /webhooks               POST /webhooks { endpoint, events, project?, mailboxes?, description? } → signing_secret
 //   GET    /webhooks/:id (no secret: create and rotate return it)   PATCH /webhooks/:id { endpoint?, events?, project?, mailboxes?, description?, enabled? }
 //   DELETE /webhooks/:id           POST /webhooks/:id/rotate | /test     GET /webhooks/:id/deliveries
@@ -660,6 +662,68 @@ http.route({
     return json({ data: rows.filter((r) => !Object.hasOwn(personal, r.mailbox)) });
   }),
 });
+// Sender rules (block, spam, allow) on an address or a domain, per mailbox; with no `mailbox`, for every mailbox
+// (full_access keys: such a rule also screens the personal mailboxes' mail, whose rules no key reads).
+const SENDER_ACTIONS = new Set(["reject", "spam", "allow"]);
+const ruleJson = (r: any) => ({
+  object: "sender_rule",
+  id: r._id,
+  mailbox: r.mailbox,
+  pattern: r.pattern,
+  kind: r.kind,
+  action: r.action,
+  note: r.note ?? null,
+  hits: r.hits,
+  last_hit_at: r.lastHitAt ? iso(r.lastHitAt) : null,
+  created_at: iso(r.createdAt),
+  updated_at: iso(r.updatedAt),
+});
+async function ruleScope(ctx: ActionCtx, p: Principal, mailbox: unknown): Promise<string | null> {
+  if (mailbox === undefined || mailbox === null || mailbox === "") {
+    need(p);
+    return null;
+  }
+  if (typeof mailbox !== "string") throw new ApiError(422, "validation_error", "mailbox must be a mailbox name");
+  need(p, "inbox");
+  notPersonal(await personalMailboxes(ctx), mailbox);
+  return mailbox;
+}
+http.route({
+  path: "/inbox/sender-rules",
+  method: "GET",
+  handler: route(async (ctx, _r, p, url) => {
+    const mailbox = await ruleScope(ctx, p, url.searchParams.get("mailbox"));
+    const action = url.searchParams.get("action");
+    if (action !== null && !SENDER_ACTIONS.has(action)) throw new ApiError(422, "validation_error", "action must be reject, spam or allow");
+    const r = (await ctx.runQuery(email.senderRules, { mailbox, ...(action ? { action } : {}), paginationOpts: { numItems: pageLimit(url, 100), cursor: url.searchParams.get("cursor") } })) as { page: any[]; isDone: boolean; continueCursor: string };
+    return json({ object: "list", data: r.page.map(ruleJson), has_more: !r.isDone, ...(r.isDone ? {} : { cursor: r.continueCursor }) });
+  }),
+});
+http.route({
+  path: "/inbox/sender-rules",
+  method: "POST",
+  handler: route(async (ctx, request, p) => {
+    const b = await body<{ pattern?: string; action?: string; mailbox?: string | null; note?: string | null }>(request);
+    const mailbox = await ruleScope(ctx, p, b.mailbox);
+    if (typeof b.pattern !== "string" || !b.pattern) throw new ApiError(422, "missing_required_field", "pattern is required (an address or a domain)");
+    if (typeof b.action !== "string" || !SENDER_ACTIONS.has(b.action)) throw new ApiError(422, "validation_error", "action must be reject, spam or allow");
+    if (b.note !== undefined && b.note !== null && typeof b.note !== "string") throw new ApiError(422, "validation_error", "note must be a string");
+    const r = await ctx.runMutation(email.setSenderRule, { mailbox, pattern: b.pattern, action: b.action, ...(b.note !== undefined ? { note: b.note } : {}), author: `key:${p.keyId ?? "admin"}` });
+    return json(ruleJson(r), 201);
+  }),
+});
+http.route({
+  path: "/inbox/sender-rules",
+  method: "DELETE",
+  handler: route(async (ctx, _r, p, url) => {
+    const mailbox = await ruleScope(ctx, p, url.searchParams.get("mailbox"));
+    const pattern = url.searchParams.get("pattern");
+    if (!pattern) throw new ApiError(422, "missing_required_field", "pattern is required");
+    const deleted = (await ctx.runMutation(email.removeSenderRule, { mailbox, pattern })) as boolean;
+    return json({ object: "sender_rule", pattern, mailbox, deleted });
+  }),
+});
+
 // Members, and who signed in asking for access (their email and name), for full-access keys and the admin token.
 http.route({
   path: "/inbox/members",

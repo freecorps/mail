@@ -4,10 +4,12 @@
 import type { AdminKey } from "./admin";
 import { adminShellEn, adminShellPtBR } from "./adminShell";
 import { featuresEn, featuresPtBR } from "./features";
+import { sendersEn, sendersPtBR } from "./senders";
 
 const ptBR = {
   ...adminShellPtBR,
   ...featuresPtBR,
+  ...sendersPtBR,
   "app.name": "Ember Mail",
   "common.cancel": "Cancelar",
   "common.close": "Fechar",
@@ -363,6 +365,7 @@ export const LOCALES: Locale[] = ["pt-BR", "en"];
 const en: Record<CoreKey, string> = {
   ...adminShellEn,
   ...featuresEn,
+  ...sendersEn,
   "app.name": "Ember Mail",
   "common.cancel": "Cancel",
   "common.close": "Close",

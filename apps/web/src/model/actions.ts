@@ -54,6 +54,9 @@ export function useThreadActions() {
   const markRead = useMutation(api.inbox.markRead);
   const markUnread = useMutation(api.inbox.markUnread);
   const assignTo = useMutation(api.inbox.assign);
+  const reportSpam = useMutation(api.inbox.reportSpam);
+  const notSpam = useMutation(api.inbox.notSpam);
+  const setRule = useMutation(api.inbox.setSenderRule);
 
   /**
    * Archives the threads, or reopens them when every one is archived already (the `e` toggle), at once (optimistic).
@@ -98,6 +101,53 @@ export function useThreadActions() {
     [client, setStatus, t, locale],
   );
 
+  /**
+   * Moves the threads to Spam (`!`, the bulk bar, the thread's Spam menu), or out of it when every one is spam
+   * already ("Não é spam", which also removes the rules blocking their senders, as everywhere). Desfazer puts each one
+   * back to the status it had, read as `archive` reads it, and is dropped when nothing turns out to be undoable.
+   */
+  const spam = useCallback(
+    (targets: readonly ActionTarget[]) => {
+      if (!targets.length) return;
+      const back = targets.every((x) => x.status === "spam");
+      const n = targets.length;
+      if (back) {
+        const done = targets.map((x) => notSpam({ threadId: x.threadId, unblock: true }).catch(() => null));
+        toast(n === 1 ? t("spam.unmarked") : t(plural(locale, "spam.unmarkedMany", n), { count: n }), {
+          duration: UNDO_MS,
+          action: {
+            label: t("common.undo"),
+            // Back to Spam, and the blocking rules it removed are set again.
+            onClick: () => {
+              for (const x of targets) quiet(setStatus({ threadId: x.threadId, status: "spam" }));
+              void Promise.all(done).then((rs) => {
+                for (const r of rs) for (const rule of r?.rules ?? []) quiet(setRule(rule));
+              });
+            },
+          },
+        });
+        return;
+      }
+      const before = targets.map((x) => statusBefore(client, x));
+      for (const x of targets) quiet(reportSpam({ threadId: x.threadId }));
+      const message = n === 1 ? t("spam.marked") : t(plural(locale, "spam.markedMany", n), { count: n });
+      const settled = Promise.all(before.map((b) => Promise.resolve(b)));
+      const restore = (was: ReadonlyArray<ThreadStatus | null>) =>
+        targets.flatMap((x, i) => (was[i] && was[i] !== "spam" ? [{ threadId: x.threadId, status: was[i]! }] : []));
+      const id = toast(message, {
+        duration: UNDO_MS,
+        action: {
+          label: t("common.undo"),
+          onClick: () => void settled.then((was) => restore(was).forEach((x) => quiet(setStatus(x)))),
+        },
+      });
+      void settled.then((was) => {
+        if (!restore(was).length) toast(message, { id, duration: UNDO_MS, action: undefined });
+      });
+    },
+    [client, notSpam, reportSpam, setRule, setStatus, t, locale],
+  );
+
   /** Marks them read when any is unread, else unread (the bulk bar's one toggle). */
   const toggleRead = useCallback(
     (targets: readonly ActionTarget[]) => {
@@ -126,5 +176,5 @@ export function useThreadActions() {
     [archive, setStatus],
   );
 
-  return { archive, toggleRead, assign, setStatus: setStatusOf };
+  return { archive, toggleRead, assign, spam, setStatus: setStatusOf };
 }
