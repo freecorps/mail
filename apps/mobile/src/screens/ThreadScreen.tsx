@@ -262,7 +262,13 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
     haptics.light();
     if (thread.status === "spam") {
       notSpamM({ threadId, unblock: true })
-        .then((r) => notify(r.removed ? t("undo.notSpamUnblocked") : t("undo.notSpam.one", { count: 1 })))
+        .then((r) =>
+          // Desfazer: back to Spam, with the blocking rules it removed.
+          undoStore.show(r.removed ? t("undo.notSpamUnblocked") : t("undo.notSpam.one", { count: 1 }), () => {
+            vm.restoreStatus(threadId, "spam");
+            for (const rule of r.rules) void setRuleM(rule).catch(() => {});
+          }),
+        )
         .catch(() => notify(t("common.error")));
       return;
     }

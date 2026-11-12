@@ -1578,7 +1578,7 @@ describe("mail app", () => {
     expect(await mail("ea", "fulano@gmail.com", "gmail de novo")).toBe("Message rejected");
 
     // Not spam + unblock removes the mailbox's rules for the sender.
-    expect(await mu("inbox:notSpam", { threadId: t, unblock: true }, "edu")).toEqual({ status: "open", removed: 1 });
+    expect(await mu("inbox:notSpam", { threadId: t, unblock: true }, "edu")).toEqual({ status: "open", removed: 1, rules: [{ mailbox: "ea", pattern: "ofertas.test", action: "spam" }] });
     await mail("ea", "promo@ofertas.test", "spam tres");
     expect(await find("ea", "spam tres", "open")).toBeTruthy();
 

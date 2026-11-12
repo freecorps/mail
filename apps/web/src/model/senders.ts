@@ -107,10 +107,22 @@ export function useSenderActions() {
   const notSpamUnblock = useCallback(
     (threadId: string) => {
       notSpam({ threadId, unblock: true })
-        .then((r) => toast(r.removed ? t("spam.unblockedToo") : t("spam.unmarked")))
+        .then((r) =>
+          toast(r.removed ? t("spam.unblockedToo") : t("spam.unmarked"), {
+            duration: UNDO_MS,
+            action: {
+              label: t("common.undo"),
+              // Back to Spam, with the blocking rules it removed.
+              onClick: () => {
+                setStatus({ threadId, status: "spam" }).catch(report);
+                for (const rule of r.rules) setRule(rule).catch(report);
+              },
+            },
+          }),
+        )
         .catch(report);
     },
-    [notSpam, t],
+    [notSpam, setRule, setStatus, t],
   );
 
   const setAction = useCallback(

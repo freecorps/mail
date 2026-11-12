@@ -1401,21 +1401,23 @@ export const reportSpam = mutation({
 
 /**
  * Takes a conversation out of Spam (back to open). `unblock`: also removes the rules that send its sender to Spam or
- * refuse them in this mailbox (the ones for every mailbox too, for an admin). Returns how many rules went.
+ * refuse them in this mailbox (the ones for every mailbox too, for an admin). Returns how many rules went and what they
+ * were (`rules`: mailbox, pattern, action, note), so a client's Desfazer can set them again.
  */
 export const notSpam = mutation({
   args: { threadId: v.string(), unblock: v.optional(v.boolean()) },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     if (t.thread.status === "spam") ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "open", author: m.userId });
-    let removed = 0;
+    const rules: Array<Pick<SenderRuleDoc, "mailbox" | "pattern" | "action"> & { note?: string }> = [];
     if (a.unblock) {
       const r = ctx.runQuery(email.matchSender, { mailbox: t.thread.mailbox, email: t.thread.contact }) as { rules: SenderRuleDoc[] };
       for (const rule of r.rules) {
         if (rule.action === "allow" || (rule.mailbox === null && !m.admin)) continue;
-        if (ctx.runMutation(email.removeSenderRule, { mailbox: rule.mailbox, pattern: rule.pattern })) removed++;
+        if (ctx.runMutation(email.removeSenderRule, { mailbox: rule.mailbox, pattern: rule.pattern }))
+          rules.push({ mailbox: rule.mailbox, pattern: rule.pattern, action: rule.action, ...(rule.note ? { note: rule.note } : {}) });
       }
     }
-    return { status: t.thread.status === "spam" ? "open" : t.thread.status, removed };
+    return { status: t.thread.status === "spam" ? "open" : t.thread.status, removed: rules.length, rules };
   },
 });

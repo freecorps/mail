@@ -56,6 +56,7 @@ export function useThreadActions() {
   const assignTo = useMutation(api.inbox.assign);
   const reportSpam = useMutation(api.inbox.reportSpam);
   const notSpam = useMutation(api.inbox.notSpam);
+  const setRule = useMutation(api.inbox.setSenderRule);
 
   /**
    * Archives the threads, or reopens them when every one is archived already (the `e` toggle), at once (optimistic).
@@ -111,12 +112,18 @@ export function useThreadActions() {
       const back = targets.every((x) => x.status === "spam");
       const n = targets.length;
       if (back) {
-        for (const x of targets) quiet(notSpam({ threadId: x.threadId, unblock: true }));
+        const done = targets.map((x) => notSpam({ threadId: x.threadId, unblock: true }).catch(() => null));
         toast(n === 1 ? t("spam.unmarked") : t(plural(locale, "spam.unmarkedMany", n), { count: n }), {
           duration: UNDO_MS,
           action: {
             label: t("common.undo"),
-            onClick: () => targets.forEach((x) => quiet(setStatus({ threadId: x.threadId, status: "spam" }))),
+            // Back to Spam, and the blocking rules it removed are set again.
+            onClick: () => {
+              for (const x of targets) quiet(setStatus({ threadId: x.threadId, status: "spam" }));
+              void Promise.all(done).then((rs) => {
+                for (const r of rs) for (const rule of r?.rules ?? []) quiet(setRule(rule));
+              });
+            },
           },
         });
         return;
@@ -138,7 +145,7 @@ export function useThreadActions() {
         if (!restore(was).length) toast(message, { id, duration: UNDO_MS, action: undefined });
       });
     },
-    [client, notSpam, reportSpam, setStatus, t, locale],
+    [client, notSpam, reportSpam, setRule, setStatus, t, locale],
   );
 
   /** Marks them read when any is unread, else unread (the bulk bar's one toggle). */

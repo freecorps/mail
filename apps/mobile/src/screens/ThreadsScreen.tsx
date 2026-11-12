@@ -125,6 +125,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
   const reportSpam = useMutation(api.inbox.reportSpam);
   const notSpam = useMutation(api.inbox.notSpam);
   const removeRule = useMutation(api.inbox.removeSenderRule);
+  const setRule = useMutation(api.inbox.setSenderRule);
   const { mailboxes } = useMailboxes();
   const { index: tagIndex } = useTagIndex();
   const snoozer = useSnooze();
@@ -170,8 +171,14 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         const ok = rows.filter(actionable);
         if (spamTarget(ok) === "notSpam") {
           mark(ok.map((r) => r.threadId));
-          for (const r of ok) quiet(notSpam({ threadId: r.threadId, unblock: true }));
-          offerUndoArchive(t("undo.notSpam", { count: ok.length }), ok.map((r) => ({ threadId: r.threadId, before: "spam" as const })), (threadId, status) => quiet(setStatus({ threadId, status })));
+          const done = ok.map((r) => notSpam({ threadId: r.threadId, unblock: true }).catch(() => null));
+          // Desfazer: back to Spam, and the blocking rules "Não é spam" removed are set again.
+          undoStore.show(t("undo.notSpam", { count: ok.length }), () => {
+            for (const r of ok) quiet(setStatus({ threadId: r.threadId, status: "spam" }));
+            void Promise.all(done).then((rs) => {
+              for (const x of rs) for (const rule of x?.rules ?? []) quiet(setRule(rule));
+            });
+          });
           return;
         }
         const records = spammable(ok);
@@ -201,7 +208,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         router.push({ pathname: "/assign", params: { threadId: first.threadId, threadIds: rows.map((r) => r.threadId).join(","), mailbox: first.mailbox, current } });
       },
     };
-  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus, reportSpam, notSpam, removeRule, source, filter, tagIndex, snoozer]);
+  }, [t, c, prefs, keeps, personal, markRead, markUnread, setStatus, reportSpam, notSpam, removeRule, setRule, source, filter, tagIndex, snoozer]);
 
   // ---- Edit mode -------------------------------------------------------------------------------------------------
   const [editing, setEditing] = useState(false);

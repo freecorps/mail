@@ -109,6 +109,13 @@ export interface SenderRule {
   lastHitAt?: number;
 }
 
+/** `inbox:notSpam`: the rules it removed (`unblock`), to set again on Desfazer. */
+export interface NotSpamResult {
+  status: ThreadStatus;
+  removed: number;
+  rules: Array<{ mailbox: string | null; pattern: string; action: SenderAction; note?: string }>;
+}
+
 /** A conversation's sender and the rules that apply to them in its mailbox (`inbox:sender`), most specific first. */
 export interface SenderInfo {
   email: string;
@@ -534,7 +541,7 @@ export const api = {
       { threadId: string; block?: "address" | "domain"; action?: "spam" | "reject" },
       { status: "spam"; rule: SenderRule | null }
     >("inbox:reportSpam"),
-    notSpam: q<"mutation", { threadId: string; unblock?: boolean }, { status: ThreadStatus; removed: number }>("inbox:notSpam"),
+    notSpam: q<"mutation", { threadId: string; unblock?: boolean }, NotSpamResult>("inbox:notSpam"),
     sender: q<"query", { threadId: string }, SenderInfo>("inbox:sender"),
     senderRules: q<"query", { mailbox?: string }, { rules: SenderRule[]; global: SenderRule[]; canEditGlobal: boolean }>(
       "inbox:senderRules",
