@@ -38,7 +38,7 @@ export function senderPatternOk(input: string): boolean {
   const domain = new RegExp(`^${label}(?:\\.${label})+\\.?$`);
   if (s.includes("@")) {
     const at = s.lastIndexOf("@");
-    return at > 0 && !/[\s<>@",;:()[\]\\]/.test(s.slice(0, at)) && domain.test(s.slice(at + 1));
+    return at > 0 && !/[\s<>@",;:()[\]\\]/.test(s.slice(0, at)) && domain.test(s.slice(at + 1)) && !/\.\d+\.?$/.test(s);
   }
   return domain.test(s) && !/\.\d+\.?$/.test(s);
 }

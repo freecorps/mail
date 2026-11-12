@@ -102,8 +102,8 @@ export function useThreadActions() {
 
   /**
    * Moves the threads to Spam (`!`, the bulk bar, the thread's Spam menu), or out of it when every one is spam
-   * already; the sender rules are left alone here (the thread's menu and banner block and unblock). Desfazer puts each
-   * one back to the status it had, read as `archive` reads it.
+   * already ("Não é spam", which also removes the rules blocking their senders, as everywhere). Desfazer puts each one
+   * back to the status it had, read as `archive` reads it, and is dropped when nothing turns out to be undoable.
    */
   const spam = useCallback(
     (targets: readonly ActionTarget[]) => {
@@ -111,7 +111,7 @@ export function useThreadActions() {
       const back = targets.every((x) => x.status === "spam");
       const n = targets.length;
       if (back) {
-        for (const x of targets) quiet(notSpam({ threadId: x.threadId }));
+        for (const x of targets) quiet(notSpam({ threadId: x.threadId, unblock: true }));
         toast(n === 1 ? t("spam.unmarked") : t(plural(locale, "spam.unmarkedMany", n), { count: n }), {
           duration: UNDO_MS,
           action: {
@@ -124,19 +124,18 @@ export function useThreadActions() {
       const before = targets.map((x) => statusBefore(client, x));
       for (const x of targets) quiet(reportSpam({ threadId: x.threadId }));
       const message = n === 1 ? t("spam.marked") : t(plural(locale, "spam.markedMany", n), { count: n });
-      toast(message, {
+      const settled = Promise.all(before.map((b) => Promise.resolve(b)));
+      const restore = (was: ReadonlyArray<ThreadStatus | null>) =>
+        targets.flatMap((x, i) => (was[i] && was[i] !== "spam" ? [{ threadId: x.threadId, status: was[i]! }] : []));
+      const id = toast(message, {
         duration: UNDO_MS,
         action: {
           label: t("common.undo"),
-          onClick: () => {
-            void Promise.all(before.map((b) => Promise.resolve(b))).then((was) => {
-              targets.forEach((x, i) => {
-                const s = was[i];
-                if (s && s !== "spam") quiet(setStatus({ threadId: x.threadId, status: s }));
-              });
-            });
-          },
+          onClick: () => void settled.then((was) => restore(was).forEach((x) => quiet(setStatus(x)))),
         },
+      });
+      void settled.then((was) => {
+        if (!restore(was).length) toast(message, { id, duration: UNDO_MS, action: undefined });
       });
     },
     [client, notSpam, reportSpam, setStatus, t, locale],

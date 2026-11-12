@@ -633,7 +633,7 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
         <View style={[styles.images, { backgroundColor: c.fill }]} accessibilityRole="summary">
           <Symbol icon={Icons.spam} size={17} color={c.secondaryLabel} />
           <ThemedText variant="footnote" tone="secondary" style={styles.grow} numberOfLines={3}>
-            {spamReason ? (spamReason.reason === "rule" && spamReason.pattern ? t("thread.spamBannerRule", { pattern: spamReason.pattern }) : t("thread.spamBannerRate")) : t("thread.spamBanner")}
+            {spamReason?.reason === "rule" && spamReason.pattern ? t("thread.spamBannerRule", { pattern: spamReason.pattern }) : spamReason?.reason === "rate" ? t("thread.spamBannerRate") : t("thread.spamBanner")}
           </ThemedText>
           <NativeButton variant="outlined" label={t("thread.notSpam")} onPress={spam} />
         </View>

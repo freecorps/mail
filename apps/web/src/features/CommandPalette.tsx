@@ -205,13 +205,11 @@ function Body(p: PaletteProps & { close: () => void }) {
               keys={["!"]}
               onSelect={run(() => actions.spam([{ threadId: th._id, status: th.status, unread: th.unreadCount > 0 }]))}
             />
-            {th.status !== "spam" && (
-              <Item
-                icon={UserX}
-                label={t("palette.blockSender")}
-                onSelect={run(() => senders.block({ threadId: th._id, mailbox: th.mailbox, status: th.status }, "address"))}
-              />
-            )}
+            <Item
+              icon={UserX}
+              label={t("palette.blockSender")}
+              onSelect={run(() => senders.block({ threadId: th._id, mailbox: th.mailbox, status: th.status }, "address"))}
+            />
             {STATUSES.filter((s) => s !== th.status).map((s) => (
               <Item
                 key={s}

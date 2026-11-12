@@ -152,13 +152,14 @@ export function keepsArchived(source: ListSource, filter: ThreadFilter): boolean
 }
 
 /**
- * Whether the list still shows a thread once it is moved to Spam (or out of it): lists of every status ("Todas" of a
+ * Whether the list still shows a thread once it is moved to Spam (or out of it): lists of every status ("Todas" and "Enviadas" of a
  * mailbox, the "Todas" view, "Adiadas") keep it, with its spam mark; a status filter, Spam's own, and the views of
  * open work (assigned, unread, waiting) drop it.
  */
 export function keepsSpam(source: ListSource, filter: ThreadFilter): boolean {
-  if (filter !== "all") return false;
-  return source.mailbox !== undefined || source.view === "all" || source.view === "snoozed";
+  // A mailbox's Sent lists every conversation it wrote in, whatever its status.
+  if (source.mailbox !== undefined) return filter === "all" || filter === "sent";
+  return filter === "all" && (source.view === "all" || source.view === "snoozed");
 }
 
 /** Whether the list still shows a thread once snoozed: only "Adiadas" (a re-snooze moves it there). */

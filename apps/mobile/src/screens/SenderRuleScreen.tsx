@@ -37,10 +37,22 @@ export function SenderRuleScreen() {
   const shown = action ?? rule?.action ?? "spam";
   const valid = senderPatternOk(text);
 
+  // A new rule only remembers the choice; an existing one changes on the server (online), and the checkmark goes back
+  // to what the server has if that fails.
   const pick = (a: SenderAction) => {
+    if (!rule) {
+      haptics.selection();
+      setAction(a);
+      return;
+    }
+    if (a === rule.action) return;
+    if (!online) return notify(t("senders.offline"));
     haptics.selection();
     setAction(a);
-    if (rule && a !== rule.action) setRule({ mailbox, pattern: rule.pattern, action: a }).catch(() => notify(t("common.error")));
+    setRule({ mailbox, pattern: rule.pattern, action: a }).catch(() => {
+      setAction(null);
+      notify(t("common.error"));
+    });
   };
   const add = async () => {
     setTried(true);

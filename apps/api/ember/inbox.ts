@@ -1388,11 +1388,12 @@ export const reportSpam = mutation({
   args: { threadId: v.string(), block: v.optional(v.union(v.literal("address"), v.literal("domain"))), action: v.optional(v.union(v.literal("spam"), v.literal("reject"))) },
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
-    ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "spam", author: m.userId });
-    if (!a.block) return { status: "spam", rule: null };
     const contact = t.thread.contact as string;
     const domain = domainOfAddress(contact);
+    // Checked before anything is written: a refused domain block leaves the conversation as it was.
     if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`);
+    ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "spam", author: m.userId });
+    if (!a.block) return { status: "spam", rule: null };
     const rule = ctx.runMutation(email.setSenderRule, { mailbox: t.thread.mailbox, pattern: a.block === "domain" ? domain : contact, action: a.action ?? "spam", author: m.userId }) as SenderRuleDoc;
     return { status: "spam", rule };
   },

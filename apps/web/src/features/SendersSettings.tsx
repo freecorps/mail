@@ -39,7 +39,9 @@ export function SendersSettings({
   const ids = { box: useId(), pattern: useId(), action: useId(), err: useId() };
   const boxes = useMailboxes().mailboxes;
   const admin = !!useQuerySnapshot(api.inbox.me, {}).value?.admin;
-  const [box, setBox] = useState(mailbox ?? (boxes.find((b) => !b.personal) ?? boxes[0])?.name ?? (admin ? ALL : ""));
+  // Picked by the person, else the one asked for, else the first shared mailbox (read again once the lists load).
+  const [picked, setBox] = useState<string | null>(mailbox);
+  const box = picked ?? (boxes.find((b) => !b.personal) ?? boxes[0])?.name ?? (admin ? ALL : "");
   const scope = box === ALL ? null : box;
   const list = useQuerySnapshot(api.inbox.senderRules, box ? (scope === null ? {} : { mailbox: scope }) : "skip");
   const setRule = useMutation(api.inbox.setSenderRule);

@@ -1573,6 +1573,7 @@ describe("mail app", () => {
     const g = (await find("ea", "gmail"))._id;
     expect((await q("inbox:sender", { threadId: g }, "edu")).domainBlockable).toBe(false);
     expect(await refused("mutation", "inbox:reportSpam", { threadId: g, block: "domain" }, "edu")).toMatch(/shared by many people/);
+    expect((await q("inbox:thread", { threadId: g }, "edu")).thread.status).toBe("open");
     expect((await mu("inbox:reportSpam", { threadId: g, block: "address", action: "reject" }, "edu")).rule).toMatchObject({ pattern: "fulano@gmail.com", action: "reject" });
     expect(await mail("ea", "fulano@gmail.com", "gmail de novo")).toBe("Message rejected");
 

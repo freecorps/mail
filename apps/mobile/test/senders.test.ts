@@ -31,7 +31,7 @@ describe("sender menu", () => {
 describe("patterns", () => {
   it("addresses and domains; junk is not", () => {
     for (const ok of ["ana@acme.com", "acme.com", "@acme.com", "*.acme.com", "mail.acme.com.br", " Ana+x@Acme.com "]) expect(senderPatternOk(ok)).toBe(true);
-    for (const bad of ["", "com", "ana@", "@", "a b.com", "1.2.3.4", "acme..com", "ana@acme"]) expect(senderPatternOk(bad)).toBe(false);
+    for (const bad of ["", "com", "ana@", "@", "a b.com", "1.2.3.4", "acme..com", "ana@acme", "ana@1.2.3.4"]) expect(senderPatternOk(bad)).toBe(false);
   });
 });
 
@@ -51,6 +51,7 @@ describe("spam in lists", () => {
     expect(keepsSpam({ mailbox: "support" }, "all")).toBe(true);
     expect(keepsSpam({ mailbox: "support" }, "open")).toBe(false);
     expect(keepsSpam({ mailbox: "support" }, "spam")).toBe(false);
+    expect(keepsSpam({ mailbox: "support" }, "sent")).toBe(true);
     expect(keepsSpam({ view: "all" }, "all")).toBe(true);
     expect(keepsSpam({ view: "unread" }, "all")).toBe(false);
     expect(keepsSpam({ view: "assigned" }, "all")).toBe(false);

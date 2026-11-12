@@ -170,7 +170,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         const ok = rows.filter(actionable);
         if (spamTarget(ok) === "notSpam") {
           mark(ok.map((r) => r.threadId));
-          for (const r of ok) quiet(notSpam({ threadId: r.threadId }));
+          for (const r of ok) quiet(notSpam({ threadId: r.threadId, unblock: true }));
           offerUndoArchive(t("undo.notSpam", { count: ok.length }), ok.map((r) => ({ threadId: r.threadId, before: "spam" as const })), (threadId, status) => quiet(setStatus({ threadId, status })));
           return;
         }
