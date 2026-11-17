@@ -128,6 +128,19 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
     Worker durante o deploy e o e2e.
   - Não exercitado em produção: `ember deploy --preflight`, a checagem de volta de schema com `--allow-schema-rollback`,
     `ember restore` e `ember files orphans`.
+- **Deploy de 2026-11-17, o segundo** (Ember 0.8.1, do 0.8.0; só o runtime mudou, sem schema nem tabelas internas).
+  - Motivo: o objeto `Auth` deste serviço estava num laço de alarms, cerca de 500 por minuto (uns 32 mil por hora),
+    pelo menos desde 2026-11-16 e ainda na 0.7.3. Este serviço usa auth sem sync de perfil (`users:sync`), o journal
+    de escritas de usuário nunca era consumido e o alarm se rearmava para uma linha que nunca saía (freecorps/ember#120).
+    Não havia erro nem efeito no serviço: só o objeto acordado o tempo todo.
+  - `ops deploy` do commit do PR, antes do merge: 25 s, shard `global:main` pronto no mesmo schema. Inventário antes e
+    depois: só adição. `ops e2e` passou: entregas em 2–5 s, respostas nas threads certas.
+  - Os alarms do `Auth` (invocações por minuto, análise da Cloudflare): cerca de 500 até 22:49 UTC, 281 em 22:50, 1 em
+    22:51 e nenhum depois. A instância antiga do objeto ficou cerca de 5 minutos depois do deploy, como no deploy da
+    0.8.0.
+  - `@freecorps/ember-expo-push` ficou na 0.8.0 de propósito: o código é o mesmo da 0.8.1 e a versão dele entra no
+    fingerprint nativo do app, então subir só o número faria um build de iOS novo. Sobe junto com a próxima mudança
+    nativa.
 - **Ember 0.8.0** (em produção desde o deploy de 2026-11-17, acima). O que muda para quem opera:
   - **O primeiro boot do shard na 0.8.0 atualiza as tabelas internas do runtime** (versão 4 → 5: `_jobs.scheduled_at`,
     e jobs encerrados passam a ficar guardados). O bookmark `deploy:<versão>` desse deploy é tirado antes dessa
