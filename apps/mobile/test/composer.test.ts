@@ -445,8 +445,12 @@ describe("drafts offline (optimistic)", () => {
     const key = (fn: string, a: unknown) => `${fn}|${JSON.stringify(a ?? {})}`;
     const m = new Map(init.map(([a, v]) => [key("inbox:drafts", a), { fn: "inbox:drafts", args: a, v: v as unknown }]));
     const s: OptimisticLocalStore = {
-      getQuery: (fn: any, a?: any) => m.get(key(fn, a))?.v as any,
+      getQuery: (fn: any, ...rest: any[]) => m.get(key(fn, rest[0]))?.v as any,
       setQuery: (fn: any, a: any, v: any) => void m.set(key(fn, a), { fn, args: a, v }),
+      updateQuery: (fn: any, a: any, f: (cur: any) => any) => {
+        const e = m.get(key(fn, a));
+        if (e && e.v !== undefined) m.set(key(fn, a), { fn, args: a, v: f(e.v) });
+      },
       getAllQueries: (fn: any) => [...m.values()].filter((e) => e.fn === fn).map((e) => ({ args: e.args as any, value: e.v as any })),
     };
     return { s, get: (a: Record<string, unknown>) => m.get(key("inbox:drafts", a))!.v as Draft[] };

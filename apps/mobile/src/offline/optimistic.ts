@@ -428,8 +428,12 @@ export function nextNotificationPrefs(p: { muted: string[]; preview: boolean }, 
   return { muted, preview: a.preview ?? p.preview };
 }
 
-export function inboxOptimisticUpdates(now: () => number = Date.now): Record<string, OptimisticUpdate> {
-  const updates: Record<string, OptimisticUpdate> = {
+// Each update names its mutation's arguments itself: the map is keyed by function name, so its type cannot.
+// (Ember 0.8 made the default of `OptimisticUpdate` a record of unknowns; `any` here is what it was before.)
+type InboxUpdates = Record<string, OptimisticUpdate<any>>;
+
+export function inboxOptimisticUpdates(now: () => number = Date.now): InboxUpdates {
+  const updates: InboxUpdates = {
     "inbox:reply": (store, args: AppendArgs) => append(store, args, "outbound", now()),
     "inbox:note": (store, args: { threadId: string; text: string }) => append(store, args, "note", now()),
     "inbox:markRead": (store, { threadId }: { threadId: string }) => {

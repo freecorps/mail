@@ -117,6 +117,31 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
     custom domain), fora do repositório. Depois, `Mobile` religado e disparado à mão (build novo: widgets, `mail-keys`,
     App Group dos widgets).
   - Não volte o Worker para um build com Ember < 0.7 depois desta migração: corrija para frente.
+- **Ember 0.8.0** (dependências em `^0.8.0` desde 2026-11-17; **ainda não publicado em produção**, então nada abaixo
+  foi exercitado neste serviço). O que muda para quem opera:
+  - **O primeiro boot do shard na 0.8.0 atualiza as tabelas internas do runtime** (versão 4 → 5: `_jobs.scheduled_at`,
+    e jobs encerrados passam a ficar guardados). O bookmark `deploy:<versão>` desse deploy é tirado antes dessa
+    atualização.
+  - **Não volte o Worker para um build com Ember < 0.8 depois desse deploy.** O guard que recusa tabelas internas mais
+    novas (`RuntimeSchemaTooNew`) só existe da 0.8.0 em diante: um runtime 0.7.x rodaria em silêncio sobre as tabelas
+    já atualizadas. Corrija para frente. Se o código tiver mesmo de voltar, restaure o shard junto, para o
+    `deploy:<versão>` do deploy da 0.8.0 (`ember restore --shard global:main --to deploy:<versão>`), o que descarta
+    o que foi gravado depois dele.
+  - **Ensaio da migração:** a partir da 0.8.0 existe `ember deploy --preflight --env prod`, que pergunta ao shard no ar
+    o que o planejador faria com o schema novo e não grava nem sobe nada. Ele substitui o ensaio local com
+    `.ember/state` descrito acima, com uma exceção: o runtime no ar precisa já ser 0.8.0 para responder. No deploy
+    que leva o serviço da 0.7.3 para a 0.8.0 o preflight responde "runtime too old", e o ensaio local continua sendo
+    o caminho.
+  - **Volta de schema:** `ember deploy` agora para antes de subir quando o schema do app é um que este ambiente já
+    deixou por um mais novo, e só segue com `--allow-schema-rollback`. O redeploy do commit anterior depois de um
+    deploy recusado (o que foi feito em 2026-11-09) cai nessa checagem, porque o deploy recusado fica registrado no
+    histórico: ali a flag é o caminho, já que o shard recusou a migração e continuou no schema antigo. Em qualquer
+    outro caso, leia o custo que a mensagem descreve antes de usá-la.
+  - **Shard recusado:** um shard com migração recusada não roda mais nada (nem jobs de action pela fila, nem action
+    com token), em vez de continuar rodando parte das coisas com o schema antigo.
+  - **CLI:** `--url http://` para outra máquina é recusado nos comandos que mandam o admin token
+    (`EMBER_ALLOW_INSECURE_HTTP=1` é a saída explícita). `ember files orphans` lista objetos do R2 sem linha de
+    arquivo; só apaga com `--delete`.
 - **Troca do MX do apex, 2026-11-10** (`freecorps.com.br` saiu do Openship; o conteúdo de lá não foi importado):
   1. API publicada com o catch-all (#20, Ember 0.5.7) e mailbox `geral` criada com `catch_all: true`.
   2. Com um token da API da Cloudflare (DNS Edit + Email Routing Rules Edit na zona; o login OAuth do wrangler não
