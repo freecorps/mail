@@ -167,8 +167,12 @@ function fakeStore(init: Array<[string, Record<string, unknown>, unknown]>) {
   const k = (fn: string, args: unknown) => `${fn}|${JSON.stringify(args)}`;
   const m = new Map(init.map(([fn, args, v]) => [k(fn, args), { fn, args, v }]));
   const store: OptimisticLocalStore = {
-    getQuery: (fn: any, args?: any) => m.get(k(fn, args ?? {}))?.v as any,
+    getQuery: (fn: any, ...rest: any[]) => m.get(k(fn, rest[0] ?? {}))?.v as any,
     setQuery: (fn: any, args: any, v: any) => void m.set(k(fn, args), { fn, args, v }),
+    updateQuery: (fn: any, args: any, f: (cur: any) => any) => {
+      const e = m.get(k(fn, args));
+      if (e && e.v !== undefined) m.set(k(fn, args), { fn, args, v: f(e.v) });
+    },
     getAllQueries: (fn: any) => [...m.values()].filter((e) => e.fn === fn).map((e) => ({ args: e.args as any, value: e.v as any })),
   };
   return { store, get: (fn: string, args: Record<string, unknown>) => m.get(k(fn, args))?.v as any };
