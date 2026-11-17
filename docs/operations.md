@@ -117,8 +117,18 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
     custom domain), fora do repositório. Depois, `Mobile` religado e disparado à mão (build novo: widgets, `mail-keys`,
     App Group dos widgets).
   - Não volte o Worker para um build com Ember < 0.7 depois desta migração: corrija para frente.
-- **Ember 0.8.0** (dependências em `^0.8.0` desde 2026-11-17; **ainda não publicado em produção**, então nada abaixo
-  foi exercitado neste serviço). O que muda para quem opera:
+- **Deploy de 2026-11-17** (Ember 0.8.0, do 0.7.3; o schema do app não mudou).
+  - Ensaio local antes: `ember dev` no commit em produção (0.7.3) com o `seed:dev` do mobile, depois o `.ember/state`
+    copiado para o commit da 0.8.0. O shard subiu sem recusa, com o mesmo schema e as mesmas conversas, as tabelas
+    internas foram para a versão 5, e mensagens novas entraram por cima. O `_jobs` desse estado estava vazio: a
+    atualização dessa tabela com jobs pendentes não foi ensaiada.
+  - `ops deploy` a partir do commit do PR, antes do merge, para o app novo nunca falar com a API antiga: 26 s, shard
+    `global:main` pronto no mesmo schema, sem `migrationError`. Inventário antes e depois: só adição. `ops e2e`
+    passou: entregas em 2–5 s, SPF, DKIM e DMARC `pass`, respostas nas threads certas. Nenhuma exceção no log do
+    Worker durante o deploy e o e2e.
+  - Não exercitado em produção: `ember deploy --preflight`, a checagem de volta de schema com `--allow-schema-rollback`,
+    `ember restore` e `ember files orphans`.
+- **Ember 0.8.0** (em produção desde o deploy de 2026-11-17, acima). O que muda para quem opera:
   - **O primeiro boot do shard na 0.8.0 atualiza as tabelas internas do runtime** (versão 4 → 5: `_jobs.scheduled_at`,
     e jobs encerrados passam a ficar guardados). O bookmark `deploy:<versão>` desse deploy é tirado antes dessa
     atualização.
