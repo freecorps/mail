@@ -21,6 +21,7 @@ import { api, type Message, type SenderInfo, type ThreadStatus } from "@/lib/api
 import { cn } from "@/lib/utils";
 import { openPicker } from "@/model/picker";
 import { blockingRule, canEditRule, useSenderActions } from "@/model/senders";
+import { spamWhyText } from "@/model/spam-why";
 
 export interface SpamThread {
   threadId: string;
@@ -150,15 +151,16 @@ export function SpamBanner({ threadId, lastInbound }: { threadId: string; lastIn
   const acts = useSenderActions();
   const why = lastInbound?.spam;
   const text =
-    why?.reason === "rule" && why.pattern
+    spamWhyText(why, t) ??
+    (why?.reason === "rule" && why.pattern
       ? t("spam.banner.rule", { pattern: why.pattern })
       : why?.reason === "rate"
         ? t("spam.banner.rate")
-        : t("spam.banner");
+        : t("spam.banner"));
   return (
     <div className="flex items-center gap-2 border-b bg-status-spam/8 px-4 py-1.5 text-ui sm:px-6" role="status">
       <ShieldAlert className="size-3.5 shrink-0 text-status-spam" aria-hidden="true" />
-      <span className="min-w-0 flex-1 truncate" dir="auto">
+      <span className="min-w-0 flex-1 truncate" dir="auto" title={text}>
         {text}
       </span>
       <Button variant="ghost" size="xs" onClick={() => acts.notSpamUnblock(threadId)}>

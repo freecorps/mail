@@ -10,6 +10,15 @@ import { UNDO_MS } from "./actions";
 
 const report = (e: unknown) => toast.error(e instanceof Error ? e.message : String(e));
 
+/**
+ * A domain block the server refused because the domain is free mail (or ours): `ValidationError` with
+ * `data.reason: "shared_domain"` (the API's SHARED_DOMAIN_REFUSAL), never matched on the English message.
+ */
+export function isSharedDomainRefusal(e: unknown): boolean {
+  const x = e as { code?: unknown; data?: { reason?: unknown } } | null;
+  return !!x && x.code === "ValidationError" && x.data?.reason === "shared_domain";
+}
+
 /** The rule that decides the sender's mail, when it blocks (spam or reject) and this member may remove it. */
 export function blockingRule(s: SenderInfo | null | undefined): SenderRule | null {
   const r = s?.effective;
@@ -64,7 +73,11 @@ export function useSenderActions() {
             },
           });
         })
-        .catch(report);
+        .catch((e: unknown) => {
+          // A free-mail domain or one of ours is refused (the ⌘K entry does not know it before asking).
+          if (how === "domain" && isSharedDomainRefusal(e)) toast(t("spam.domainShared"));
+          else report(e);
+        });
     },
     [reportSpam, removeRule, setStatus, t],
   );

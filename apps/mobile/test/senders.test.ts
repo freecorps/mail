@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { SenderInfo, SenderRule } from "../src/api";
 import { keepsSpam, parseListPrefs, spammable, spamTarget, SWIPE_KINDS } from "../src/model/list-actions";
-import { senderEntries, senderPatternOk } from "../src/model/senders";
+import { senderEntries, senderPatternOk, splitSenderEntries } from "../src/model/senders";
 import { filtersFor } from "../src/model/threads";
 
 const rule = (o: Partial<SenderRule>): SenderRule => ({ _id: "r", mailbox: "support", pattern: "acme.test", kind: "domain", action: "spam", createdAt: 1, updatedAt: 1, hits: 0, ...o });
@@ -13,6 +13,13 @@ describe("sender menu", () => {
   it("offers blocking the address, the domain (when blockable) and refusing, then always accept", () => {
     expect(senderEntries(info()).map((e) => (e.key === "block" ? `${e.how}:${e.action}` : e.key))).toEqual(["address:spam", "domain:spam", "address:reject", "allow"]);
     expect(senderEntries(info({ domainBlockable: false })).map((e) => (e.key === "block" ? `${e.how}:${e.action}` : e.key))).toEqual(["address:spam", "address:reject", "allow"]);
+  });
+  it("blocking the address and the domain go to the menu's top level; the rest stays under Remetente", () => {
+    const { quick, more } = splitSenderEntries(senderEntries(info()));
+    expect(quick.map((e) => e.how)).toEqual(["address", "domain"]);
+    expect(more.map((e) => (e.key === "block" ? `${e.how}:${e.action}` : e.key))).toEqual(["address:reject", "allow"]);
+    const own = rule({});
+    expect(splitSenderEntries(senderEntries(info({ effective: own, rules: [own] }))).quick).toEqual([]);
   });
   it("a blocked sender: unblock (or the note, for a rule of every mailbox and no admin)", () => {
     const own = rule({});

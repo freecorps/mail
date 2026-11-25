@@ -22,6 +22,8 @@ import {
   type SavedReplyDoc,
 } from "./composer.ts";
 import { prefsDoc, prefsOf } from "./notifications.ts";
+import { hostOfAddress, isRegistrable, orgDomain, SHARED_DOMAIN_REFUSAL, SHARED_DOMAINS } from "../src/spam/domain.ts";
+import { inboundOf, noteContacts, train } from "./spam.ts";
 
 const push = new PushNotifications(components.push);
 const email = components.email.lib;
@@ -49,6 +51,12 @@ function allowed(ctx: Ctx, mailbox: string) {
   const m = member(ctx);
   if (!canSee(ctx.db, m, mailbox)) throw new Error(`no access to mailbox ${mailbox}`);
   return m;
+}
+
+/** Forgets the spam training of a conversation's messages (it came back out of Spam without "Não é spam"). */
+function untrainSpam(ctx: Ctx, t: { messages?: Array<{ _id: string; direction: string }> }) {
+  const trained = inboundOf(t as any).filter((x) => (ctx.db.query("spamTrained").withIndex("by_message", (q: any) => q.eq("messageId", x._id)).first() as { as?: string } | null)?.as === "spam");
+  if (trained.length) train(ctx as any, trained, null);
 }
 
 function threadOf(ctx: Ctx, threadId: string) {
@@ -534,6 +542,11 @@ export const reply = mutation({
       const extras = sendExtras(ctx.db, m.userId, t.thread.mailbox, a);
       const at = sendAtOf(ctx, a.sendAt);
       const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
+      // An answered conversation was wanted: its mail teaches the filter what is not spam, and its contact is known.
+      if (t.thread.status !== "spam") {
+        train(ctx as any, inboundOf(t, 1), "ham");
+        noteContacts(ctx as any, [t.thread.contact as string]);
+      }
       const sent = ctx.runMutation(email.reply, {
         threadId: a.threadId,
         text: w.text,
@@ -610,7 +623,10 @@ export const markRead = mutation({
 export const setStatus = mutation({
   args: { threadId: v.string(), status: v.union(v.literal("open"), v.literal("waiting"), v.literal("closed"), v.literal("spam")) },
   handler: (ctx, a) => {
-    const { m } = threadOf(ctx, a.threadId);
+    const { t, m } = threadOf(ctx, a.threadId);
+    // Into Spam teaches the filter; out of it (Desfazer) forgets what that taught.
+    if (a.status === "spam" && t.thread.status !== "spam") train(ctx as any, inboundOf(t), "spam");
+    else if (a.status !== "spam" && t.thread.status === "spam") untrainSpam(ctx, t);
     return ctx.runMutation(email.setStatus, { ...a, author: m.userId });
   },
 });
@@ -662,6 +678,7 @@ export const compose = mutation({
       const extras = sendExtras(ctx.db, m.userId, a.mailbox, a);
       const at = sendAtOf(ctx, a.sendAt);
       const w = withAttachments(ctx, m, a.text, a.attachments, [], extras.bodyHtml, at.sendAt);
+      noteContacts(ctx as any, a.to);
       const sent = ctx.runMutation(email.compose, {
         mailbox: a.mailbox,
         to: a.to,
@@ -1305,22 +1322,15 @@ const RULE_PAGE = { numItems: 1000, cursor: null };
 /** A rule as the component returns it: `mailbox` null means every mailbox. */
 export type SenderRuleDoc = { _id: string; mailbox: string | null; pattern: string; kind: "address" | "domain"; action: "reject" | "spam" | "allow"; note?: string; author?: string; createdAt: number; updatedAt: number; hits: number; lastHitAt?: number };
 
+export { SHARED_DOMAINS };
+
 /**
- * Domains shared by many people (free mail): blocking the whole domain from a conversation would block strangers, so
- * the clients offer only the address there. The rules screen still takes any domain.
+ * Whether a conversation may block `domain` as a whole: a registrable domain (not `com.br`, not an IP), not free mail,
+ * not a domain of one of this instance's mailboxes.
  */
-export const SHARED_DOMAINS = new Set([
-  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "yahoo.com.br", "ymail.com",
-  "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "mail.com",
-  "yandex.com", "yandex.ru", "zoho.com", "uol.com.br", "bol.com.br", "terra.com.br", "ig.com.br", "outlook.com.br", "hotmail.com.br",
-]);
-
-const domainOfAddress = (e: string) => e.slice(e.lastIndexOf("@") + 1).toLowerCase();
-
-/** Whether a conversation may block `domain` as a whole: not free mail, not a domain of one of this instance's mailboxes. */
 function blockableDomain(ctx: Ctx, domain: string): boolean {
-  if (SHARED_DOMAINS.has(domain)) return false;
-  const own = (ctx.runQuery(email.mailboxes, {}) as Array<{ address: string }>).map((b) => domainOfAddress(b.address));
+  if (SHARED_DOMAINS.has(domain) || !isRegistrable(domain)) return false;
+  const own = (ctx.runQuery(email.mailboxes, {}) as Array<{ address: string }>).map((b) => hostOfAddress(b.address));
   return !own.some((d) => d === domain || d.endsWith(`.${domain}`) || domain.endsWith(`.${d}`));
 }
 
@@ -1373,7 +1383,8 @@ export const sender = query({
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     const contact = t.thread.contact as string;
-    const domain = domainOfAddress(contact);
+    // The registrable domain: a rule on it covers every subdomain (spammers rotate `loca30.`, `loca31.`...).
+    const domain = orgDomain(contact);
     const r = ctx.runQuery(email.matchSender, { mailbox: t.thread.mailbox, email: contact }) as { effective: SenderRuleDoc | null; rules: SenderRuleDoc[] };
     return { email: contact, name: (t.thread.contactName as string | undefined) ?? null, domain, domainBlockable: blockableDomain(ctx, domain), canEditGlobal: !!m.admin, ...r };
   },
@@ -1389,10 +1400,11 @@ export const reportSpam = mutation({
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     const contact = t.thread.contact as string;
-    const domain = domainOfAddress(contact);
+    const domain = orgDomain(contact);
     // Checked before anything is written: a refused domain block leaves the conversation as it was.
-    if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`);
+    if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`, { reason: SHARED_DOMAIN_REFUSAL, domain });
     ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "spam", author: m.userId });
+    train(ctx as any, inboundOf(t), "spam");
     if (!a.block) return { status: "spam", rule: null };
     const rule = ctx.runMutation(email.setSenderRule, { mailbox: t.thread.mailbox, pattern: a.block === "domain" ? domain : contact, action: a.action ?? "spam", author: m.userId }) as SenderRuleDoc;
     return { status: "spam", rule };
@@ -1409,6 +1421,8 @@ export const notSpam = mutation({
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     if (t.thread.status === "spam") ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "open", author: m.userId });
+    // The filter (or a member) was wrong: it learns these as wanted mail.
+    train(ctx as any, inboundOf(t), "ham");
     const rules: Array<Pick<SenderRuleDoc, "mailbox" | "pattern" | "action"> & { note?: string }> = [];
     if (a.unblock) {
       const r = ctx.runQuery(email.matchSender, { mailbox: t.thread.mailbox, email: t.thread.contact }) as { rules: SenderRuleDoc[] };

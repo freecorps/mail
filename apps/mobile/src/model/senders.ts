@@ -31,6 +31,26 @@ export function senderEntries(s: SenderInfo): SenderEntry[] {
   return out;
 }
 
+/**
+ * A domain block the server refused because the domain is free mail (or ours): `ValidationError` with
+ * `data.reason: "shared_domain"` (the API's SHARED_DOMAIN_REFUSAL), never matched on the English message.
+ */
+export function isSharedDomainRefusal(e: unknown): boolean {
+  const x = e as { code?: unknown; data?: { reason?: unknown } } | null;
+  return !!x && x.code === "ValidationError" && x.data?.reason === "shared_domain";
+}
+
+export type BlockEntry = Extract<SenderEntry, { key: "block" }>;
+
+/**
+ * The conversation menu's own items (top level, next to "Marcar como spam"): blocking the address and the whole
+ * domain, the two a spam wave needs at once. The rest (refuse, always accept, unblock) stays in "Remetente ›".
+ */
+export function splitSenderEntries(entries: SenderEntry[]): { quick: BlockEntry[]; more: SenderEntry[] } {
+  const isQuick = (e: SenderEntry): e is BlockEntry => e.key === "block" && e.action === "spam";
+  return { quick: entries.filter(isQuick), more: entries.filter((e) => !isQuick(e)) };
+}
+
 /** An address (`nome@dominio.com`) or a domain (`dominio.com`, `@dominio.com`, `*.dominio.com`). */
 export function senderPatternOk(input: string): boolean {
   const s = input.trim().toLowerCase().replace(/^\*@|^@|^\*\./, "");

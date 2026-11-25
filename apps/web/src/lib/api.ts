@@ -87,7 +87,16 @@ export interface Message {
   /** Outbound only: the status of the email it sent (`inbox:thread`), and why it was not delivered. */
   delivery?: { status: string; reason: string | null };
   /** Inbound filed as spam by a filter: a sender rule (its pattern then), or too many messages in an hour. */
-  spam?: { reason: "rule" | "rate"; rule?: string; pattern?: string; action?: SenderAction };
+  /** Why it was filed as spam: a sender rule, the per-hour limit, or the content filter (`category`, `signals`). */
+  spam?: {
+    reason: "rule" | "rate" | "filter";
+    rule?: string;
+    pattern?: string;
+    action?: SenderAction;
+    category?: "phishing" | "malware" | "spam";
+    score?: number;
+    signals?: string[];
+  };
 }
 
 /** What a sender rule does: file in Spam, refuse at SMTP (nothing kept), or keep out of Spam. */

@@ -3,11 +3,11 @@
 // native: buttons come from @expo/ui (SwiftUI / Jetpack Compose), icons from SF Symbols / Material Symbols.
 import { Button, type ButtonVariant } from "@expo/ui";
 import { BrandHost } from "./native/brand-host";
-import { useConnectionState } from "@freecorps/ember-react-native";
 import type { ReactNode } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import type { ThreadStatus } from "../api";
 import { useI18n } from "../i18n";
+import { useConnectionBanner } from "../model/connection-banner";
 import { initials } from "../lib/format";
 import { corner, hairline, radius, screenEdge, spacing, useColors } from "../theme";
 import { Icons, Symbol, type IconSpec } from "./icons";
@@ -118,19 +118,23 @@ export function NativeButton({ label, onPress, variant = "text", disabled }: { l
   );
 }
 
-/** "Offline" / "N actions queued" strip under the header. */
+/**
+ * "Offline" / "N actions queued" strip under the header: only what lasts (model/connection-banner.ts), never a blink
+ * for each mutation in flight.
+ */
 export function ConnectionBanner() {
   const { t } = useI18n();
   const colors = useColors();
-  const c = useConnectionState();
-  if (c.online && c.pendingMutations === 0) return null;
-  const label = !c.online ? t("banner.offline") : t("banner.pending", { count: c.pendingMutations });
+  const c = useConnectionBanner();
+  if (!c.kind) return null;
+  // The count can reach 0 while the strip holds for a moment: it says "offline" or the last count it had.
+  const label = c.kind === "offline" ? t("banner.offline") : t("banner.pending", { count: Math.max(1, c.pendingMutations) });
   return (
     <View style={[styles.banner, { backgroundColor: colors.fill }]} accessible accessibilityRole="summary" accessibilityLiveRegion="polite">
-      <Symbol icon={c.online ? Icons.pending : Icons.offline} size={15} color={colors.secondaryLabel} />
+      <Symbol icon={c.kind === "pending" ? Icons.pending : Icons.offline} size={15} color={colors.secondaryLabel} />
       <ThemedText variant="footnote" tone="secondary" style={styles.bannerText}>
         {label}
-        {!c.online && c.pendingMutations > 0 ? ` · ${t("banner.pending", { count: c.pendingMutations })}` : ""}
+        {c.kind === "offline" && c.pendingMutations > 0 ? ` · ${t("banner.pending", { count: c.pendingMutations })}` : ""}
       </ThemedText>
     </View>
   );

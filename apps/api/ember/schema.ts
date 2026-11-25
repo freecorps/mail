@@ -167,5 +167,22 @@ export default defineSchema({
       .index("by_webhook", ["webhookId", "at"])
       .index("by_webhook_status", ["webhookId", "status", "at"])
       .index("by_at", ["at"]),
+
+    // ---- spam filter (ember/spam.ts)
+    /** Learned words: how many messages trained as spam and as ham had each token. */
+    spamTokens: defineTable({ token: v.string(), spam: v.number(), ham: v.number() }).index("by_token", ["token"]),
+    /** What a message was trained as (`spam` | `ham`), so it counts once and a change of mind moves it. */
+    spamTrained: defineTable({ messageId: v.string(), as: v.string(), at: v.number() }).index("by_message", ["messageId"]),
+    /** History of a sender: `key` an address, `@` + a registrable domain, or `#total` (trained messages). */
+    spamReputation: defineTable({ key: v.string(), spam: v.number(), ham: v.number(), updatedAt: v.number() }).index("by_key", ["key"]),
+    /** Domain lookups (security resolver: blocked / nonexistent; RDAP: registration), cached. */
+    spamDomains: defineTable({
+      domain: v.string(),
+      checkedAt: v.number(),
+      blocked: v.boolean(),
+      nx: v.boolean(),
+      registeredAt: v.optional(v.number()),
+      ageCheckedAt: v.optional(v.number()),
+    }).index("by_domain", ["domain"]),
   },
 });
