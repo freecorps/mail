@@ -1,6 +1,6 @@
 // The spam/phishing filter's data, shared by its pure parts (extract, score, bayes, lookups) and ember/spam.ts.
 
-/** What the email component's `hooks.onScreen` gives (`InboundScreenInput`, freecorps/ember#163), as this filter reads it. */
+/** What the email component's `hooks.onScreen` gives (`InboundScreenInput`, Ember 0.9.0), as this filter reads it. */
 export interface ScreenMessage {
   mailbox: string;
   recipient: string;

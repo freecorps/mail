@@ -1,4 +1,4 @@
-// The spam and phishing filter: the email component's `hooks.onScreen` (freecorps/ember#163, the release after 0.8.1), called in the email() handler
+// The spam and phishing filter: the email component's `hooks.onScreen` (Ember 0.9.0), called in the email() handler
 // before a message is stored. It scores the message (src/spam/score.ts) from what it says and links to, how it is
 // authenticated, the sender's history here, the words the team taught it, and the reputation of the domains involved
 // (Cloudflare's security resolver and RDAP, cached in `spamDomains`). At SPAM_AT it files the message in Spam with
