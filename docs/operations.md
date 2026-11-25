@@ -141,6 +141,24 @@ bun run ops deploy                # publica apps/api como ember-mail-prod (ver "
   - `@freecorps/ember-expo-push` ficou na 0.8.0 de propósito: o código é o mesmo da 0.8.1 e a versão dele entra no
     fingerprint nativo do app, então subir só o número faria um build de iOS novo. Sobe junto com a próxima mudança
     nativa.
+- **Deploy de 2026-11-25** (Ember 0.9.0, do 0.8.1; #64: bloqueio por domínio registrável, filtro de spam e
+  phishing no hook `onScreen`, faixa de conexão estável no mobile).
+  - O schema ganhou as tabelas do filtro (`spamTokens`, `spamTrained`, `spamReputation`, `spamDomains`). O componente
+    de email ganhou `messages.spam.{category,score,signals}` (só amplia), `emails.threadMessageId`, o índice
+    `emails.by_claim` (backfill em etapas), `presence.by_expires` e a tabela `maintenance`. O índice
+    `threads.unread`, sem leitor, saiu. O push ganhou `pendingReceipts` e `receiptsDrain`.
+  - Ensaio com `ember deploy --preflight --env prod` (o runtime no ar era 0.8.1): `global:main` aceitaria, 11 passos
+    e 1 backfill em etapas, nenhuma recusa.
+  - `ops deploy` do commit do PR, antes do merge: 28 s, shard `global:main` pronto no schema novo, sem
+    `migrationError`. Inventário antes e depois: só adição. `ops e2e` passou: entregas em 2–5 s, SPF, DKIM e DMARC
+    `pass`, respostas nas threads certas.
+  - Web: `ember-mail-web` republicado com a config de produção (`web-wrangler.json`, fora do repositório), conferida
+    antes contra o Worker no ar (bindings, var, data de compatibilidade e domínio iguais).
+  - `@freecorps/ember-expo-push` subiu junto para a 0.9.0: o fingerprint nativo muda e o workflow `Mobile` faz um build
+    novo (TestFlight) em vez de um EAS Update.
+  - O filtro decide antes de guardar a mensagem: uma mensagem que ele pontua como spam nasce no Spam, sem auto-resposta
+    nem push, e o aviso da conversa diz o porquê. Para desligar sem deploy de código: `SPAM_FILTER=off` (ou
+    `SPAM_LOOKUPS=off` para não consultar o resolvedor de segurança da Cloudflare nem o RDAP) nas variáveis do Worker.
 - **Ember 0.8.0** (em produção desde o deploy de 2026-11-17, acima). O que muda para quem opera:
   - **O primeiro boot do shard na 0.8.0 atualiza as tabelas internas do runtime** (versão 4 → 5: `_jobs.scheduled_at`,
     e jobs encerrados passam a ficar guardados). O bookmark `deploy:<versão>` desse deploy é tirado antes dessa
