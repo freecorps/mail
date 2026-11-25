@@ -37,6 +37,7 @@ import { useOutbox, type OutboxEntry } from "../model/outbox";
 import { isPersonal, useMailboxes } from "../model/threads";
 import { notify, offerUndoArchive, undoStore } from "../model/undo";
 import { senderEntries, splitSenderEntries, type SenderEntry } from "../model/senders";
+import { spamWhyText } from "../model/spam-why";
 import { allowImagesFrom, deviceTimeZone, useImageSenders } from "../prefs";
 import { ActivityLine } from "../components/activity-line";
 import { TagChips } from "../components/tag-chips";
@@ -654,8 +655,8 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
       {thread.status === "spam" && !preview ? (
         <View style={[styles.images, { backgroundColor: c.fill }]} accessibilityRole="summary">
           <Symbol icon={Icons.spam} size={17} color={c.secondaryLabel} />
-          <ThemedText variant="footnote" tone="secondary" style={styles.grow} numberOfLines={3}>
-            {spamReason?.reason === "rule" && spamReason.pattern ? t("thread.spamBannerRule", { pattern: spamReason.pattern }) : spamReason?.reason === "rate" ? t("thread.spamBannerRate") : t("thread.spamBanner")}
+          <ThemedText variant="footnote" tone="secondary" style={styles.grow} numberOfLines={4}>
+            {spamWhyText(spamReason, t) ?? (spamReason?.reason === "rule" && spamReason.pattern ? t("thread.spamBannerRule", { pattern: spamReason.pattern }) : spamReason?.reason === "rate" ? t("thread.spamBannerRate") : t("thread.spamBanner"))}
           </ThemedText>
           <NativeButton variant="outlined" label={t("thread.notSpam")} onPress={spam} />
         </View>

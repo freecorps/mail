@@ -88,7 +88,8 @@ export interface Message {
   /** Canceled or suppressed before it went out. */
   unsent?: true;
   /** Inbound filed as spam by a filter: a sender rule (its pattern then), or too many messages in an hour. */
-  spam?: { reason: "rule" | "rate"; rule?: string; pattern?: string; action?: SenderAction };
+  /** Why it was filed as spam: a sender rule, the per-hour limit, or the content filter (`category`, `signals`). */
+  spam?: { reason: "rule" | "rate" | "filter"; rule?: string; pattern?: string; action?: SenderAction; category?: "phishing" | "malware" | "spam"; score?: number; signals?: string[] };
 }
 
 /** What a sender rule does: file in Spam, refuse at SMTP (nothing kept), or keep out of Spam. */

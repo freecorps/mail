@@ -90,6 +90,17 @@ Remetentes bloqueados (Ember 0.7.3): `GET/POST/DELETE /inbox/sender-rules` bloqu
 mensagens vão para o Spam), `reject` (voltam ao remetente, nada é guardado) ou `allow` (nunca vão para o Spam e vencem
 um bloqueio mais amplo). No web e no app: "Marcar como spam" (`!` no web, swipe e menu no app), "Bloquear remetente"
 na conversa, "Não é spam" no aviso de uma conversa no Spam e Ajustes › Remetentes bloqueados.
+"Bloquear domínio" bloqueia o domínio registrável (`loca30.hotelx.com.br` → `hotelx.com.br`, pela Public Suffix
+List), então os subdomínios que uma onda de spam troca a cada envio caem juntos; email gratuito e os nossos domínios só
+por endereço.
+
+Filtro de spam e phishing (`ember/spam.ts`, hook `onScreen` do Ember, antes de guardar a mensagem): pontua
+autenticação (SPF/DKIM/DMARC), remetente falsificado ou parecido com o nosso, marcas imitadas, links disfarçados, IPs,
+encurtadores, hospedagem gratuita, anexos executáveis/HTML/macro, iscas de nota fiscal e cobrança, o histórico do
+remetente aqui e as palavras que a equipe ensinou ("Marcar como spam", "Não é spam" e responder treinam o filtro). Só
+os domínios (nunca o conteúdo) vão ao resolvedor de segurança da Cloudflare (1.1.1.2: domínios de golpe e malware) e ao
+RDAP (idade do domínio). Acima do limite, a conversa nasce no Spam, sem auto-resposta nem push, e o aviso diz o porquê.
+`SPAM_FILTER=off` desliga o filtro; `SPAM_LOOKUPS=off` não consulta nada fora da Worker.
 
 ```ts
 import { EmberMail } from "@freecorps/mail-sdk";
@@ -192,6 +203,16 @@ included) in one mailbox (`mailbox`) or in all of them (no `mailbox`, `full_acce
 mail goes to Spam), `reject` (it bounces, nothing is kept) or `allow` (never Spam, and it beats a broader block). On the
 web and in the app: "Mark as spam" (`!` on the web, a swipe and the menu in the app), "Block sender" in a conversation,
 "Not spam" on a spam conversation's banner, and Settings › Blocked senders.
+"Block domain" blocks the registrable domain (`loca30.hotelx.com.br` → `hotelx.com.br`, by the Public Suffix List), so
+the subdomains a spam wave rotates are caught too; free mail and our own domains only by address.
+
+Spam and phishing filter (`ember/spam.ts`, Ember's `onScreen` hook, before the message is stored): it scores
+authentication (SPF/DKIM/DMARC), forged or look-alike senders, imitated brands, disguised links, IPs, shorteners, free
+hosting, executable/HTML/macro attachments, invoice and bill lures, the sender's history here, and the words the team
+taught it ("Mark as spam", "Not spam" and replying train it). Only domains (never content) go to Cloudflare's security
+resolver (1.1.1.2: scam and malware domains) and to RDAP (domain age). Past the threshold the conversation starts in
+Spam, with no auto-reply or push, and its banner says why. `SPAM_FILTER=off` turns it off; `SPAM_LOOKUPS=off` keeps it
+inside the Worker.
 
 ### For agents
 

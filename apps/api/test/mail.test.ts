@@ -1613,6 +1613,63 @@ describe("mail app", () => {
     expect(await mu("inbox:removeSenderRule", { mailbox: "eia", pattern: "chato@user.test" }, "eva")).toBe(true);
   });
 
+  it("spam filter: a lure is filed in Spam with why, a customer is not; Spam / Não é spam / a reply teach it", async () => {
+    await stateSetup();
+    const deliver = async (o: { from: string; subject: string; text: string; html?: string; auth?: string }) => {
+      const raw = [
+        `Authentication-Results: mx.cloudflare.net; ${o.auth ?? "dkim=none; dmarc=none; spf=pass"}`,
+        `From: ${o.from}`,
+        "To: ea@acme.test",
+        `Subject: ${o.subject}`,
+        `Message-ID: <${Math.random()}@x.test>`,
+        "MIME-Version: 1.0",
+        `Content-Type: ${o.html ? "text/html" : "text/plain"}; charset=utf-8`,
+        "",
+        o.html ?? o.text,
+        "",
+      ].join("\r\n");
+      const m = inbound(o.from.replace(/.*<|>.*/g, ""), "ea@acme.test", raw);
+      await worker.email(m.msg as never, env as never, createExecutionContext());
+      return m.out.rejected;
+    };
+    const find = async (subject: string) => ((await q("inbox:threads", { mailbox: "ea" }, "eva")).page as any[]).find((x) => x.subject === subject);
+    const lure = (n: number) => ({
+      from: `"Loggis Trans" <nfe${n}@loca${n}.motelz.com.br>`,
+      subject: `Nota Fiscal 10288${n} confirmada`,
+      text: "",
+      html: `<p>Prezado Cliente, suporte@acme.test</p><p>Informamos que foi emitida a Nota Fiscal de Serviços. Clique no botão abaixo para baixar o arquivo da nota.</p><a href="https://loca${n}.motelz.com.br/nfe.php">Baixar NF-e</a>`,
+    });
+    expect(await deliver(lure(1))).toBeNull();
+    const t = await find("Nota Fiscal 102881 confirmada");
+    expect(t.status).toBe("spam");
+    const why = ((await q("inbox:thread", { threadId: t._id }, "eva")).messages as any[])[0].spam;
+    expect(why).toMatchObject({ reason: "filter", category: "phishing" });
+    expect(why.signals).toEqual(expect.arrayContaining(["stranger-invoice", "quotes-our-address"]));
+
+    // A customer's question with a link stays open.
+    expect(await deliver({ from: '"Ana" <ana@cliente.test>', subject: "Pedido 77", text: "Oi, o pedido 77 não chegou. https://cliente.test/p/77", auth: "dkim=pass; dmarc=pass; spf=pass" })).toBeNull();
+    expect((await find("Pedido 77")).status).toBe("open");
+
+    // Spam teaches the sender and their domain; Não é spam takes it back as wanted; replying makes the contact known.
+    const cold = { from: '"Gabriela" <gabi@credito.test>', text: "Crédito empresarial a partir de R$ 600 mil, capital de giro e antecipação de recebíveis. Simulação sem compromisso. Descadastre-se.", auth: "dkim=pass; dmarc=pass; spf=pass" };
+    await deliver({ ...cold, subject: "Crédito 1" });
+    const c1 = await find("Crédito 1");
+    expect(c1.status).toBe("open");
+    await mu("inbox:reportSpam", { threadId: c1._id }, "eva");
+    await deliver({ ...cold, from: '"Bia" <bia@credito.test>', subject: "Crédito 2" });
+    await mu("inbox:reportSpam", { threadId: (await find("Crédito 2"))._id }, "eva");
+    // Twice reported domain + its words: the next one is filed by itself.
+    await deliver({ ...cold, from: '"Caio" <caio@credito.test>', subject: "Crédito 3" });
+    const c3 = await find("Crédito 3");
+    expect(c3.status).toBe("spam");
+    expect(((await q("inbox:thread", { threadId: c3._id }, "eva")).messages as any[])[0].spam.signals).toContain("domain-reported:credito.test");
+    await mu("inbox:notSpam", { threadId: c3._id }, "eva");
+    await mu("inbox:reply", { threadId: c3._id, text: "Obrigado, não temos interesse." }, "eva");
+    // Caio is a known sender now: his next mail is not filed, even with the same words.
+    await deliver({ ...cold, from: '"Caio" <caio@credito.test>', subject: "Crédito 4" });
+    expect((await find("Crédito 4")).status).toBe("open");
+  });
+
   it("presence: who else is viewing or replying on a thread, for who sees it; never oneself", async () => {
     await stateSetup();
     const t = await threadIn("ea", "presença");

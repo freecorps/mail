@@ -12,8 +12,9 @@ export default defineApp()
     config: {
       // Per sending project (API key tenant). Mailbox replies use the project "mailbox:<name>".
       rateLimit: { rate: 600, period: 60_000, capacity: 600 },
-      // onInbound: push and webhooks; onEvent: delivery events → webhooks (ember/webhooks.ts).
-      hooks: { onInbound: createFunctionHandle("support:onInbound"), onEvent: createFunctionHandle("support:onEvent") },
+      // onScreen: the spam and phishing filter, before a message is stored (ember/spam.ts); onInbound: push and
+      // webhooks; onEvent: delivery events → webhooks (ember/webhooks.ts).
+      hooks: { onScreen: createFunctionHandle("spam:screen"), onInbound: createFunctionHandle("support:onInbound"), onEvent: createFunctionHandle("support:onEvent") },
     },
   })
   .use(pushComponent, {
