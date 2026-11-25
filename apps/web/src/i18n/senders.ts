@@ -61,6 +61,8 @@ export const sendersPtBR = {
   "senders.saved": "{pattern}: {action}",
   "palette.manageSenders": "Remetentes bloqueados",
   "palette.blockSender": "Bloquear remetente",
+  "palette.blockDomain": "Bloquear domínio do remetente",
+  "spam.domainShared": "Esse domínio é de email gratuito ou nosso: bloqueie só o remetente",
 };
 
 export type SendersKey = keyof typeof sendersPtBR;
@@ -125,4 +127,6 @@ export const sendersEn: Record<SendersKey, string> = {
   "senders.saved": "{pattern}: {action}",
   "palette.manageSenders": "Blocked senders",
   "palette.blockSender": "Block sender",
+  "palette.blockDomain": "Block sender's domain",
+  "spam.domainShared": "That domain is free email or ours: block just the sender",
 };

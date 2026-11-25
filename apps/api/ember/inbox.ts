@@ -22,6 +22,7 @@ import {
   type SavedReplyDoc,
 } from "./composer.ts";
 import { prefsDoc, prefsOf } from "./notifications.ts";
+import { hostOfAddress, orgDomain, SHARED_DOMAINS } from "../src/spam/domain.ts";
 
 const push = new PushNotifications(components.push);
 const email = components.email.lib;
@@ -1305,22 +1306,15 @@ const RULE_PAGE = { numItems: 1000, cursor: null };
 /** A rule as the component returns it: `mailbox` null means every mailbox. */
 export type SenderRuleDoc = { _id: string; mailbox: string | null; pattern: string; kind: "address" | "domain"; action: "reject" | "spam" | "allow"; note?: string; author?: string; createdAt: number; updatedAt: number; hits: number; lastHitAt?: number };
 
+export { SHARED_DOMAINS };
+
 /**
- * Domains shared by many people (free mail): blocking the whole domain from a conversation would block strangers, so
- * the clients offer only the address there. The rules screen still takes any domain.
+ * Whether a conversation may block `domain` as a whole: a registrable domain (not `com.br`, not an IP), not free mail,
+ * not a domain of one of this instance's mailboxes.
  */
-export const SHARED_DOMAINS = new Set([
-  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "yahoo.com.br", "ymail.com",
-  "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "mail.com",
-  "yandex.com", "yandex.ru", "zoho.com", "uol.com.br", "bol.com.br", "terra.com.br", "ig.com.br", "outlook.com.br", "hotmail.com.br",
-]);
-
-const domainOfAddress = (e: string) => e.slice(e.lastIndexOf("@") + 1).toLowerCase();
-
-/** Whether a conversation may block `domain` as a whole: not free mail, not a domain of one of this instance's mailboxes. */
 function blockableDomain(ctx: Ctx, domain: string): boolean {
-  if (SHARED_DOMAINS.has(domain)) return false;
-  const own = (ctx.runQuery(email.mailboxes, {}) as Array<{ address: string }>).map((b) => domainOfAddress(b.address));
+  if (SHARED_DOMAINS.has(domain) || !domain.includes(".") || /^[\d.]+$|:/.test(domain)) return false;
+  const own = (ctx.runQuery(email.mailboxes, {}) as Array<{ address: string }>).map((b) => hostOfAddress(b.address));
   return !own.some((d) => d === domain || d.endsWith(`.${domain}`) || domain.endsWith(`.${d}`));
 }
 
@@ -1373,7 +1367,8 @@ export const sender = query({
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     const contact = t.thread.contact as string;
-    const domain = domainOfAddress(contact);
+    // The registrable domain: a rule on it covers every subdomain (spammers rotate `loca30.`, `loca31.`...).
+    const domain = orgDomain(contact);
     const r = ctx.runQuery(email.matchSender, { mailbox: t.thread.mailbox, email: contact }) as { effective: SenderRuleDoc | null; rules: SenderRuleDoc[] };
     return { email: contact, name: (t.thread.contactName as string | undefined) ?? null, domain, domainBlockable: blockableDomain(ctx, domain), canEditGlobal: !!m.admin, ...r };
   },
@@ -1389,7 +1384,7 @@ export const reportSpam = mutation({
   handler: (ctx, a) => {
     const { t, m } = threadOf(ctx, a.threadId);
     const contact = t.thread.contact as string;
-    const domain = domainOfAddress(contact);
+    const domain = orgDomain(contact);
     // Checked before anything is written: a refused domain block leaves the conversation as it was.
     if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`);
     ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "spam", author: m.userId });

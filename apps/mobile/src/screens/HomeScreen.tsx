@@ -4,13 +4,13 @@
 // Offline / pending shows as a row of its own.
 import { FieldGroup, ListItem, Text } from "@expo/ui";
 import { BrandHost } from "../components/native/brand-host";
-import { useConnectionState } from "@freecorps/ember-react-native";
 import { router, useIsFocused } from "expo-router";
 import type { InboxView, Mailbox, ViewCounts } from "../api";
 import { Icons, type IconSpec } from "../components/icons";
 import { EmptyState, ListActions, Loading, NativeIcon } from "../components/ui";
 import { useI18n } from "../i18n";
 import { useShortcuts } from "../keys";
+import { useConnectionBanner } from "../model/connection-banner";
 import { byMailbox, tagColor } from "../model/tags";
 import { badge, useMailboxes, useTagIndex, useViewCounts } from "../model/threads";
 import { type, useColors, useTagColors } from "../theme";
@@ -43,7 +43,7 @@ export function HomeScreen() {
   const { t } = useI18n();
   const vm = useMailboxes();
   const counts = useViewCounts();
-  const conn = useConnectionState();
+  const conn = useConnectionBanner();
   const compose = () => router.push("/compose");
   // ⌘N; ⌘F goes to the search tab (the home has no search bar of its own).
   useShortcuts({ compose, search: () => router.navigate("/search") }, useIsFocused());
@@ -62,7 +62,7 @@ export function HomeScreen() {
   else if (vm.status === "error" && !vm.mailboxes.length) body = <EmptyState icon={Icons.error} title={t("common.error")} body={vm.error?.message} />;
   else if (!vm.mailboxes.length) body = <EmptyState icon={Icons.empty} title={t("mailboxes.empty")} />;
   else {
-    const offline = !conn.online || conn.pendingMutations > 0;
+    const offline = conn.kind !== null;
     const trailing = (s: string | null) => (s ? <Text textStyle={{ color: c.secondaryText }}>{s}</Text> : undefined);
     body = (
       <BrandHost style={{ flex: 1 }}>
@@ -115,10 +115,10 @@ export function HomeScreen() {
           {offline ? (
             <FieldGroup.Section>
               <ListItem
-                leading={<NativeIcon icon={conn.online ? Icons.pending : Icons.offline} color={c.secondaryText} />}
-                supportingText={!conn.online && conn.pendingMutations > 0 ? t("banner.pending", { count: conn.pendingMutations }) : undefined}
+                leading={<NativeIcon icon={conn.kind === "pending" ? Icons.pending : Icons.offline} color={c.secondaryText} />}
+                supportingText={conn.kind === "offline" && conn.pendingMutations > 0 ? t("banner.pending", { count: conn.pendingMutations }) : undefined}
               >
-                <Text textStyle={{ color: c.secondaryText }}>{!conn.online ? t("banner.offline") : t("banner.pending", { count: conn.pendingMutations })}</Text>
+                <Text textStyle={{ color: c.secondaryText }}>{conn.kind === "offline" ? t("banner.offline") : t("banner.pending", { count: Math.max(1, conn.pendingMutations) })}</Text>
               </ListItem>
             </FieldGroup.Section>
           ) : null}

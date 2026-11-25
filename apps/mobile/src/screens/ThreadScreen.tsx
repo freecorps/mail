@@ -36,7 +36,7 @@ import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, sender
 import { useOutbox, type OutboxEntry } from "../model/outbox";
 import { isPersonal, useMailboxes } from "../model/threads";
 import { notify, offerUndoArchive, undoStore } from "../model/undo";
-import { senderEntries, type SenderEntry } from "../model/senders";
+import { senderEntries, splitSenderEntries, type SenderEntry } from "../model/senders";
 import { allowImagesFrom, deviceTimeZone, useImageSenders } from "../prefs";
 import { ActivityLine } from "../components/activity-line";
 import { TagChips } from "../components/tag-chips";
@@ -308,8 +308,18 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
         .catch(() => notify(t("common.error")));
     }
   };
+  // Blocking the address and the whole domain sit at the menu's top level (a spam wave needs them at once); the rest
+  // of what can be done with the sender is under "Remetente ›".
+  const senderMenu = sender ? splitSenderEntries(senderEntries(sender)) : { quick: [], more: [] };
+  const quickBlocks: Array<{ key: string; label: string; detail: string; entry: SenderEntry }> = sender
+    ? senderMenu.quick.map((e) =>
+        e.how === "domain"
+          ? { key: "block:domain", label: t("thread.blockDomainShort"), detail: sender.domain, entry: e }
+          : { key: "block:address", label: t("thread.blockSender"), detail: sender.email, entry: e },
+      )
+    : [];
   const senderItems: Array<{ key: string; label: string; icon: IconSpec; destructive?: boolean; disabled?: boolean; entry: SenderEntry }> = sender
-    ? senderEntries(sender).map((e, i) => {
+    ? senderMenu.more.map((e, i) => {
         const k = `${e.key}:${i}`;
         switch (e.key) {
           case "block":
@@ -454,6 +464,7 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
               ],
             },
         { key: "spam", label: isSpam ? t("thread.notSpam") : t("thread.spam"), icon: isSpam ? Icons.notSpam : Icons.spam, onPress: spam },
+        ...quickBlocks.map((x) => ({ key: x.key, label: `${x.label} · ${x.detail}`, icon: Icons.block, onPress: () => runSender(x.entry) })),
         ...(senderItems.length
           ? [{ key: "sender", label: t("thread.sender"), icon: Icons.block, onPress: () => {}, submenu: senderItems.map((x) => ({ key: x.key, label: x.label, icon: x.icon, ...(x.destructive ? { destructive: true } : {}), ...(x.disabled ? { disabled: true } : {}), onPress: () => runSender(x.entry) })) }]
           : []),
@@ -537,6 +548,11 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
             <Stack.Toolbar.MenuAction icon={spamIcon} onPress={spam}>
               {isSpam ? t("thread.notSpam") : t("thread.spam")}
             </Stack.Toolbar.MenuAction>
+            {quickBlocks.map((x) => (
+              <Stack.Toolbar.MenuAction key={x.key} icon={blockIcon} {...(ios ? { subtitle: x.detail } : {})} onPress={() => runSender(x.entry)}>
+                {ios ? x.label : `${x.label} · ${x.detail}`}
+              </Stack.Toolbar.MenuAction>
+            ))}
             {senderItems.length ? (
               <Stack.Toolbar.Menu icon={blockIcon} title={t("thread.sender")} {...(ios && sender ? { subtitle: sender.email } : {})}>
                 {senderItems.map((x) => (

@@ -64,7 +64,11 @@ export function useSenderActions() {
             },
           });
         })
-        .catch(report);
+        .catch((e: unknown) => {
+          // A free-mail domain or one of ours is refused (the ⌘K entry does not know it before asking).
+          if (how === "domain" && /shared by many people/.test(String((e as Error)?.message))) toast(t("spam.domainShared"));
+          else report(e);
+        });
     },
     [reportSpam, removeRule, setStatus, t],
   );

@@ -210,6 +210,11 @@ function Body(p: PaletteProps & { close: () => void }) {
               label={t("palette.blockSender")}
               onSelect={run(() => senders.block({ threadId: th._id, mailbox: th.mailbox, status: th.status }, "address"))}
             />
+            <Item
+              icon={UserX}
+              label={t("palette.blockDomain")}
+              onSelect={run(() => senders.block({ threadId: th._id, mailbox: th.mailbox, status: th.status }, "domain"))}
+            />
             {STATUSES.filter((s) => s !== th.status).map((s) => (
               <Item
                 key={s}

@@ -1577,6 +1577,17 @@ describe("mail app", () => {
     expect((await mu("inbox:reportSpam", { threadId: g, block: "address", action: "reject" }, "edu")).rule).toMatchObject({ pattern: "fulano@gmail.com", action: "reject" });
     expect(await mail("ea", "fulano@gmail.com", "gmail de novo")).toBe("Message rejected");
 
+    // A sender on a subdomain: the registrable domain is blocked (spam waves rotate `loca30.`, `loca31.`...), never a
+    // public suffix.
+    await mail("ea", "nfe3@loca30.hotelx.com.br", "NF-e 1");
+    const nf = (await find("ea", "NF-e 1"))._id;
+    expect(await q("inbox:sender", { threadId: nf }, "edu")).toMatchObject({ domain: "hotelx.com.br", domainBlockable: true });
+    expect((await mu("inbox:reportSpam", { threadId: nf, block: "domain" }, "edu")).rule).toMatchObject({ pattern: "hotelx.com.br" });
+    await mail("ea", "nfe9@loca31.hotelx.com.br", "NF-e 2");
+    expect(await find("ea", "NF-e 2", "spam")).toBeTruthy();
+    await mail("ea", "ana@outra.com.br", "outra");
+    expect(await find("ea", "outra", "open")).toBeTruthy();
+
     // Not spam + unblock removes the mailbox's rules for the sender.
     expect(await mu("inbox:notSpam", { threadId: t, unblock: true }, "edu")).toEqual({ status: "open", removed: 1, rules: [{ mailbox: "ea", pattern: "ofertas.test", action: "spam" }] });
     await mail("ea", "promo@ofertas.test", "spam tres");
@@ -1591,7 +1602,7 @@ describe("mail app", () => {
     const listed = await q("inbox:senderRules", { mailbox: "eb" }, "eli");
     expect(listed).toMatchObject({ rules: [], canEditGlobal: false });
     expect(listed.global.map((x: any) => [x.pattern, x.hits])).toEqual([["golpe.test", 1]]);
-    expect((await fetch_(`/inbox/sender-rules?mailbox=ea`, "GET")).body.data.map((x: any) => x.pattern)).toEqual(["fulano@gmail.com"]);
+    expect((await fetch_(`/inbox/sender-rules?mailbox=ea`, "GET")).body.data.map((x: any) => x.pattern)).toEqual(["hotelx.com.br", "fulano@gmail.com"]);
     expect((await fetch_(`/inbox/sender-rules?mailbox=eia`, "GET")).status).toBe(403);
     expect((await fetch_(`/inbox/sender-rules`, "POST", { pattern: "not a domain", action: "spam", mailbox: "ea" })).status).toBe(422);
     expect((await fetch_(`/inbox/sender-rules?pattern=golpe.test`, "DELETE")).body).toMatchObject({ deleted: true });

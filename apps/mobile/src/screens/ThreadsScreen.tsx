@@ -96,8 +96,11 @@ interface RowOps {
   assign(rows: ThreadRow[]): void;
   /** To Spam (Desfazer puts them back), or out of it when every one is spam already. */
   spam(rows: ThreadRow[]): void;
-  /** To Spam and the sender's address blocked: their next mail goes to Spam too (Desfazer removes the rule). */
-  blockSender(row: ThreadRow): void;
+  /**
+   * To Spam and the sender blocked, by address or by their whole (registrable) domain: their next mail goes to Spam
+   * too (Desfazer removes the rule). A free-mail domain or ours is refused by the server: the toast says so.
+   */
+  blockSender(row: ThreadRow, how?: "address" | "domain"): void;
 }
 
 /** Rows closing an archived row's gap (or making room): on-screen movement, ease-in-out. Off with Reduce Motion. */
@@ -186,11 +189,11 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
         for (const r of records) quiet(reportSpam({ threadId: r.threadId }));
         offerUndoArchive(t("undo.spam", { count: records.length }), records, (threadId, status) => quiet(setStatus({ threadId, status })));
       },
-      blockSender: (row) => {
+      blockSender: (row, how = "address") => {
         if (!actionable(row)) return;
         const before = row.status as ThreadStatus;
         mark([row.threadId]);
-        reportSpam({ threadId: row.threadId, block: "address" })
+        reportSpam({ threadId: row.threadId, block: how })
           .then((r) => {
             const pattern = r.rule?.pattern;
             if (!pattern) return;
@@ -199,7 +202,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
               if (before !== "spam") quiet(setStatus({ threadId: row.threadId, status: before }));
             });
           })
-          .catch(() => notify(t("common.error")));
+          .catch((e: unknown) => notify(how === "domain" && /shared by many people/.test(String((e as Error)?.message)) ? t("spam.domainShared") : t("common.error")));
       },
       assign: (rows) => {
         const first = rows[0];
@@ -668,11 +671,12 @@ const ThreadItem = memo(function ThreadItem({
       ],
     });
     list.push({ label: t("thread.tags"), icon: Icons.tag, onPress: () => ops.tags(row) });
-    // Spam, and blocking the sender (their address: the conversation's menu offers the whole domain).
+    // Spam, and blocking the sender: their address, or their whole domain (a spam wave rotates addresses).
     if (row.status === "spam") list.push({ label: t("thread.notSpam"), icon: Icons.notSpam, onPress: () => ops.spam([row]) });
     else {
       list.push({ label: t("thread.spam"), icon: Icons.spam, onPress: () => ops.spam([row]) });
-      list.push({ label: t("thread.blockSender"), icon: Icons.block, destructive: true, onPress: () => ops.blockSender(row) });
+      list.push({ label: t("thread.blockSender"), icon: Icons.block, destructive: true, onPress: () => ops.blockSender(row, "address") });
+      list.push({ label: t("thread.blockSenderDomain"), icon: Icons.block, destructive: true, onPress: () => ops.blockSender(row, "domain") });
     }
     return list;
   }, [row, t, ops, canAssign]);

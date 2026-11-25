@@ -21,7 +21,8 @@
     "@freecorps/ember-runtime": "^0.8.1",
     "@freecorps/ember-server": "^0.8.1",
     "@freecorps/ember-values": "^0.8.1",
-    "@freecorps/mail-email-html": "workspace:*"
+    "@freecorps/mail-email-html": "workspace:*",
+    "tldts": "^7.5.6"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.5.1",
