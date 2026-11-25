@@ -31,6 +31,7 @@ import { useSnooze } from "../model/snooze";
 import { threadTags } from "../model/tags";
 import { formatLater, type LaterChoice } from "../lib/when";
 import { setThreadOrder } from "../model/thread-order";
+import { isSharedDomainRefusal } from "../model/senders";
 import { notify, offerUndoArchive, undoStore } from "../model/undo";
 import { deviceTimeZone, useListPrefs } from "../prefs";
 import { useKeyStill, useShortcuts } from "../keys";
@@ -202,7 +203,7 @@ export function ThreadsScreen({ source, title, searchOnly = false }: { source: L
               if (before !== "spam") quiet(setStatus({ threadId: row.threadId, status: before }));
             });
           })
-          .catch((e: unknown) => notify(how === "domain" && /shared by many people/.test(String((e as Error)?.message)) ? t("spam.domainShared") : t("common.error")));
+          .catch((e: unknown) => notify(how === "domain" && isSharedDomainRefusal(e) ? t("spam.domainShared") : t("common.error")));
       },
       assign: (rows) => {
         const first = rows[0];

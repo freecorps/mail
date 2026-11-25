@@ -69,7 +69,9 @@ export function spamWhyText(why: FilterWhy | null | undefined, t: Translate, max
     if (!KNOWN.has(code) || seen.has(code)) continue;
     seen.add(code);
     const raw = i < 0 ? "" : s.slice(i + 1).replace(/→/g, " → ");
-    const detail = raw.length > 48 ? `${raw.slice(0, 47)}…` : raw;
+    // By characters, not UTF-16 units: a detail is sender-controlled text and may hold emoji.
+    const chars = Array.from(raw);
+    const detail = chars.length > 48 ? `${chars.slice(0, 47).join("")}…` : raw;
     parts.push(tr(`spam.why.${code}`, { detail }));
     if (parts.length >= max) break;
   }

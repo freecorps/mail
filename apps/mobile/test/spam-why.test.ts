@@ -1,6 +1,7 @@
 // The Spam banner's words for a message the filter filed: its category and its first signals.
 import { describe, expect, it } from "vitest";
 import { translate } from "../src/i18n/strings";
+import { isSharedDomainRefusal } from "../src/model/senders";
 import { spamWhyText } from "../src/model/spam-why";
 
 const pt = ((k: never, v?: Record<string, string | number>) => translate("pt-BR", k, v)) as never;
@@ -17,5 +18,20 @@ describe("spam banner: why the filter filed it", () => {
     expect(spamWhyText({ reason: "filter", category: "malware" }, en)).toBe("Dangerous file or link.");
     expect(spamWhyText({ reason: "rule" }, pt)).toBeNull();
     expect(spamWhyText(null, pt)).toBeNull();
+  });
+  it("a long detail is cut by characters, never in the middle of an emoji", () => {
+    const why = { reason: "filter", category: "malware", signals: [`dangerous-attachment:${"😀".repeat(60)}.exe`] };
+    const text = spamWhyText(why, en)!;
+    expect(text).toContain("😀".repeat(47) + "…");
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(text)).toBe(false);
+  });
+});
+
+describe("domain block refusal", () => {
+  it("is the ValidationError with reason shared_domain, not any error that says so", () => {
+    expect(isSharedDomainRefusal({ code: "ValidationError", message: "x", data: { reason: "shared_domain", domain: "gmail.com" } })).toBe(true);
+    expect(isSharedDomainRefusal({ code: "ValidationError", message: "gmail.com is shared by many people" })).toBe(false);
+    expect(isSharedDomainRefusal(new Error("shared by many people"))).toBe(false);
+    expect(isSharedDomainRefusal(null)).toBe(false);
   });
 });

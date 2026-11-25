@@ -31,6 +31,15 @@ export function senderEntries(s: SenderInfo): SenderEntry[] {
   return out;
 }
 
+/**
+ * A domain block the server refused because the domain is free mail (or ours): `ValidationError` with
+ * `data.reason: "shared_domain"` (the API's SHARED_DOMAIN_REFUSAL), never matched on the English message.
+ */
+export function isSharedDomainRefusal(e: unknown): boolean {
+  const x = e as { code?: unknown; data?: { reason?: unknown } } | null;
+  return !!x && x.code === "ValidationError" && x.data?.reason === "shared_domain";
+}
+
 export type BlockEntry = Extract<SenderEntry, { key: "block" }>;
 
 /**

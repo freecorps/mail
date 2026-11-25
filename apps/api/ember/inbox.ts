@@ -22,7 +22,7 @@ import {
   type SavedReplyDoc,
 } from "./composer.ts";
 import { prefsDoc, prefsOf } from "./notifications.ts";
-import { hostOfAddress, orgDomain, SHARED_DOMAINS } from "../src/spam/domain.ts";
+import { hostOfAddress, isRegistrable, orgDomain, SHARED_DOMAIN_REFUSAL, SHARED_DOMAINS } from "../src/spam/domain.ts";
 import { inboundOf, noteContacts, train } from "./spam.ts";
 
 const push = new PushNotifications(components.push);
@@ -1329,7 +1329,7 @@ export { SHARED_DOMAINS };
  * not a domain of one of this instance's mailboxes.
  */
 function blockableDomain(ctx: Ctx, domain: string): boolean {
-  if (SHARED_DOMAINS.has(domain) || !domain.includes(".") || /^[\d.]+$|:/.test(domain)) return false;
+  if (SHARED_DOMAINS.has(domain) || !isRegistrable(domain)) return false;
   const own = (ctx.runQuery(email.mailboxes, {}) as Array<{ address: string }>).map((b) => hostOfAddress(b.address));
   return !own.some((d) => d === domain || d.endsWith(`.${domain}`) || domain.endsWith(`.${d}`));
 }
@@ -1402,7 +1402,7 @@ export const reportSpam = mutation({
     const contact = t.thread.contact as string;
     const domain = orgDomain(contact);
     // Checked before anything is written: a refused domain block leaves the conversation as it was.
-    if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`);
+    if (a.block === "domain" && !blockableDomain(ctx, domain)) throw new EmberError("ValidationError", `${domain} is shared by many people (or is ours): block the address instead`, { reason: SHARED_DOMAIN_REFUSAL, domain });
     ctx.runMutation(email.setStatus, { threadId: a.threadId, status: "spam", author: m.userId });
     train(ctx as any, inboundOf(t), "spam");
     if (!a.block) return { status: "spam", rule: null };

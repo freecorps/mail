@@ -36,7 +36,7 @@ import { collapsedCount, imagesAllowed, isExpanded, keepOpened, latestId, sender
 import { useOutbox, type OutboxEntry } from "../model/outbox";
 import { isPersonal, useMailboxes } from "../model/threads";
 import { notify, offerUndoArchive, undoStore } from "../model/undo";
-import { senderEntries, splitSenderEntries, type SenderEntry } from "../model/senders";
+import { isSharedDomainRefusal, senderEntries, splitSenderEntries, type SenderEntry } from "../model/senders";
 import { spamWhyText } from "../model/spam-why";
 import { allowImagesFrom, deviceTimeZone, useImageSenders } from "../prefs";
 import { ActivityLine } from "../components/activity-line";
@@ -293,7 +293,7 @@ function ThreadView({ threadId, fromList, host }: { threadId: string; fromList: 
             if (before !== "spam") vm.restoreStatus(threadId, before);
           });
         })
-        .catch(() => notify(t("common.error")));
+        .catch((err: unknown) => notify(e.how === "domain" && isSharedDomainRefusal(err) ? t("spam.domainShared") : t("common.error")));
       host.leave();
     } else if (e.key === "allow") {
       setRuleM({ mailbox, pattern: sender.email, action: "allow" })
